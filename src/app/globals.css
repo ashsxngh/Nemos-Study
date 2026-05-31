@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base: #f0fafb;
+  --bg-surface: #ffffff;
+  --bg-hover: #e6f7f9;
+  --bg-active: #cceef2;
+  --border: #c0e4ea;
+  --border-strong: #9dd4dc;
+  --text-primary: #0a1a1c;
+  --text-secondary: #2d6570;
+  --text-muted: #7aacb3;
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-subtle: #ecfeff;
+  --danger: #ef4444;
+  --danger-subtle: #fef2f2;
+  --success: #16a34a;
+  --success-subtle: #f0fdf4;
+  --warning: #d97706;
+  --warning-subtle: #fffbeb;
+  --sidebar-width: 232px;
+  --header-height: 44px;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-lg: 12px;
+}
+
+.dark {
+  --bg-base: #131315;
+  --bg-surface: #1c1c1f;
+  --bg-hover: #222226;
+  --bg-active: #2a2a30;
+  --border: #2a2a30;
+  --border-strong: #363640;
+  --text-primary: #e8e8ec;
+  --text-secondary: #8888a0;
+  --text-muted: #55555f;
+  --accent: #22d3ee;
+  --accent-hover: #06b6d4;
+  --accent-subtle: #0a2a33;
+  --danger: #f87171;
+  --danger-subtle: #2d1515;
+  --success: #4ade80;
+  --success-subtle: #052e16;
+  --warning: #fbbf24;
+  --warning-subtle: #2d1f05;
+}
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+}
+
+* { box-sizing: border-box; }
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  line-height: 1.5;
+  margin: 0;
+}
+
+::selection {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Animations ──────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
+  50%       { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.animate-fade-in  { animation: fadeIn  0.18s ease-out; }
+.animate-scale-in { animation: scaleIn 0.14s ease-out; }
+
+/* ── Skeleton ────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover) 25%,
+    var(--bg-active) 50%,
+    var(--bg-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Card surface glow (used on study cards) ─────────────── */
+.card-glow {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 4px 16px -4px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 1px 3px -1px color-mix(in srgb, var(--bg-base) 60%, transparent);
+}
+.dark .card-glow {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 8px 32px -8px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 2px 8px -2px rgba(0,0,0,0.4);
+}
+
+/* ── Sidebar nav item active ─────────────────────────────── */
+.nav-active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
