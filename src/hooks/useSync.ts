@@ -52,6 +52,38 @@ function toSnake(obj: unknown): unknown {
   return obj
 }
 
+// ─── Realtime-pending tracker ─────────────────────────────────────────────────
+// Realtime INSERT handlers register row IDs here before updating Zustand state.
+// pullFromSupabase() reads this set when it resolves to decide which rows in the
+// current store were written by a realtime event (and must be preserved) versus
+// which rows came from a stale localStorage snapshot (and must be dropped if the
+// server no longer has them).
+
+const realtimePending = {
+  folders:    new Set<string>(),
+  decks:      new Set<string>(),
+  cards:      new Set<string>(),
+  reviewLogs: new Set<string>(),
+  notes:      new Set<string>(),
+}
+
+// Server rows are authoritative for matching IDs. Current rows whose IDs are
+// absent from the server response are kept only when they arrived via realtime
+// (i.e. their ID is in pendingIds). Stale localStorage rows that were deleted on
+// the server are dropped — their IDs are absent from both serverRows and
+// pendingIds.
+function mergeWithPending<T extends { id: string }>(
+  serverRows: T[],
+  currentRows: T[],
+  pendingIds: Set<string>,
+): T[] {
+  const serverMap = new Map(serverRows.map((r) => [r.id, r]))
+  const realtimeOnly = currentRows.filter(
+    (r) => !serverMap.has(r.id) && pendingIds.has(r.id),
+  )
+  return [...serverRows, ...realtimeOnly]
+}
+
 // ─── Pull ─────────────────────────────────────────────────────────────────────
 
 async function pullFromSupabase(): Promise<void> {
@@ -92,8 +124,26 @@ async function pullFromSupabase(): Promise<void> {
     srsData[s.cardId] = s
   }
 
-  useLibraryStore.setState({ folders, decks, cards, srsData, sessions, reviewLogs })
-  useNotesStore.setState({ notes })
+  // Functional updater so we can merge rather than replace. Server rows win for
+  // matching IDs; rows that arrived via realtime while the queries were in-flight
+  // are preserved via realtimePending; stale localStorage-only rows are dropped.
+  useLibraryStore.setState((current) => ({
+    folders:    mergeWithPending(folders,    current.folders,    realtimePending.folders),
+    decks:      mergeWithPending(decks,      current.decks,      realtimePending.decks),
+    cards:      mergeWithPending(cards,      current.cards,      realtimePending.cards),
+    srsData:    { ...current.srsData, ...srsData },
+    sessions,
+    reviewLogs: mergeWithPending(reviewLogs, current.reviewLogs, realtimePending.reviewLogs),
+  }))
+  useNotesStore.setState((current) => ({
+    notes: mergeWithPending(notes, current.notes, realtimePending.notes),
+  }))
+
+  realtimePending.folders.clear()
+  realtimePending.decks.clear()
+  realtimePending.cards.clear()
+  realtimePending.reviewLogs.clear()
+  realtimePending.notes.clear()
 }
 
 // ─── Push helpers ─────────────────────────────────────────────────────────────
@@ -112,24 +162,26 @@ async function pushToSupabase(
 
   const upsertOpts = { onConflict: 'id' } as const
 
+  const withUserId = (r: unknown) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })
+
   await Promise.all([
     folders.length
-      ? supabase.from('folders').upsert(folders.map((r) => toSnake(r)), upsertOpts)
+      ? supabase.from('folders').upsert(folders.map(withUserId), upsertOpts)
       : null,
     decks.length
-      ? supabase.from('decks').upsert(decks.map((r) => toSnake(r)), upsertOpts)
+      ? supabase.from('decks').upsert(decks.map(withUserId), upsertOpts)
       : null,
     cards.length
-      ? supabase.from('cards').upsert(cards.map((r) => toSnake(r)), upsertOpts)
+      ? supabase.from('cards').upsert(cards.map(withUserId), upsertOpts)
       : null,
     Object.keys(srsData).length
       ? supabase.from('srs_data').upsert(
-          Object.values(srsData).map((r) => toSnake(r)),
+          Object.values(srsData).map(withUserId),
           { onConflict: 'card_id' },
         )
       : null,
     sessions.length
-      ? supabase.from('review_sessions').upsert(sessions.map((r) => toSnake(r)), upsertOpts)
+      ? supabase.from('review_sessions').upsert(sessions.map(withUserId), upsertOpts)
       : null,
   ])
 }
@@ -140,7 +192,10 @@ async function pushNotesToSupabase(notes: Note[]): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
   if (!notes.length) return
-  await supabase.from('notes').upsert(notes.map((r) => toSnake(r)), { onConflict: 'id' })
+  await supabase.from('notes').upsert(
+    notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })),
+    { onConflict: 'id' },
+  )
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -195,6 +250,15 @@ export function useSync(): SyncStatus {
   // Initial pull on mount
   useEffect(() => {
     let cancelled = false
+
+    // Rehydrate localStorage synchronously first so the UI has instant data
+    // from the previous session. This must happen before pullFromSupabase() so
+    // the async Supabase response (and any realtime events that arrive while it
+    // is in-flight) always lands on top of the localStorage snapshot — never
+    // the other way around.
+    useLibraryStore.persist.rehydrate()
+    useNotesStore.persist.rehydrate()
+
     setSyncing(true)
     pullFromSupabase()
       .then(() => {
@@ -244,7 +308,7 @@ export function useSync(): SyncStatus {
     }
   }, [handleNotesPush])
 
-  // Supabase Realtime subscriptions
+  // Supabase Realtime subscriptions — merge individual rows instead of full pull
   useEffect(() => {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
@@ -253,23 +317,102 @@ export function useSync(): SyncStatus {
 
     channel.on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'cards' },
-      () => { pullFromSupabase().catch(() => null) },
+      { event: '*', schema: 'public', table: 'folders' },
+      (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload
+        if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          const folder = toCamel(newRow) as Folder
+          if (eventType === 'INSERT') realtimePending.folders.add(folder.id)
+          useLibraryStore.setState((state) => {
+            const exists = state.folders.some((f) => f.id === folder.id)
+            return {
+              folders: exists
+                ? state.folders.map((f) => f.id === folder.id ? folder : f)
+                : [...state.folders, folder],
+            }
+          })
+        } else if (eventType === 'DELETE') {
+          const id = (oldRow as { id: string }).id
+          useLibraryStore.setState((state) => ({
+            folders: state.folders.filter((f) => f.id !== id),
+          }))
+        }
+      },
     )
+
     channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'decks' },
-      () => { pullFromSupabase().catch(() => null) },
+      (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload
+        if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          const deck = toCamel(newRow) as Deck
+          if (eventType === 'INSERT') realtimePending.decks.add(deck.id)
+          useLibraryStore.setState((state) => {
+            const exists = state.decks.some((d) => d.id === deck.id)
+            return {
+              decks: exists
+                ? state.decks.map((d) => d.id === deck.id ? deck : d)
+                : [...state.decks, deck],
+            }
+          })
+        } else if (eventType === 'DELETE') {
+          const id = (oldRow as { id: string }).id
+          useLibraryStore.setState((state) => ({
+            decks: state.decks.filter((d) => d.id !== id),
+          }))
+        }
+      },
     )
+
     channel.on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'folders' },
-      () => { pullFromSupabase().catch(() => null) },
+      { event: '*', schema: 'public', table: 'cards' },
+      (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload
+        if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          const card = toCamel(newRow) as Card
+          if (eventType === 'INSERT') realtimePending.cards.add(card.id)
+          useLibraryStore.setState((state) => {
+            const exists = state.cards.some((c) => c.id === card.id)
+            return {
+              cards: exists
+                ? state.cards.map((c) => c.id === card.id ? card : c)
+                : [...state.cards, card],
+            }
+          })
+        } else if (eventType === 'DELETE') {
+          const id = (oldRow as { id: string }).id
+          useLibraryStore.setState((state) => ({
+            cards: state.cards.filter((c) => c.id !== id),
+          }))
+        }
+      },
     )
+
     channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'review_logs' },
-      () => { pullFromSupabase().catch(() => null) },
+      (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload
+        if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          const log = toCamel(newRow) as ReviewLog
+          if (eventType === 'INSERT') realtimePending.reviewLogs.add(log.id)
+          useLibraryStore.setState((state) => {
+            const exists = state.reviewLogs.some((l) => l.id === log.id)
+            return {
+              reviewLogs: exists
+                ? state.reviewLogs.map((l) => l.id === log.id ? log : l)
+                : [...state.reviewLogs, log],
+            }
+          })
+        } else if (eventType === 'DELETE') {
+          const id = (oldRow as { id: string }).id
+          useLibraryStore.setState((state) => ({
+            reviewLogs: state.reviewLogs.filter((l) => l.id !== id),
+          }))
+        }
+      },
     )
 
     channel.subscribe()

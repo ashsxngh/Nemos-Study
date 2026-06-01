@@ -409,6 +409,7 @@ export const useLibraryStore = create<LibraryState>()(
     }),
     {
       name: 'nemos-library',
+      skipHydration: true,
     }
   )
 )

@@ -60,6 +60,7 @@ export const useNotesStore = create<NoteState>()(
     }),
     {
       name: 'nemos-notes',
+      skipHydration: true,
     }
   )
 )
