@@ -53,11 +53,6 @@ function toSnake(obj: unknown): unknown {
 }
 
 // ─── Realtime-pending tracker ─────────────────────────────────────────────────
-// Realtime INSERT handlers register row IDs here before updating Zustand state.
-// pullFromSupabase() reads this set when it resolves to decide which rows in the
-// current store were written by a realtime event (and must be preserved) versus
-// which rows came from a stale localStorage snapshot (and must be dropped if the
-// server no longer has them).
 
 const realtimePending = {
   folders:    new Set<string>(),
@@ -67,20 +62,35 @@ const realtimePending = {
   notes:      new Set<string>(),
 }
 
-// Server rows are authoritative for matching IDs. Current rows whose IDs are
-// absent from the server response are kept only when they arrived via realtime
-// (i.e. their ID is in pendingIds). Stale localStorage rows that were deleted on
-// the server are dropped — their IDs are absent from both serverRows and
-// pendingIds.
 function mergeWithPending<T extends { id: string }>(
+  label: string,
   serverRows: T[],
   currentRows: T[],
   pendingIds: Set<string>,
 ): T[] {
   const serverMap = new Map(serverRows.map((r) => [r.id, r]))
+  const serverIds = [...serverMap.keys()]
+  const currentIds = currentRows.map((r) => r.id)
+  const pendingArr = [...pendingIds]
+
   const realtimeOnly = currentRows.filter(
     (r) => !serverMap.has(r.id) && pendingIds.has(r.id),
   )
+  const dropped = currentRows.filter(
+    (r) => !serverMap.has(r.id) && !pendingIds.has(r.id),
+  )
+
+  if (dropped.length > 0 || realtimeOnly.length > 0 || currentIds.some(id => !serverMap.has(id))) {
+    console.log(`[SYNC] mergeWithPending(${label})`, {
+      serverIds,
+      currentIds,
+      pendingIds: pendingArr,
+      kept_from_realtime: realtimeOnly.map(r => r.id),
+      dropped: dropped.map(r => r.id),
+      result_count: serverRows.length + realtimeOnly.length,
+    })
+  }
+
   return [...serverRows, ...realtimeOnly]
 }
 
@@ -91,6 +101,8 @@ async function pullFromSupabase(): Promise<void> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
+
+  console.log('[SYNC] pullFromSupabase: START — realtimePending.decks:', [...realtimePending.decks])
 
   const [
     foldersRes,
@@ -117,6 +129,12 @@ async function pullFromSupabase(): Promise<void> {
   const reviewLogs = (logsRes.data  ?? []).map((r) => toCamel(r) as ReviewLog)
   const notes   = (notesRes.data   ?? []).map((r) => toCamel(r) as Note)
 
+  console.log('[SYNC] pullFromSupabase: GOT RESULTS —', {
+    decks_from_server: decks.map(d => ({ id: d.id, name: d.name })),
+    realtimePending_decks_now: [...realtimePending.decks],
+    store_decks_now: useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })),
+  })
+
   // srsData is stored as a Record<cardId, SRSData> in the store
   const srsData: Record<string, SRSData> = {}
   for (const row of srsRes.data ?? []) {
@@ -124,20 +142,20 @@ async function pullFromSupabase(): Promise<void> {
     srsData[s.cardId] = s
   }
 
-  // Functional updater so we can merge rather than replace. Server rows win for
-  // matching IDs; rows that arrived via realtime while the queries were in-flight
-  // are preserved via realtimePending; stale localStorage-only rows are dropped.
   useLibraryStore.setState((current) => ({
-    folders:    mergeWithPending(folders,    current.folders,    realtimePending.folders),
-    decks:      mergeWithPending(decks,      current.decks,      realtimePending.decks),
-    cards:      mergeWithPending(cards,      current.cards,      realtimePending.cards),
+    folders:    mergeWithPending('folders',    folders,    current.folders,    realtimePending.folders),
+    decks:      mergeWithPending('decks',      decks,      current.decks,      realtimePending.decks),
+    cards:      mergeWithPending('cards',      cards,      current.cards,      realtimePending.cards),
     srsData:    { ...current.srsData, ...srsData },
     sessions,
-    reviewLogs: mergeWithPending(reviewLogs, current.reviewLogs, realtimePending.reviewLogs),
+    reviewLogs: mergeWithPending('reviewLogs', reviewLogs, current.reviewLogs, realtimePending.reviewLogs),
   }))
   useNotesStore.setState((current) => ({
-    notes: mergeWithPending(notes, current.notes, realtimePending.notes),
+    notes: mergeWithPending('notes', notes, current.notes, realtimePending.notes),
   }))
+
+  console.log('[SYNC] pullFromSupabase: DONE — clearing realtimePending. Store decks after merge:',
+    useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })))
 
   realtimePending.folders.clear()
   realtimePending.decks.clear()
@@ -155,16 +173,33 @@ async function pushToSupabase(
   srsData: Record<string, SRSData>,
   sessions: ReviewSession[],
 ): Promise<void> {
-  if (!isSupabaseConfigured()) return
+  if (!isSupabaseConfigured()) {
+    console.warn('[SYNC] pushToSupabase: Supabase not configured, skipping push')
+    return
+  }
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    console.error('[SYNC] pushToSupabase: auth error', authError)
+    throw new Error(`Auth error: ${authError.message}`)
+  }
+  if (!user) {
+    console.warn('[SYNC] pushToSupabase: no authenticated user, skipping push')
+    return
+  }
 
   const upsertOpts = { onConflict: 'id' } as const
-
   const withUserId = (r: unknown) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })
 
-  await Promise.all([
+  console.log('[SYNC] pushToSupabase: upserting to Supabase as user', user.id, {
+    folders: folders.length,
+    decks: decks.length,
+    cards: cards.length,
+    srsData: Object.keys(srsData).length,
+    sessions: sessions.length,
+  })
+
+  const [foldersRes, decksRes, cardsRes, srsRes, sessionsRes] = await Promise.all([
     folders.length
       ? supabase.from('folders').upsert(folders.map(withUserId), upsertOpts)
       : null,
@@ -184,18 +219,38 @@ async function pushToSupabase(
       ? supabase.from('review_sessions').upsert(sessions.map(withUserId), upsertOpts)
       : null,
   ])
+
+  const checks: [string, typeof foldersRes][] = [
+    ['folders', foldersRes],
+    ['decks', decksRes],
+    ['cards', cardsRes],
+    ['srs_data', srsRes],
+    ['review_sessions', sessionsRes],
+  ]
+  for (const [table, res] of checks) {
+    if (res?.error) {
+      console.error(`[SYNC] pushToSupabase: upsert error on "${table}":`, res.error)
+      throw new Error(`${table}: ${res.error.message} (code ${res.error.code})`)
+    }
+  }
+  console.log('[SYNC] pushToSupabase: all upserts succeeded')
 }
 
 async function pushNotesToSupabase(notes: Note[]): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError) throw new Error(`Auth error: ${authError.message}`)
   if (!user) return
   if (!notes.length) return
-  await supabase.from('notes').upsert(
+  const res = await supabase.from('notes').upsert(
     notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })),
     { onConflict: 'id' },
   )
+  if (res.error) {
+    console.error('[SYNC] pushNotesToSupabase error:', res.error)
+    throw new Error(`notes: ${res.error.message} (code ${res.error.code})`)
+  }
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -222,12 +277,15 @@ export function useSync(): SyncStatus {
     srsData: Record<string, SRSData>,
     sessions: ReviewSession[],
   ) => {
+    console.log('[SYNC] handlePush: pushing', { decks: decks.map(d => ({ id: d.id, name: d.name })) })
     setSyncing(true)
     setError(null)
     try {
       await pushToSupabase(folders, decks, cards, srsData, sessions)
+      console.log('[SYNC] handlePush: push COMPLETE')
       setLastSynced(new Date())
     } catch (err) {
+      console.error('[SYNC] handlePush: push ERROR', err)
       setError(err instanceof Error ? err.message : 'Sync failed')
     } finally {
       setSyncing(false)
@@ -259,15 +317,20 @@ export function useSync(): SyncStatus {
     useLibraryStore.persist.rehydrate()
     useNotesStore.persist.rehydrate()
 
+    console.log('[SYNC] useSync mount: starting initial pull')
     setSyncing(true)
     pullFromSupabase()
       .then(() => {
         if (!cancelled) {
+          console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')
           setLastSynced(new Date())
           mountedRef.current = true
+        } else {
+          console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
         }
       })
       .catch((err: unknown) => {
+        console.error('[SYNC] useSync mount: initial pull FAILED', err)
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Initial sync failed')
         }
@@ -275,13 +338,20 @@ export function useSync(): SyncStatus {
       .finally(() => {
         if (!cancelled) setSyncing(false)
       })
-    return () => { cancelled = true }
+    return () => {
+      console.log('[SYNC] useSync UNMOUNT — cancelled = true')
+      cancelled = true
+    }
   }, [])
 
   // Subscribe to library store changes with 1.5s debounce
   useEffect(() => {
     const unsub = useLibraryStore.subscribe((state) => {
-      if (!mountedRef.current) return
+      if (!mountedRef.current) {
+        console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
+        return
+      }
+      console.log('[SYNC] store change detected — scheduling push in 1.5s. decks:', state.decks.map(d => ({ id: d.id, name: d.name })))
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
       libraryDebounceRef.current = setTimeout(() => {
         handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions)
@@ -345,19 +415,30 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'decks' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
+        console.log(`[SYNC] realtime decks ${eventType}`, {
+          payload_new: newRow,
+          realtimePending_before: [...realtimePending.decks],
+          store_decks_before: useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })),
+        })
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const deck = toCamel(newRow) as Deck
-          if (eventType === 'INSERT') realtimePending.decks.add(deck.id)
+          if (eventType === 'INSERT') {
+            realtimePending.decks.add(deck.id)
+            console.log('[SYNC] realtime decks INSERT — added to realtimePending:', deck.id, '— realtimePending now:', [...realtimePending.decks])
+          }
           useLibraryStore.setState((state) => {
             const exists = state.decks.some((d) => d.id === deck.id)
-            return {
+            const next = {
               decks: exists
                 ? state.decks.map((d) => d.id === deck.id ? deck : d)
                 : [...state.decks, deck],
             }
+            console.log(`[SYNC] realtime decks ${eventType} — store updated. exists=${exists}, new deck count:`, next.decks.length)
+            return next
           })
         } else if (eventType === 'DELETE') {
           const id = (oldRow as { id: string }).id
+          console.log('[SYNC] realtime decks DELETE id:', id)
           useLibraryStore.setState((state) => ({
             decks: state.decks.filter((d) => d.id !== id),
           }))
@@ -415,9 +496,14 @@ export function useSync(): SyncStatus {
       },
     )
 
-    channel.subscribe()
+    const channelName = channel.topic
+    console.log('[SYNC] realtime channel subscribing:', channelName)
+    channel.subscribe((status) => {
+      console.log('[SYNC] realtime channel status:', channelName, status)
+    })
 
     return () => {
+      console.log('[SYNC] realtime channel unsubscribing:', channelName)
       supabase.removeChannel(channel)
     }
   }, [])

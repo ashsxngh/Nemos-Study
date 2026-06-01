@@ -56,7 +56,7 @@ export function truncate(str: string, maxLength: number): string {
 }
 
 export function generateId(): string {
-  return Math.random().toString(36).slice(2, 11)
+  return crypto.randomUUID()
 }
 
 export function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
