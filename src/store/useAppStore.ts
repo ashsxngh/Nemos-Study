@@ -11,6 +11,8 @@ interface AppState {
   toasts: ToastData[]
   lastOpenDeckId: string | null
   lastOpenNoteId: string | null
+  syncing: boolean
+  syncError: string | null
 
   setTheme: (theme: Theme) => void
   toggleSidebar: () => void
@@ -21,6 +23,8 @@ interface AppState {
   removeToast: (id: string) => void
   setLastOpenDeck: (id: string | null) => void
   setLastOpenNote: (id: string | null) => void
+  setSyncing: (v: boolean) => void
+  setSyncError: (e: string | null) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -32,6 +36,8 @@ export const useAppStore = create<AppState>()(
       toasts: [],
       lastOpenDeckId: null,
       lastOpenNoteId: null,
+      syncing: false,
+      syncError: null,
 
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -49,6 +55,8 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
       setLastOpenDeck: (id) => set({ lastOpenDeckId: id }),
       setLastOpenNote: (id) => set({ lastOpenNoteId: id }),
+      setSyncing: (v) => set({ syncing: v }),
+      setSyncError: (e) => set({ syncError: e }),
     }),
     {
       name: 'nemos-app',

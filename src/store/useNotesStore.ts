@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Note } from '@/lib/types'
 import { generateId } from '@/lib/utils'
 
@@ -61,6 +61,7 @@ export const useNotesStore = create<NoteState>()(
     {
       name: 'nemos-notes',
       skipHydration: true,
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 )

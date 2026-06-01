@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, Sun, Moon, User, RefreshCw, WifiOff, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/store/useAppStore'
-import { useSync } from '@/hooks/useSync'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
@@ -17,8 +16,7 @@ interface HeaderProps {
 }
 
 export function Header({ title, actions, breadcrumbs }: HeaderProps) {
-  const { theme, setTheme, toasts } = useAppStore()
-  const { syncing, error: syncError } = useSync()
+  const { theme, setTheme, toasts, syncing, syncError } = useAppStore()
   const isDark = theme === 'dark'
   const router = useRouter()
 

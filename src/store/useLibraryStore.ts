@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Folder, Deck, Card, SRSData, ReviewLog, ReviewSession, FolderColor, CardType } from '@/lib/types'
 import {
   createInitialSRSData,
@@ -410,6 +410,7 @@ export const useLibraryStore = create<LibraryState>()(
     {
       name: 'nemos-library',
       skipHydration: true,
+      storage: createJSONStorage(() => sessionStorage),
     }
   )
 )
