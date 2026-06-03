@@ -138,6 +138,8 @@ export interface Exam {
   notes?: string
   priority: 'low' | 'medium' | 'high'
   deckIds: string[]
+  folderIds: string[]
+  targetRetention: number  // 0–1, e.g. 0.85 = 85% recall on exam day
   createdAt: string
 }
 

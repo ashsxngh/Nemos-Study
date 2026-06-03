@@ -14,6 +14,8 @@ import {
 import type { FSRSState } from '@/lib/srs'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useTrashStore } from '@/store/useTrashStore'
+import { useExamStore } from '@/store/useExamStore'
+import { getExamDeckIds, getPulledForwardCardIds, computeCardUrgencies } from '@/lib/examScheduler'
 import { generateId } from '@/lib/utils'
 
 const USER_ID = 'local-user'
@@ -433,12 +435,26 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       getReviewsDue: (deckId) => {
-        const { cards, fsrsData, srsData } = get()
+        const { cards, fsrsData, srsData, decks, folders } = get()
         const { algorithm } = useSettingsStore.getState()
         const pool = deckId ? cards.filter((c) => c.deckId === deckId) : cards
         const now = new Date()
 
+        // Collect IDs of cards pulled forward by exam deadlines
+        const pulledForwardIds = new Set<string>()
+        const futureExams = useExamStore.getState().exams.filter(
+          (e) => new Date(e.date + 'T00:00') > now
+        )
+        for (const exam of futureExams) {
+          const examDeckIds = new Set(getExamDeckIds(exam, decks, folders))
+          const linked = pool.filter((c) => examDeckIds.has(c.deckId))
+          getPulledForwardCardIds(exam, linked, fsrsData).forEach((id) =>
+            pulledForwardIds.add(id)
+          )
+        }
+
         return pool.filter((c) => {
+          if (pulledForwardIds.has(c.id)) return true
           if (algorithm === 'fsrs') {
             const fs = fsrsData[c.id]
             if (!fs || fs.repetitions === 0) return false
@@ -451,7 +467,20 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       getDueCards: (deckId) => {
-        return [...get().getNewCards(deckId), ...get().getReviewsDue(deckId)]
+        const newCards = get().getNewCards(deckId)
+        const reviews = get().getReviewsDue(deckId)
+
+        // Sort reviews by exam urgency — highest urgency first in inbox
+        const { fsrsData, decks, folders } = get()
+        const futureExams = useExamStore.getState().exams.filter(
+          (e) => new Date(e.date + 'T00:00') > new Date()
+        )
+        if (futureExams.length > 0) {
+          const urgencies = computeCardUrgencies(reviews, fsrsData, futureExams, decks, folders)
+          reviews.sort((a, b) => (urgencies.get(b.id) ?? 0) - (urgencies.get(a.id) ?? 0))
+        }
+
+        return [...reviews, ...newCards]
       },
 
       getDeckCards: (deckId) => {
