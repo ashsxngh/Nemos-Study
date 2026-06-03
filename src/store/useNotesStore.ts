@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Note } from '@/lib/types'
+import { useTrashStore } from '@/store/useTrashStore'
 import { generateId } from '@/lib/utils'
 
 const USER_ID = 'local-user'
@@ -49,6 +50,17 @@ export const useNotesStore = create<NoteState>()(
       },
 
       deleteNote: (id) => {
+        const note = get().notes.find((n) => n.id === id)
+        if (note) {
+          useTrashStore.getState().add({
+            id: note.id,
+            type: 'note',
+            deletedAt: new Date().toISOString(),
+            name: note.title || 'Untitled',
+            snippet: note.content?.replace(/[#*`>_~]/g, '').slice(0, 120),
+            note,
+          })
+        }
         set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }))
       },
 

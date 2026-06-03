@@ -13,6 +13,7 @@ import {
 } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 import { useSettingsStore } from '@/store/useSettingsStore'
+import { useTrashStore } from '@/store/useTrashStore'
 import { generateId } from '@/lib/utils'
 
 const USER_ID = 'local-user'
@@ -168,14 +169,42 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteDeck: (id) => {
-        const { cards, srsData, fsrsData } = get()
-        const cardIdsToDelete = cards.filter((c) => c.deckId === id).map((c) => c.id)
+        const { cards, decks, folders, srsData, fsrsData } = get()
+        const deck = decks.find((d) => d.id === id)
+        const deckCards = cards.filter((c) => c.deckId === id)
+        const cardIdsToDelete = deckCards.map((c) => c.id)
         const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         cardIdsToDelete.forEach((cid) => {
           delete newSrsData[cid]
           delete newFsrsData[cid]
         })
+
+        // Save to trash before removing
+        if (deck) {
+          const folderName = deck.folderId
+            ? folders.find((f) => f.id === deck.folderId)?.name
+            : undefined
+          const deckSRS: Record<string, typeof srsData[string]> = {}
+          const deckFSRS: Record<string, typeof fsrsData[string]> = {}
+          cardIdsToDelete.forEach((cid) => {
+            if (srsData[cid]) deckSRS[cid] = srsData[cid]
+            if (fsrsData[cid]) deckFSRS[cid] = fsrsData[cid]
+          })
+          useTrashStore.getState().add({
+            id: deck.id,
+            type: 'deck',
+            deletedAt: new Date().toISOString(),
+            name: deck.name,
+            parentName: folderName,
+            cardCount: deckCards.length,
+            deck,
+            deckCards,
+            deckSRS,
+            deckFSRS,
+          })
+        }
+
         set((s) => ({
           decks: s.decks.filter((d) => d.id !== id),
           cards: s.cards.filter((c) => c.deckId !== id),
@@ -227,10 +256,29 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteCard: (id) => {
-        const newSrsData = { ...get().srsData }
-        const newFsrsData = { ...get().fsrsData }
+        const { cards, decks, srsData, fsrsData } = get()
+        const card = cards.find((c) => c.id === id)
+        const newSrsData = { ...srsData }
+        const newFsrsData = { ...fsrsData }
         delete newSrsData[id]
         delete newFsrsData[id]
+
+        // Save to trash before removing
+        if (card) {
+          const deckName = decks.find((d) => d.id === card.deckId)?.name
+          useTrashStore.getState().add({
+            id: card.id,
+            type: 'card',
+            deletedAt: new Date().toISOString(),
+            name: card.front,
+            parentName: deckName,
+            snippet: card.back?.slice(0, 120),
+            card,
+            cardSRS: srsData[id],
+            cardFSRS: fsrsData[id],
+          })
+        }
+
         set((s) => ({
           cards: s.cards.filter((c) => c.id !== id),
           srsData: newSrsData,

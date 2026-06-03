@@ -448,7 +448,7 @@ export function Sidebar() {
         {sidebarCollapsed ? (
           <Tooltip content="Trash" side="right">
             <Link
-              href="/library?filter=archived"
+              href="/trash"
               className="flex items-center justify-center h-7 w-full rounded-[var(--radius-sm)] text-xs transition-colors text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
             >
               <Trash2 size={13} className="shrink-0" />
@@ -456,7 +456,7 @@ export function Sidebar() {
           </Tooltip>
         ) : (
           <Link
-            href="/library?filter=archived"
+            href="/trash"
             className="flex items-center gap-2.5 h-7 px-2.5 rounded-[var(--radius-sm)] text-xs transition-colors text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
           >
             <Trash2 size={13} className="shrink-0" />
