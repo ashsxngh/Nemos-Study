@@ -39,6 +39,14 @@ interface SettingsData {
   dailyReminderTime: string
   streakWarningEnabled: boolean
   weeklyReportEnabled: boolean
+
+  // Keyboard shortcuts (study session)
+  studyShortcuts: {
+    forgot: string      // key when answer shown → rate 1
+    remembered: string  // key when answer shown → rate 4
+    skip: string        // skip card
+    back: string        // go back
+  }
 }
 
 interface SettingsState extends SettingsData {
@@ -75,6 +83,13 @@ const defaults: SettingsData = {
   dailyReminderTime: '18:00',
   streakWarningEnabled: true,
   weeklyReportEnabled: false,
+
+  studyShortcuts: {
+    forgot: 'f',
+    remembered: ' ',
+    skip: 'ArrowRight',
+    back: 'ArrowLeft',
+  },
 }
 
 export const useSettingsStore = create<SettingsState>()(

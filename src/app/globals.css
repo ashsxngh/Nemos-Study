@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --bg-base: #f0fafb;
+  --bg-base: #f5f5f7;
   --bg-surface: #ffffff;
-  --bg-hover: #e6f7f9;
-  --bg-active: #cceef2;
-  --border: #c0e4ea;
-  --border-strong: #9dd4dc;
-  --text-primary: #0a1a1c;
-  --text-secondary: #2d6570;
-  --text-muted: #7aacb3;
-  --accent: #0891b2;
-  --accent-hover: #0e7490;
-  --accent-subtle: #ecfeff;
+  --bg-hover: #ebebee;
+  --bg-active: #e0e0e4;
+  --border: #dcdce0;
+  --border-strong: #c4c4cc;
+  --text-primary: #18181b;
+  --text-secondary: #52525e;
+  --text-muted: #8c8c9c;
+  --accent: #6366f1;
+  --accent-hover: #4f52d9;
+  --accent-subtle: #eef2ff;
   --danger: #ef4444;
   --danger-subtle: #fef2f2;
   --success: #16a34a;
@@ -27,18 +27,18 @@
 }
 
 .dark {
-  --bg-base: #131315;
-  --bg-surface: #1c1c1f;
-  --bg-hover: #222226;
-  --bg-active: #2a2a30;
-  --border: #2a2a30;
-  --border-strong: #363640;
+  --bg-base: #1a1a1c;
+  --bg-surface: #222225;
+  --bg-hover: #2a2a2e;
+  --bg-active: #333338;
+  --border: #333338;
+  --border-strong: #414148;
   --text-primary: #e8e8ec;
-  --text-secondary: #8888a0;
-  --text-muted: #55555f;
-  --accent: #22d3ee;
-  --accent-hover: #06b6d4;
-  --accent-subtle: #0a2a33;
+  --text-secondary: #8e8ea0;
+  --text-muted: #56566a;
+  --accent: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-subtle: #1c1c2e;
   --danger: #f87171;
   --danger-subtle: #2d1515;
   --success: #4ade80;
@@ -143,8 +143,8 @@ button { cursor: pointer; }
 .dark .card-glow {
   box-shadow:
     0 0 0 1px var(--border),
-    0 8px 32px -8px color-mix(in srgb, var(--accent) 20%, transparent),
-    0 2px 8px -2px rgba(0,0,0,0.4);
+    0 8px 32px -8px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 2px 8px -2px rgba(0,0,0,0.5);
 }
 
 /* ── Sidebar nav item active ─────────────────────────────── */

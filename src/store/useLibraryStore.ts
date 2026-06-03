@@ -17,6 +17,12 @@ import { generateId } from '@/lib/utils'
 
 const USER_ID = 'local-user'
 
+interface PendingDeletes {
+  folders: string[]
+  decks: string[]
+  cards: string[]
+}
+
 interface LibraryState {
   folders: Folder[]
   decks: Deck[]
@@ -25,6 +31,7 @@ interface LibraryState {
   fsrsData: Record<string, FSRSState>
   reviewLogs: ReviewLog[]
   sessions: ReviewSession[]
+  pendingDeletes: PendingDeletes
 
   // Folder actions
   createFolder: (name: string, parentId?: string | null, color?: FolderColor) => Folder
@@ -47,8 +54,11 @@ interface LibraryState {
   setSRSData: (cardId: string, srs: SRSData) => void
   removeLastLog: () => void
   resetCardSRS: (cardId: string) => void
+  clearPendingDeletes: () => void
 
   // Query helpers
+  getNewCards: (deckId?: string) => Card[]
+  getReviewsDue: (deckId?: string) => Card[]
   getDueCards: (deckId?: string) => Card[]
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
@@ -74,6 +84,7 @@ export const useLibraryStore = create<LibraryState>()(
       fsrsData: {},
       reviewLogs: [],
       sessions: [],
+      pendingDeletes: { folders: [], decks: [], cards: [] },
 
       // ── Folder actions ──────────────────────────────────────────────────────
       createFolder: (name, parentId = null, color = 'default') => {
@@ -103,7 +114,7 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteFolder: (id) => {
-        const { folders, decks, cards, srsData, fsrsData } = get()
+        const { folders, decks, cards, srsData, fsrsData, pendingDeletes } = get()
         const descendantIds = getAllDescendantFolderIds(folders, id)
         const allFolderIds = [id, ...descendantIds]
         const deckIdsToDelete = decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id)
@@ -120,6 +131,11 @@ export const useLibraryStore = create<LibraryState>()(
           cards: cards.filter((c) => !cardIdsToDelete.includes(c.id)),
           srsData: newSrsData,
           fsrsData: newFsrsData,
+          pendingDeletes: {
+            folders: [...pendingDeletes.folders, ...allFolderIds],
+            decks: [...pendingDeletes.decks, ...deckIdsToDelete],
+            cards: [...pendingDeletes.cards, ...cardIdsToDelete],
+          },
         })
       },
 
@@ -165,6 +181,11 @@ export const useLibraryStore = create<LibraryState>()(
           cards: s.cards.filter((c) => c.deckId !== id),
           srsData: newSrsData,
           fsrsData: newFsrsData,
+          pendingDeletes: {
+            ...s.pendingDeletes,
+            decks: [...s.pendingDeletes.decks, id],
+            cards: [...s.pendingDeletes.cards, ...cardIdsToDelete],
+          },
         }))
       },
 
@@ -214,6 +235,10 @@ export const useLibraryStore = create<LibraryState>()(
           cards: s.cards.filter((c) => c.id !== id),
           srsData: newSrsData,
           fsrsData: newFsrsData,
+          pendingDeletes: {
+            ...s.pendingDeletes,
+            cards: [...s.pendingDeletes.cards, id],
+          },
         }))
       },
 
@@ -321,38 +346,64 @@ export const useLibraryStore = create<LibraryState>()(
         }
       },
 
+      clearPendingDeletes: () => {
+        set({ pendingDeletes: { folders: [], decks: [], cards: [] } })
+      },
+
       // ── Query helpers ────────────────────────────────────────────────────────
-      getDueCards: (deckId) => {
-        const { cards, srsData, fsrsData } = get()
-        const { newCardsPerDay, maxReviewsPerDay, algorithm } = useSettingsStore.getState()
+      getNewCards: (deckId) => {
+        const { cards, fsrsData, srsData } = get()
+        const { algorithm, newCardsPerDay } = useSettingsStore.getState()
+        const todayStr = new Date().toISOString().slice(0, 10)
         const pool = deckId ? cards.filter((c) => c.deckId === deckId) : cards
 
-        if (algorithm === 'fsrs') {
-          const dueCards = pool.filter((c) => {
+        // Count new cards already studied today (repetitions went from 0→1 today)
+        const studiedNewToday = pool.filter((c) => {
+          if (algorithm === 'fsrs') {
             const fs = fsrsData[c.id]
-            if (!fs) return true
-            return new Date(fs.dueDate) <= new Date()
-          })
-          const newCards = dueCards.filter((c) => !fsrsData[c.id] || fsrsData[c.id].repetitions === 0)
-          const reviewCards = dueCards.filter((c) => (fsrsData[c.id]?.repetitions ?? 0) > 0)
-          return [
-            ...newCards.slice(0, newCardsPerDay),
-            ...reviewCards.slice(0, maxReviewsPerDay),
-          ]
-        }
-
-        const dueCards = pool.filter((c) => {
+            return fs && fs.repetitions === 1 && fs.lastReviewedAt?.slice(0, 10) === todayStr
+          }
           const srs = srsData[c.id]
-          return srs ? isDue(srs) : true
+          return srs && srs.repetitions === 1 && srs.lastReviewedAt?.slice(0, 10) === todayStr
+        }).length
+
+        const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
+        if (remaining === 0) return []
+
+        const newCards = pool
+          .filter((c) => {
+            if (algorithm === 'fsrs') {
+              const fs = fsrsData[c.id]
+              return !fs || fs.repetitions === 0
+            }
+            const srs = srsData[c.id]
+            return !srs || srs.repetitions === 0
+          })
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+
+        return newCards.slice(0, remaining)
+      },
+
+      getReviewsDue: (deckId) => {
+        const { cards, fsrsData, srsData } = get()
+        const { algorithm } = useSettingsStore.getState()
+        const pool = deckId ? cards.filter((c) => c.deckId === deckId) : cards
+        const now = new Date()
+
+        return pool.filter((c) => {
+          if (algorithm === 'fsrs') {
+            const fs = fsrsData[c.id]
+            if (!fs || fs.repetitions === 0) return false
+            return new Date(fs.dueDate) <= now
+          }
+          const srs = srsData[c.id]
+          if (!srs || srs.repetitions === 0) return false
+          return isDue(srs)
         })
+      },
 
-        const newCards = dueCards.filter((c) => !srsData[c.id] || srsData[c.id].repetitions === 0)
-        const reviewCards = dueCards.filter((c) => (srsData[c.id]?.repetitions ?? 0) > 0)
-
-        return [
-          ...newCards.slice(0, newCardsPerDay),
-          ...reviewCards.slice(0, maxReviewsPerDay),
-        ]
+      getDueCards: (deckId) => {
+        return [...get().getNewCards(deckId), ...get().getReviewsDue(deckId)]
       },
 
       getDeckCards: (deckId) => {

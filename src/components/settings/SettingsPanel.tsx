@@ -27,17 +27,69 @@ const themes: { value: Theme; label: string; icon: React.ElementType }[] = [
   { value: 'system', label: 'System', icon: Monitor },
 ]
 
-const shortcuts = [
-  { action: 'Open command palette', keys: ['⌘', 'K'] },
-  { action: 'Search', keys: ['/'] },
-  { action: 'New card', keys: ['N'] },
-  { action: 'Flip card', keys: ['Space'] },
-  { action: 'Rate: Again', keys: ['1'] },
-  { action: 'Rate: Hard', keys: ['2'] },
-  { action: 'Rate: Good', keys: ['3'] },
-  { action: 'Rate: Easy', keys: ['4'] },
+function formatKey(key: string): string {
+  if (key === ' ') return 'Space'
+  if (key === 'ArrowLeft') return '←'
+  if (key === 'ArrowRight') return '→'
+  if (key === 'ArrowUp') return '↑'
+  if (key === 'ArrowDown') return '↓'
+  if (key === 'Enter') return 'Enter'
+  if (key === 'Escape') return 'Esc'
+  if (key === 'Backspace') return '⌫'
+  if (key === 'Tab') return 'Tab'
+  if (key.length === 1) return key.toUpperCase()
+  return key
+}
+
+const BLOCKED_KEYS = new Set(['Escape', 'Tab', 'CapsLock', 'Meta', 'Control', 'Alt', 'Shift'])
+
+interface ShortcutRecorderProps {
+  value: string
+  onChange: (key: string) => void
+}
+
+function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
+  const [recording, setRecording] = useState(false)
+
+  useEffect(() => {
+    if (!recording) return
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (BLOCKED_KEYS.has(e.key)) {
+        setRecording(false)
+        return
+      }
+      onChange(e.key)
+      setRecording(false)
+    }
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
+  }, [recording, onChange])
+
+  return (
+    <button
+      type="button"
+      onClick={() => setRecording(true)}
+      onBlur={() => setRecording(false)}
+      className={cn(
+        'min-w-[56px] px-2 py-1 rounded border text-xs font-mono font-medium transition-colors',
+        recording
+          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] animate-pulse'
+          : 'border-[var(--border)] bg-[var(--bg-active)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
+      )}
+    >
+      {recording ? 'Press key…' : formatKey(value)}
+    </button>
+  )
+}
+
+const globalShortcuts = [
+  { action: 'Command palette', keys: ['⌘', 'K'] },
   { action: 'Toggle sidebar', keys: ['['] },
   { action: 'Toggle theme', keys: ['⌘', 'Shift', 'L'] },
+  { action: 'Navigate back', keys: ['Alt', '←'] },
+  { action: 'Flip card (study)', keys: ['Space'] },
 ]
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -577,22 +629,55 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <section className="space-y-4">
               <SectionHeading icon={Keyboard} label="Keyboard Shortcuts" />
 
-              <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
-                {shortcuts.map(({ action, keys }) => (
-                  <div key={action} className="flex items-center justify-between px-4 py-2.5">
-                    <span className="text-sm text-[var(--text-primary)]">{action}</span>
-                    <div className="flex items-center gap-1">
-                      {keys.map((k) => (
-                        <kbd
-                          key={k}
-                          className="text-xs bg-[var(--bg-active)] border border-[var(--border)] rounded px-1.5 py-0.5 font-mono text-[var(--text-secondary)]"
-                        >
-                          {k}
-                        </kbd>
-                      ))}
+              {/* Study session — customisable */}
+              <div>
+                <p className="text-xs font-medium text-[var(--text-secondary)] mb-2">Study session</p>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
+                  {([
+                    { key: 'forgot',     label: 'Forgot',    description: 'Rate card as forgotten' },
+                    { key: 'remembered', label: 'Remembered', description: 'Rate card as remembered (also flips card)' },
+                    { key: 'skip',       label: 'Skip card',  description: 'Skip without rating' },
+                    { key: 'back',       label: 'Go back',    description: 'Return to previous card' },
+                  ] as const).map(({ key, label, description }) => (
+                    <div key={key} className="flex items-center justify-between px-4 py-2.5">
+                      <div>
+                        <p className="text-sm text-[var(--text-primary)]">{label}</p>
+                        <p className="text-xs text-[var(--text-muted)]">{description}</p>
+                      </div>
+                      <ShortcutRecorder
+                        value={settings.studyShortcuts[key]}
+                        onChange={(k) =>
+                          updateSettings({
+                            studyShortcuts: { ...settings.studyShortcuts, [key]: k },
+                          })
+                        }
+                      />
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] mt-1.5">Click a key badge then press any key to rebind.</p>
+              </div>
+
+              {/* Global — read-only */}
+              <div>
+                <p className="text-xs font-medium text-[var(--text-secondary)] mb-2">Global</p>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
+                  {globalShortcuts.map(({ action, keys }) => (
+                    <div key={action} className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-sm text-[var(--text-primary)]">{action}</span>
+                      <div className="flex items-center gap-1">
+                        {keys.map((k) => (
+                          <kbd
+                            key={k}
+                            className="text-xs bg-[var(--bg-active)] border border-[var(--border)] rounded px-1.5 py-0.5 font-mono text-[var(--text-secondary)]"
+                          >
+                            {k}
+                          </kbd>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
 

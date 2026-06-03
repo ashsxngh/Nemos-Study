@@ -13,6 +13,7 @@ export default function LibraryPage() {
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
   const [deckDialogOpen, setDeckDialogOpen] = useState(false)
   const [deckDefaultFolderId, setDeckDefaultFolderId] = useState<string | null>(null)
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
 
   const openDeckDialog = (folderId?: string | null) => {
     setDeckDefaultFolderId(folderId ?? null)
@@ -46,7 +47,7 @@ export default function LibraryPage() {
               variant="primary"
               size="sm"
               icon={<Plus size={13} />}
-              onClick={() => openDeckDialog(null)}
+              onClick={() => openDeckDialog(currentFolderId)}
             >
               New Deck
             </Button>
@@ -57,6 +58,7 @@ export default function LibraryPage() {
         <LibraryBrowser
           onNewFolder={() => setFolderDialogOpen(true)}
           onNewDeck={openDeckDialog}
+          onFolderChange={setCurrentFolderId}
         />
       </main>
 

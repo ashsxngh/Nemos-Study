@@ -172,6 +172,7 @@ async function pushToSupabase(
   cards: Card[],
   srsData: Record<string, SRSData>,
   sessions: ReviewSession[],
+  pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
     console.warn('[SYNC] pushToSupabase: Supabase not configured, skipping push')
@@ -234,6 +235,23 @@ async function pushToSupabase(
     }
   }
   console.log('[SYNC] pushToSupabase: all upserts succeeded')
+
+  // Execute pending deletes
+  if (pendingDeletes) {
+    if (pendingDeletes.folders.length) {
+      await supabase.from('folders').delete().in('id', pendingDeletes.folders)
+    }
+    if (pendingDeletes.decks.length) {
+      await supabase.from('decks').delete().in('id', pendingDeletes.decks)
+    }
+    if (pendingDeletes.cards.length) {
+      await supabase.from('cards').delete().in('id', pendingDeletes.cards)
+      await supabase.from('srs_data').delete().in('card_id', pendingDeletes.cards)
+    }
+    if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length) {
+      console.log('[SYNC] pushToSupabase: deletes complete')
+    }
+  }
 }
 
 async function pushNotesToSupabase(notes: Note[]): Promise<void> {
@@ -276,12 +294,17 @@ export function useSync(): SyncStatus {
     cards: Card[],
     srsData: Record<string, SRSData>,
     sessions: ReviewSession[],
+    pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
   ) => {
     console.log('[SYNC] handlePush: pushing', { decks: decks.map(d => ({ id: d.id, name: d.name })) })
     setSyncing(true)
     setError(null)
     try {
-      await pushToSupabase(folders, decks, cards, srsData, sessions)
+      await pushToSupabase(folders, decks, cards, srsData, sessions, pendingDeletes)
+      // Clear pending deletes after successful push
+      if (pendingDeletes && (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length)) {
+        useLibraryStore.getState().clearPendingDeletes()
+      }
       console.log('[SYNC] handlePush: push COMPLETE')
       setLastSynced(new Date())
     } catch (err) {
@@ -325,6 +348,11 @@ export function useSync(): SyncStatus {
           console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')
           setLastSynced(new Date())
           mountedRef.current = true
+          // Push any local changes that existed before pull completed (e.g. cards created during load)
+          const state = useLibraryStore.getState()
+          if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length) {
+            handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
+          }
         } else {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
         }
@@ -354,7 +382,7 @@ export function useSync(): SyncStatus {
       console.log('[SYNC] store change detected — scheduling push in 1.5s. decks:', state.decks.map(d => ({ id: d.id, name: d.name })))
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
       libraryDebounceRef.current = setTimeout(() => {
-        handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions)
+        handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
       }, 1500)
     })
     return () => {

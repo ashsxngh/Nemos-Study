@@ -44,6 +44,19 @@ type SortBy = 'alpha' | 'due' | 'mastery' | 'recent'
 interface LibraryBrowserProps {
   onNewFolder?: () => void
   onNewDeck?: (folderId?: string | null) => void
+  onFolderChange?: (folderId: string | null) => void
+}
+
+function getRecursiveCardCount(
+  folderId: string,
+  folders: FolderType[],
+  decks: DeckType[],
+  getDeckCards: (id: string) => { length: number },
+): number {
+  const directDecks = decks.filter((d) => d.folderId === folderId)
+  const directCount = directDecks.reduce((sum, d) => sum + getDeckCards(d.id).length, 0)
+  const childFolders = folders.filter((f) => f.parentId === folderId)
+  return directCount + childFolders.reduce((sum, f) => sum + getRecursiveCardCount(f.id, folders, decks, getDeckCards), 0)
 }
 
 // ── Dropdown menu ─────────────────────────────────────────────────────────────
@@ -136,7 +149,7 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function LibraryBrowser({ onNewFolder, onNewDeck }: LibraryBrowserProps) {
+export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: LibraryBrowserProps) {
   const {
     folders, decks, getDeckCards, getDeckMastery, getDueCards, sessions,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
@@ -223,10 +236,15 @@ export function LibraryBrowser({ onNewFolder, onNewDeck }: LibraryBrowserProps) 
     setActiveDeckId(null)
     setSearch('')
     setActiveTags([])
+    onFolderChange?.(folderId)
   }
 
   const navigateToBreadcrumb = (index: number) => {
-    setFolderStack((prev) => prev.slice(0, index + 1))
+    setFolderStack((prev) => {
+      const next = prev.slice(0, index + 1)
+      onFolderChange?.(next[next.length - 1] ?? null)
+      return next
+    })
     setActiveDeckId(null)
     setSearch('')
     setActiveTags([])
@@ -473,16 +491,14 @@ export function LibraryBrowser({ onNewFolder, onNewDeck }: LibraryBrowserProps) 
                     },
                   },
                 ]
+                const totalCards = getRecursiveCardCount(folder.id, folders, decks, getDeckCards)
+                const childCount = folders.filter((f) => f.parentId === folder.id).length
                 return view === 'grid' ? (
                   <FolderCardGrid
                     key={folder.id}
                     folder={folder}
-                    cardCount={
-                      decks
-                        .filter((d) => d.folderId === folder.id)
-                        .reduce((sum, d) => sum + getDeckCards(d.id).length, 0)
-                    }
-                    childCount={folders.filter((f) => f.parentId === folder.id).length}
+                    cardCount={totalCards}
+                    childCount={childCount}
                     onClick={() => navigateToFolder(folder.id)}
                     menuItems={folderMenuItems}
                   />
@@ -490,11 +506,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck }: LibraryBrowserProps) 
                   <FolderCardList
                     key={folder.id}
                     folder={folder}
-                    cardCount={
-                      decks
-                        .filter((d) => d.folderId === folder.id)
-                        .reduce((sum, d) => sum + getDeckCards(d.id).length, 0)
-                    }
+                    cardCount={totalCards}
                     onClick={() => navigateToFolder(folder.id)}
                     menuItems={folderMenuItems}
                   />

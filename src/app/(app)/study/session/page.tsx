@@ -15,18 +15,27 @@ import {
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 import { ReviewCard } from '@/components/study/ReviewCard'
 import { ConfidenceRating } from '@/components/study/ConfidenceRating'
 import { Progress } from '@/components/ui/Progress'
 import { cn, formatDuration } from '@/lib/utils'
 import type { Difficulty } from '@/lib/types'
 
+function formatKey(key: string): string {
+  if (key === ' ') return 'Space'
+  if (key === 'ArrowLeft') return '←'
+  if (key === 'ArrowRight') return '→'
+  if (key.length === 1) return key.toUpperCase()
+  return key
+}
+
 /* ─────────────────────────────────────────────────────────── */
 /* Colour tokens for focus-mode dark theme                     */
 /* ─────────────────────────────────────────────────────────── */
-// bg:        #131315
-// card bg:   #1c1c1f
-// card btm:  #161618
+// bg:        #1a1a1c
+// card bg:   #222225
+// card btm:  #1e1e20
 // border:    #2a2a30
 // text:      #e8e8ea
 // muted:     #6b6b72
@@ -56,7 +65,8 @@ function SessionContent() {
     decrementIndex,
   } = useStudyStore()
 
-  const { getDueCards, reviewCard, decks } = useLibraryStore()
+  const { getDueCards, getNewCards, getReviewsDue, reviewCard, decks, fsrsData } = useLibraryStore()
+  const { studyShortcuts } = useSettingsStore()
 
   const cardShownAtRef = useRef<number>(Date.now())
 
@@ -70,6 +80,8 @@ function SessionContent() {
     if (modeParam === 'cram') return 'cram' as const
     if (modeParam === 'random') return 'random' as const
     if (modeParam === 'failed') return 'failed-only' as const
+    if (modeParam === 'new') return 'new-only' as const
+    if (modeParam === 'reviews') return 'reviews-only' as const
     return 'standard' as const
   })()
 
@@ -94,7 +106,9 @@ function SessionContent() {
         return srs && (srs.lapses > 0 || srs.masteryPercent < 30)
       })
     }
-    // standard — use getDueCards (respects daily limits)
+    if (resolvedMode === 'new-only') return getNewCards(deckId)
+    if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
+    // standard inbox — new cards + due reviews
     return getDueCards(deckId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckId, resolvedMode])
@@ -221,35 +235,43 @@ function SessionContent() {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
 
-      // Undo / Redo
+      // Undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
         handleUndo()
         return
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-        e.preventDefault()
-        return
-      }
 
+      const k = e.key
+
+      // Space: flip when front, Remembered when back
       if (e.code === 'Space') {
         e.preventDefault()
         if (!showAnswer) flipCard()
+        else handleRate(4)
+        return
       }
 
       if (showAnswer) {
-        if (e.key === '1') handleRate(1)
-        if (e.key === '4') handleRate(4)
-        if (e.key === 'f' || e.key === 'F') handleRate(1)
-        if (e.key === 'r' || e.key === 'R') handleRate(4)
-        if (e.key === 'ArrowLeft') handleBack()
-        if (e.key === 'ArrowRight') handleSkip()
+        // Configurable: Forgot
+        if (k === studyShortcuts.forgot || k === studyShortcuts.forgot.toUpperCase()) {
+          handleRate(1)
+          return
+        }
+        // Configurable: Remembered (if not space — space is handled above)
+        if (studyShortcuts.remembered !== ' ' && k === studyShortcuts.remembered) {
+          handleRate(4)
+          return
+        }
+        // Configurable: Skip / Back
+        if (k === studyShortcuts.skip) { handleSkip(); return }
+        if (k === studyShortcuts.back) { handleBack(); return }
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAnswer, currentIndex, queue, history, handleUndo])
+  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts])
 
   const currentCard = queue[currentIndex]
   const isComplete = loaded && queue.length > 0 && currentIndex >= queue.length
@@ -272,14 +294,14 @@ function SessionContent() {
     return (
       <div
         className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6"
-        style={{ background: '#131315' }}
+        style={{ background: '#1a1a1c' }}
       >
         <div className="w-full max-w-sm animate-fade-in space-y-5">
           {/* Card */}
           <div
             className="rounded-xl overflow-hidden"
             style={{
-              background: '#1c1c1f',
+              background: '#222225',
               border: '1px solid #2a2a30',
               boxShadow: '0 8px 32px -8px rgba(0,0,0,0.6)',
             }}
@@ -378,7 +400,7 @@ function SessionContent() {
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all"
               style={{
-                background: '#1c1c1f',
+                background: '#222225',
                 border: '1px solid #2a2a30',
                 color: '#6b6b72',
               }}
@@ -399,7 +421,7 @@ function SessionContent() {
     return (
       <div
         className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6"
-        style={{ background: '#131315' }}
+        style={{ background: '#1a1a1c' }}
       >
         {isLoading ? (
           <div className="space-y-3 animate-pulse">
@@ -410,7 +432,7 @@ function SessionContent() {
           <div
             className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in"
             style={{
-              background: '#1c1c1f',
+              background: '#222225',
               border: '1px solid #2a2a30',
             }}
           >
@@ -449,7 +471,7 @@ function SessionContent() {
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col"
-      style={{ background: '#131315' }}
+      style={{ background: '#1a1a1c' }}
     >
       {/* ── Thin progress bar at very top ── */}
       <div
@@ -469,7 +491,7 @@ function SessionContent() {
       <div
         className="flex items-center h-11 px-4 gap-3 shrink-0 mt-[3px]"
         style={{
-          background: '#131315',
+          background: '#1a1a1c',
           borderBottom: '1px solid #2a2a30',
         }}
       >
@@ -479,19 +501,29 @@ function SessionContent() {
             reset()
             router.push('/study')
           }}
-          className="flex items-center gap-1.5 text-sm font-medium rounded-md px-2 py-1 transition-colors hover:bg-[#1c1c1f]"
+          className="flex items-center gap-1.5 text-sm font-medium rounded-md px-2 py-1 transition-colors hover:bg-[#222225]"
           style={{ color: '#e8e8ea' }}
         >
           {deckName}
           <ChevronDown size={13} style={{ color: '#6b6b72' }} />
         </button>
 
+        {/* NEW badge when card has never been reviewed */}
+        {currentCard && (fsrsData[currentCard.id]?.repetitions ?? 0) === 0 && (
+          <span
+            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ background: '#1c1c2e', color: '#818cf8', border: '1px solid #2a2a50' }}
+          >
+            NEW
+          </span>
+        )}
+
         <div className="flex-1" />
 
         {/* Shuffle */}
         <button
           onClick={handleShuffle}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#1c1c1f]"
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
           style={{ color: '#6b6b72' }}
           title="Shuffle remaining"
         >
@@ -515,7 +547,7 @@ function SessionContent() {
           <div
             className="rounded-xl overflow-hidden w-full"
             style={{
-              background: '#1c1c1f',
+              background: '#222225',
               border: '1px solid #2a2a30',
               boxShadow: '0 8px 32px -8px rgba(0,0,0,0.5)',
             }}
@@ -533,7 +565,7 @@ function SessionContent() {
                 onClick={flipCard}
                 className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-t hover:brightness-110 select-none"
                 style={{
-                  background: '#161618',
+                  background: '#1e1e20',
                   borderColor: '#2a2a30',
                   color: '#6b6b72',
                 }}
@@ -559,7 +591,7 @@ function SessionContent() {
             <div className="mt-3 animate-fade-in">
               <button
                 onClick={() => setShowMoreRatings((v) => !v)}
-                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors hover:bg-[#1c1c1f] mx-auto"
+                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors hover:bg-[#222225] mx-auto"
                 style={{ color: '#6b6b72' }}
               >
                 <MoreHorizontal size={12} />
@@ -579,7 +611,7 @@ function SessionContent() {
       <div
         className="flex items-center px-6 py-3 gap-3 shrink-0"
         style={{
-          background: '#131315',
+          background: '#1a1a1c',
           borderTop: '1px solid #2a2a30',
         }}
       >
@@ -589,7 +621,7 @@ function SessionContent() {
           disabled={!canGoBack}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors"
           style={{
-            background: '#1c1c1f',
+            background: '#222225',
             border: '1px solid #2a2a30',
             color: canGoBack ? '#e8e8ea' : '#3a3a42',
             cursor: canGoBack ? 'pointer' : 'not-allowed',
@@ -605,7 +637,7 @@ function SessionContent() {
             onClick={handleUndo}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
             style={{
-              background: '#1c1c1f',
+              background: '#222225',
               border: '1px solid #2a2a30',
               color: '#a0a0b0',
             }}
@@ -621,7 +653,7 @@ function SessionContent() {
           onClick={handleSkip}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:brightness-110"
           style={{
-            background: '#1c1c1f',
+            background: '#222225',
             border: '1px solid #2a2a30',
             color: '#6b6b72',
           }}
@@ -638,15 +670,20 @@ function SessionContent() {
           disabled={!answerReady}
           className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
           style={{
-            background: answerReady ? '#2a1515' : '#1c1c1f',
+            background: answerReady ? '#2a1515' : '#222225',
             border: `1px solid ${answerReady ? '#5a2020' : '#2a2a30'}`,
             color: answerReady ? '#f87171' : '#3a3a42',
             cursor: answerReady ? 'pointer' : 'not-allowed',
           }}
-          title="Forgot (1)"
+          title={`Forgot (${formatKey(studyShortcuts.forgot)})`}
         >
           <span>×</span>
           Forgot
+          {answerReady && (
+            <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
+              {formatKey(studyShortcuts.forgot)}
+            </kbd>
+          )}
         </button>
 
         {/* ✓ Remembered */}
@@ -655,22 +692,27 @@ function SessionContent() {
           disabled={!answerReady}
           className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
           style={{
-            background: answerReady ? '#0a2a15' : '#1c1c1f',
+            background: answerReady ? '#0a2a15' : '#222225',
             border: `1px solid ${answerReady ? '#1a5a30' : '#2a2a30'}`,
             color: answerReady ? '#4ade80' : '#3a3a42',
             cursor: answerReady ? 'pointer' : 'not-allowed',
           }}
-          title="Remembered (4)"
+          title={`Remembered (${formatKey(studyShortcuts.remembered)})`}
         >
           <span>✓</span>
           Remembered
+          {answerReady && (
+            <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
+              {formatKey(studyShortcuts.remembered)}
+            </kbd>
+          )}
         </button>
 
         <div className="flex-1" />
 
         {/* … Options */}
         <button
-          className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[#1c1c1f]"
+          className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[#222225]"
           style={{
             color: '#6b6b72',
           }}
@@ -689,7 +731,7 @@ export default function StudySessionPage() {
       fallback={
         <div
           className="flex min-h-full items-center justify-center"
-          style={{ background: '#131315' }}
+          style={{ background: '#1a1a1c' }}
         >
           <div className="space-y-3 text-center">
             <div className="skeleton w-48 h-4 mx-auto rounded" />
