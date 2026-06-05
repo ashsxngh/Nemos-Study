@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --bg-base: #f5f5f7;
-  --bg-surface: #ffffff;
-  --bg-hover: #ebebee;
-  --bg-active: #e0e0e4;
-  --border: #dcdce0;
-  --border-strong: #c4c4cc;
-  --text-primary: #18181b;
-  --text-secondary: #52525e;
-  --text-muted: #8c8c9c;
-  --accent: #6366f1;
-  --accent-hover: #4f52d9;
-  --accent-subtle: #eef2ff;
-  --danger: #ef4444;
-  --danger-subtle: #fef2f2;
-  --success: #16a34a;
-  --success-subtle: #f0fdf4;
-  --warning: #d97706;
-  --warning-subtle: #fffbeb;
+  --bg-base: #1a1a1c;
+  --bg-surface: #222225;
+  --bg-hover: #2a2a2e;
+  --bg-active: #333338;
+  --border: #333338;
+  --border-strong: #414148;
+  --text-primary: #e8e8ec;
+  --text-secondary: #8e8ea0;
+  --text-muted: #56566a;
+  --accent: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-subtle: #1c1c2e;
+  --danger: #f87171;
+  --danger-subtle: #2d1515;
+  --success: #4ade80;
+  --success-subtle: #052e16;
+  --warning: #fbbf24;
+  --warning-subtle: #2d1f05;
   --sidebar-width: 232px;
   --header-height: 44px;
   --radius: 8px;
@@ -112,13 +112,19 @@ button { cursor: pointer; }
   from { background-position: -200% 0; }
   to   { background-position:  200% 0; }
 }
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
-  50%       { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); }
+@keyframes swipeLeft {
+  from { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
+  to   { transform: translateX(-90px) scale(0.88) rotate(-5deg); opacity: 0; }
+}
+@keyframes swipeRight {
+  from { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
+  to   { transform: translateX(90px) scale(0.88) rotate(5deg); opacity: 0; }
 }
 
-.animate-fade-in  { animation: fadeIn  0.18s ease-out; }
-.animate-scale-in { animation: scaleIn 0.14s ease-out; }
+.animate-fade-in    { animation: fadeIn    0.18s ease-out; }
+.animate-scale-in   { animation: scaleIn   0.14s ease-out; }
+.animate-swipe-left  { animation: swipeLeft  0.12s ease-in forwards; }
+.animate-swipe-right { animation: swipeRight 0.12s ease-in forwards; }
 
 /* ── Skeleton ────────────────────────────────────────────── */
 .skeleton {
@@ -133,18 +139,11 @@ button { cursor: pointer; }
   border-radius: var(--radius-sm);
 }
 
-/* ── Card surface glow (used on study cards) ─────────────── */
+/* ── Card surface (no glow) ──────────────────────────────── */
 .card-glow {
   box-shadow:
     0 0 0 1px var(--border),
-    0 4px 16px -4px color-mix(in srgb, var(--accent) 12%, transparent),
-    0 1px 3px -1px color-mix(in srgb, var(--bg-base) 60%, transparent);
-}
-.dark .card-glow {
-  box-shadow:
-    0 0 0 1px var(--border),
-    0 8px 32px -8px color-mix(in srgb, var(--accent) 18%, transparent),
-    0 2px 8px -2px rgba(0,0,0,0.5);
+    0 4px 16px -4px rgba(0,0,0,0.4);
 }
 
 /* ── Sidebar nav item active ─────────────────────────────── */

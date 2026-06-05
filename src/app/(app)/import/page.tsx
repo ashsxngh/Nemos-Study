@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Upload, X, FileText } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
 import { cn, truncate } from '@/lib/utils'
+import type { CardType } from '@/lib/types'
 import {
   detectFormat,
   parseDelimited,
@@ -20,41 +21,34 @@ import {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type DelimiterOption = 'tab' | 'comma' | 'semicolon' | 'pipe' | 'doublecolon' | 'custom'
-
 interface ParsedCard {
   front: string
   back: string
   tags?: string[]
 }
 
-const DELIMITER_MAP: Record<Exclude<DelimiterOption, 'custom'>, string> = {
-  tab: '\t',
-  comma: ',',
-  semicolon: ';',
-  pipe: '|',
-  doublecolon: '::',
-}
-
-const DELIMITER_LABELS: Record<DelimiterOption, string> = {
-  tab: 'Tab (default)',
-  comma: 'Comma',
-  semicolon: 'Semicolon',
-  pipe: 'Pipe ( | )',
-  doublecolon: 'Double colon ( :: )',
-  custom: 'Custom',
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function resolveDelimiter(raw: string): string {
+  if (!raw || raw === '\\t') return '\t'
+  if (raw === '\\n') return '\n'
+  return raw
+}
+
+function detectCardType(front: string, back: string): CardType {
+  if (/\{\{c\d+::/.test(front)) return 'cloze'
+  if (/^(https?:\/\/|data:image)/.test(back.trim())) return 'image'
+  return 'basic'
+}
 
 function parseFile(
   filename: string,
   text: string,
-  delimiterOption: DelimiterOption,
-  customDelimiter: string,
+  delimiterRaw: string,
   skipFirstRow: boolean
 ): { cards: ParsedCard[]; error: string | null } {
   const format = detectFormat(filename, text)
+  const delimiter = resolveDelimiter(delimiterRaw)
 
   try {
     let cards: ParsedCard[] = []
@@ -64,7 +58,6 @@ function parseFile(
     } else if (format === 'markdown') {
       cards = parseMarkdownCards(text)
     } else if (format === 'json') {
-      // Try Nemo backup JSON first; fall back to simple [{front,back}] array
       try {
         const backup = importFromJSON(text)
         if (backup.cards.length > 0) {
@@ -88,33 +81,14 @@ function parseFile(
           )
         }
       }
-    } else if (format === 'csv') {
-      // Use our new parseDelimited with the selected delimiter
-      const delimiter =
-        delimiterOption === 'custom'
-          ? customDelimiter || ','
-          : DELIMITER_MAP[delimiterOption]
+    } else {
       const rawLines = text.split(/\r?\n/)
       const dataText = skipFirstRow ? rawLines.slice(1).join('\n') : text
       cards = parseDelimited(dataText, delimiter)
-      // Fallback to the original CSV parser if nothing found
-      if (cards.length === 0 && format === 'csv') {
+      if (cards.length === 0) {
         const csvCards = importFromCSV(text)
         cards = csvCards
       }
-    } else if (format === 'tsv') {
-      const rawLines = text.split(/\r?\n/)
-      const dataText = skipFirstRow ? rawLines.slice(1).join('\n') : text
-      cards = parseDelimited(dataText, '\t')
-    } else {
-      // unknown — try tab then comma
-      const rawLines = text.split(/\r?\n/)
-      const dataText = skipFirstRow ? rawLines.slice(1).join('\n') : text
-      const delimiter =
-        delimiterOption === 'custom'
-          ? customDelimiter || '\t'
-          : DELIMITER_MAP[delimiterOption]
-      cards = parseDelimited(dataText, delimiter)
     }
 
     if (cards.length === 0) {
@@ -132,10 +106,15 @@ function parseFile(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ImportPage() {
+function ImportContent() {
   const router = useRouter()
-  const { folders, createDeck, createCard } = useLibraryStore()
+  const searchParams = useSearchParams()
+  const targetDeckId = searchParams.get('deckId')
+
+  const { decks, folders, createDeck, createCard } = useLibraryStore()
   const { addToast } = useAppStore()
+
+  const targetDeck = targetDeckId ? decks.find((d) => d.id === targetDeckId) : null
 
   // File state
   const [fileName, setFileName] = useState('')
@@ -144,8 +123,7 @@ export default function ImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Settings
-  const [delimiterOption, setDelimiterOption] = useState<DelimiterOption>('tab')
-  const [customDelimiter, setCustomDelimiter] = useState('')
+  const [delimiterRaw, setDelimiterRaw] = useState('\\t')
   const [skipFirstRow, setSkipFirstRow] = useState(false)
   const [deckName, setDeckName] = useState('')
   const [folderId, setFolderId] = useState<string | null>(null)
@@ -174,40 +152,22 @@ export default function ImportPage() {
         const name = file.name
         setFileName(name)
         setFileText(text)
-        // Auto-set deck name from filename (strip extension)
         const baseName = name.replace(/\.[^.]+$/, '')
-        setDeckName(baseName)
+        if (!targetDeckId) setDeckName(baseName)
 
-        const { cards, error } = parseFile(
-          name,
-          text,
-          delimiterOption,
-          customDelimiter,
-          skipFirstRow
-        )
+        const { cards, error } = parseFile(name, text, delimiterRaw, skipFirstRow)
         setParsedCards(cards.length > 0 ? cards : null)
         setParseError(error)
       }
       reader.readAsText(file)
     },
-    [delimiterOption, customDelimiter, skipFirstRow]
+    [delimiterRaw, skipFirstRow, targetDeckId]
   )
 
-  // Re-parse when settings change (if we already have a file loaded)
   const reParse = useCallback(
-    (
-      newDelimiter: DelimiterOption,
-      newCustom: string,
-      newSkip: boolean
-    ) => {
+    (newDelim: string, newSkip: boolean) => {
       if (!fileName || !fileText) return
-      const { cards, error } = parseFile(
-        fileName,
-        fileText,
-        newDelimiter,
-        newCustom,
-        newSkip
-      )
+      const { cards, error } = parseFile(fileName, fileText, newDelim, newSkip)
       setParsedCards(cards.length > 0 ? cards : null)
       setParseError(error)
     },
@@ -216,27 +176,17 @@ export default function ImportPage() {
 
   // ── Drag-and-drop ──────────────────────────────────────────────────────────
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(false)
-  }
-
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragOver(true) }
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragOver(false) }
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
     const file = e.dataTransfer.files[0]
     if (file) processFile(file)
   }
-
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) processFile(file)
-    // Reset the input so the same file can be re-selected
     e.target.value = ''
   }
 
@@ -246,14 +196,25 @@ export default function ImportPage() {
     if (!parsedCards || parsedCards.length === 0) return
     setImporting(true)
     try {
-      const name = deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'
-      const deck = createDeck(name, folderId)
-      for (const card of parsedCards) {
-        createCard(deck.id, card.front, card.back)
+      let finalDeckId: string
+
+      if (targetDeckId) {
+        finalDeckId = targetDeckId
+      } else {
+        const name = deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'
+        const deck = createDeck(name, folderId)
+        finalDeckId = deck.id
       }
+
+      for (const card of parsedCards) {
+        const type = detectCardType(card.front, card.back)
+        createCard(finalDeckId, card.front, card.back, type)
+      }
+
+      const label = targetDeck ? `"${targetDeck.name}"` : `"${deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'}"`
       addToast({
         type: 'success',
-        message: `Imported ${parsedCards.length} card${parsedCards.length !== 1 ? 's' : ''} into "${name}"`,
+        message: `Imported ${parsedCards.length} card${parsedCards.length !== 1 ? 's' : ''} into ${label}`,
       })
       router.push('/library')
     } catch (err) {
@@ -271,7 +232,7 @@ export default function ImportPage() {
     setFileText('')
     setParsedCards(null)
     setParseError(null)
-    setDeckName('')
+    if (!targetDeckId) setDeckName('')
     setFolderId(null)
   }
 
@@ -295,7 +256,7 @@ export default function ImportPage() {
             </Link>
             <span className="text-[var(--text-muted)]">/</span>
             <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-              Import Cards
+              {targetDeck ? `Import into "${targetDeck.name}"` : 'Import Cards'}
             </span>
           </div>
         }
@@ -388,46 +349,25 @@ export default function ImportPage() {
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-4">
                 <h2 className="text-sm font-semibold text-[var(--text-primary)]">Import Settings</h2>
 
-                {/* Delimiter selector */}
+                {/* Delimiter input */}
                 {showDelimiterSettings && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-[var(--text-secondary)]">Delimiter</label>
-                    <div className="space-y-1">
-                      {(Object.keys(DELIMITER_LABELS) as DelimiterOption[]).map((opt) => (
-                        <label
-                          key={opt}
-                          className="flex items-center gap-2 cursor-pointer group"
-                        >
-                          <input
-                            type="radio"
-                            name="delimiter"
-                            value={opt}
-                            checked={delimiterOption === opt}
-                            onChange={() => {
-                              setDelimiterOption(opt)
-                              reParse(opt, customDelimiter, skipFirstRow)
-                            }}
-                            className="accent-[var(--accent)]"
-                          />
-                          <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
-                            {DELIMITER_LABELS[opt]}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                    {delimiterOption === 'custom' && (
-                      <input
-                        type="text"
-                        placeholder="Enter delimiter…"
-                        value={customDelimiter}
-                        maxLength={4}
-                        onChange={(e) => {
-                          setCustomDelimiter(e.target.value)
-                          reParse(delimiterOption, e.target.value, skipFirstRow)
-                        }}
-                        className="mt-1 w-full h-7 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
-                      />
-                    )}
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">
+                      Delimiter
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="\t (tab), , (comma), | (pipe)…"
+                      value={delimiterRaw}
+                      onChange={(e) => {
+                        setDelimiterRaw(e.target.value)
+                        reParse(e.target.value, skipFirstRow)
+                      }}
+                      className="w-full h-8 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] font-mono"
+                    />
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      Use <code className="font-mono">\t</code> for tab (default)
+                    </p>
                   </div>
                 )}
 
@@ -438,41 +378,53 @@ export default function ImportPage() {
                     checked={skipFirstRow}
                     onChange={(e) => {
                       setSkipFirstRow(e.target.checked)
-                      reParse(delimiterOption, customDelimiter, e.target.checked)
+                      reParse(delimiterRaw, e.target.checked)
                     }}
                     className="accent-[var(--accent)]"
                   />
                   <span className="text-xs text-[var(--text-secondary)]">First row is header</span>
                 </label>
 
-                {/* Deck name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[var(--text-secondary)]">Deck name</label>
-                  <input
-                    type="text"
-                    placeholder="Enter deck name…"
-                    value={deckName}
-                    onChange={(e) => setDeckName(e.target.value)}
-                    className="w-full h-7 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
-                  />
-                </div>
+                {/* Target deck */}
+                {targetDeck ? (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Importing into</label>
+                    <div className="text-xs text-[var(--text-primary)] bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2.5 py-1.5 font-medium">
+                      {targetDeck.name}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Deck name */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Deck name</label>
+                      <input
+                        type="text"
+                        placeholder="Enter deck name…"
+                        value={deckName}
+                        onChange={(e) => setDeckName(e.target.value)}
+                        className="w-full h-7 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
+                      />
+                    </div>
 
-                {/* Target folder */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-[var(--text-secondary)]">Target folder</label>
-                  <select
-                    value={folderId ?? ''}
-                    onChange={(e) => setFolderId(e.target.value || null)}
-                    className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                  >
-                    <option value="">No folder</option>
-                    {folders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {/* Target folder */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Target folder</label>
+                      <select
+                        value={folderId ?? ''}
+                        onChange={(e) => setFolderId(e.target.value || null)}
+                        className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                      >
+                        <option value="">No folder</option>
+                        {folders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -491,13 +443,7 @@ export default function ImportPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleClear}
-                  >
-                    Clear
-                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleClear}>Clear</Button>
                   <Button
                     variant="primary"
                     size="sm"
@@ -524,12 +470,8 @@ export default function ImportPage() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-[var(--border)] bg-[var(--bg-hover)]">
-                          <th className="text-left px-4 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide w-1/2">
-                            Front
-                          </th>
-                          <th className="text-left px-4 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide w-1/2">
-                            Back
-                          </th>
+                          <th className="text-left px-4 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide w-1/2">Front</th>
+                          <th className="text-left px-4 py-2 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide w-1/2">Back</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -571,5 +513,13 @@ export default function ImportPage() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function ImportPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">Loading…</div>}>
+      <ImportContent />
+    </Suspense>
   )
 }

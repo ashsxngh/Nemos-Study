@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download } from 'lucide-react'
 import {
   DndContext,
   closestCenter,
@@ -154,6 +155,7 @@ interface DeckViewProps {
 }
 
 export function DeckView({ deckId, onStudy }: DeckViewProps) {
+  const router = useRouter()
   const { decks, getDeckCards, getDeckMastery, getDueCards, deleteCard, updateCard, resetCardSRS } = useLibraryStore()
   const deck = decks.find((d) => d.id === deckId)
   const cards = getDeckCards(deckId)
@@ -207,6 +209,9 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
             )}
           </div>
           <div className="flex gap-2 shrink-0">
+            <Button variant="ghost" size="sm" icon={<Download size={13} />} onClick={() => router.push(`/import?deckId=${deckId}`)}>
+              Import
+            </Button>
             <Button variant="ghost" size="sm" icon={<Plus size={13} />} onClick={() => setAddingCard(true)}>
               Add Card
             </Button>

@@ -240,14 +240,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   }
 
   const navigateToBreadcrumb = (index: number) => {
-    setFolderStack((prev) => {
-      const next = prev.slice(0, index + 1)
-      onFolderChange?.(next[next.length - 1] ?? null)
-      return next
-    })
+    const newStack = folderStack.slice(0, index + 1)
+    setFolderStack(newStack)
     setActiveDeckId(null)
     setSearch('')
     setActiveTags([])
+    onFolderChange?.(newStack[newStack.length - 1] ?? null)
   }
 
   // ── Open deck and remember it ─────────────────────────────────────────────

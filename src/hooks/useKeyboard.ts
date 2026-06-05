@@ -21,6 +21,7 @@ export function useKeyboard(shortcuts: Shortcut[]) {
         const ctrlMatch = shortcut.ctrl ? e.ctrlKey : true
         const shiftMatch = shortcut.shift ? e.shiftKey : !shortcut.shift || e.shiftKey
         const altMatch = shortcut.alt ? e.altKey : true
+        if (!shortcut.key) continue
         const keyMatch = e.key.toLowerCase() === shortcut.key.toLowerCase()
 
         if (keyMatch && metaMatch && ctrlMatch && altMatch) {

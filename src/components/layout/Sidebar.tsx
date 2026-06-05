@@ -15,11 +15,12 @@ import {
   Search,
   Settings,
   Trash2,
-  Download,
   Plus,
   User,
   ChevronDown,
   BookOpen,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
 
@@ -71,16 +72,15 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { sidebarCollapsed, toggleSidebar, openCommandPalette } = useAppStore()
-  const { decks, folders, cards, srsData, createDeck } = useLibraryStore()
+  const { decks, folders, cards, createDeck, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [expandedDecks, setExpandedDecks] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // New-card inbox count: cards with repetitions === 0
-  const inboxCount = cards.filter((c) => {
-    const srs = srsData[c.id]
-    return !srs || srs.repetitions === 0
-  }).length
+  // Today's work: new cards (within daily limit) + due reviews
+  const newCards = getNewCards()
+  const reviewsDue = getReviewsDue()
+  const inboxCount = newCards.length + reviewsDue.length
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0])
@@ -210,6 +210,26 @@ export function Sidebar() {
           active={isActive('/study')}
           collapsed={sidebarCollapsed}
           badge={inboxCount > 0 ? String(inboxCount > 99 ? '99+' : inboxCount) : undefined}
+        />
+
+        {/* New Cards */}
+        <NavItem
+          href="/study/session?mode=new"
+          label="New Cards"
+          icon={<Sparkles size={14} />}
+          active={false}
+          collapsed={sidebarCollapsed}
+          badge={newCards.length > 0 ? String(newCards.length > 99 ? '99+' : newCards.length) : undefined}
+        />
+
+        {/* Reviews */}
+        <NavItem
+          href="/study/session?mode=reviews"
+          label="Reviews"
+          icon={<RotateCcw size={14} />}
+          active={false}
+          collapsed={sidebarCollapsed}
+          badge={reviewsDue.length > 0 ? String(reviewsDue.length > 99 ? '99+' : reviewsDue.length) : undefined}
         />
 
         {NAV_ITEMS.map(({ id, label, href, icon: Icon }) => (
@@ -407,25 +427,6 @@ export function Sidebar() {
 
       {/* Bottom actions */}
       <div className="px-2 pb-2 pt-1 border-t border-[var(--border)] shrink-0 space-y-0.5">
-        {sidebarCollapsed ? (
-          <Tooltip content="Import" side="right">
-            <Link
-              href="/library?import=1"
-              className="flex items-center justify-center h-7 w-full rounded-[var(--radius-sm)] text-xs transition-colors text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
-            >
-              <Download size={13} className="shrink-0" />
-            </Link>
-          </Tooltip>
-        ) : (
-          <Link
-            href="/library?import=1"
-            className="flex items-center gap-2.5 h-7 px-2.5 rounded-[var(--radius-sm)] text-xs transition-colors text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
-          >
-            <Download size={13} className="shrink-0" />
-            Import
-          </Link>
-        )}
-
         {sidebarCollapsed ? (
           <Tooltip content="Settings" side="right">
             <button

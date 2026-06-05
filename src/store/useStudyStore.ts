@@ -36,6 +36,8 @@ interface StudyState {
   pushRedo: (cardId: string, newSRS: SRSData) => void
   popRedo: () => RedoEntry | undefined
   decrementIndex: () => void
+  requeueCurrentCard: () => void
+  removeCurrentCard: () => void
 }
 
 export const useStudyStore = create<StudyState>((set, get) => ({
@@ -116,4 +118,22 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       currentIndex: Math.max(0, s.currentIndex - 1),
       showAnswer: false,
     })),
+
+  requeueCurrentCard: () =>
+    set((s) => {
+      const card = s.queue[s.currentIndex]
+      if (!card) return s
+      return {
+        queue: [...s.queue, card],
+        currentIndex: s.currentIndex + 1,
+        showAnswer: false,
+      }
+    }),
+
+  removeCurrentCard: () =>
+    set((s) => {
+      const newQueue = [...s.queue]
+      newQueue.splice(s.currentIndex, 1)
+      return { queue: newQueue, showAnswer: false }
+    }),
 }))

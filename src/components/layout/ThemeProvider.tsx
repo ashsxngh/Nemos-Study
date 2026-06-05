@@ -8,7 +8,7 @@ import { CommandPalette } from './CommandPalette'
 import { ToastContainer } from '@/components/ui/Toast'
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { theme, setTheme, openCommandPalette, toggleSidebar } = useAppStore()
+  const { theme, openCommandPalette, toggleSidebar } = useAppStore()
   const router = useRouter()
   const [pendingG, setPendingG] = useState(false)
   const pendingGTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -45,13 +45,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       const target = e.target as HTMLElement
       const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
 
-      // Cmd+Shift+L — toggle theme
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault()
-        setTheme(theme === 'dark' ? 'light' : 'dark')
-        return
-      }
-
       // Alt+← — back navigation
       if (e.altKey && e.key === 'ArrowLeft') {
         e.preventDefault()
@@ -79,7 +72,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [theme, setTheme, pendingG, router])
+  }, [pendingG, router])
 
   return (
     <>
