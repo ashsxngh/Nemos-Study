@@ -9,7 +9,6 @@ import {
   RotateCcw,
   Shuffle,
   MoreHorizontal,
-  ChevronDown,
   Undo2,
   Pencil,
   Trash2,
@@ -91,10 +90,12 @@ function SessionContent() {
   const [showMoreRatings, setShowMoreRatings] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
-  // Progress tracking
+  // Progress tracking (reviews only — new cards excluded)
   const [initialQueueLength, setInitialQueueLength] = useState(0)
   const [rememberedCount, setRememberedCount] = useState(0)
   const [forgottenReviewCount, setForgottenReviewCount] = useState(0)
+  const [newCardReviewedCount, setNewCardReviewedCount] = useState(0)
+  const [newCardCorrectCount, setNewCardCorrectCount] = useState(0)
 
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | null>(null)
@@ -153,6 +154,8 @@ function SessionContent() {
     setInitialQueueLength(sessionCards.length)
     setRememberedCount(0)
     setForgottenReviewCount(0)
+    setNewCardReviewedCount(0)
+    setNewCardCorrectCount(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -230,11 +233,13 @@ function SessionContent() {
 
       reviewCard(card.id, rating)
 
-      // Update progress bar counters
-      if (rating >= 3) {
+      // Update progress bar counters (new cards excluded from review metrics)
+      if (isNew) {
+        setNewCardReviewedCount((c) => c + 1)
+        if (rating >= 3) setNewCardCorrectCount((c) => c + 1)
+      } else if (rating >= 3) {
         setRememberedCount((c) => c + 1)
-      } else if (!isNew) {
-        // Forgotten review card
+      } else {
         setForgottenReviewCount((c) => c + 1)
       }
 
@@ -374,8 +379,8 @@ function SessionContent() {
      SESSION COMPLETE
   ════════════════════════════════════════════════════════════ */
   if (isComplete) {
-    const correct = logs.filter((l) => l.rating >= 3).length
-    const totalLogged = logs.length
+    const totalLogged = logs.length - newCardReviewedCount
+    const correct = logs.filter((l) => l.rating >= 3).length - newCardCorrectCount
     const accuracy = totalLogged > 0 ? Math.round((correct / totalLogged) * 100) : 0
     const elapsed = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : 0
 
@@ -419,6 +424,8 @@ function SessionContent() {
                 setInitialQueueLength(cards.length)
                 setRememberedCount(0)
                 setForgottenReviewCount(0)
+                setNewCardReviewedCount(0)
+                setNewCardCorrectCount(0)
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
               style={{ background: 'var(--accent)', color: '#fff' }}
@@ -505,12 +512,15 @@ function SessionContent() {
       >
         <button
           onClick={() => { reset(); router.push('/study') }}
-          className="flex items-center gap-1.5 text-sm font-medium rounded-md px-2 py-1 transition-colors hover:bg-[#222225]"
-          style={{ color: '#e8e8ea' }}
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
+          style={{ color: '#6b6b72' }}
+          title="Exit session"
         >
-          {deckName}
-          <ChevronDown size={13} style={{ color: '#6b6b72' }} />
+          <ArrowLeft size={15} />
         </button>
+        <span className="text-sm font-medium" style={{ color: '#e8e8ea' }}>
+          {deckName}
+        </span>
 
         {isCurrentCardNew && (
           <span
@@ -558,14 +568,14 @@ function SessionContent() {
             >
               <ReviewCard card={currentCard} showAnswer={showAnswer} onTypedCheck={flipCard} />
 
-              {!showAnswer && currentCard.type !== 'typed' && (
+              {!showAnswer && currentCard.type !== 'typed' && currentCard.type !== 'cloze' && (
                 <button
                   onClick={flipCard}
                   className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-t hover:brightness-110 select-none"
                   style={{ background: '#1e1e20', borderColor: '#2a2a30', color: '#6b6b72' }}
                 >
                   <span style={{ fontSize: '1rem', lineHeight: 1 }}>↓</span>
-                  Next Side
+                  Show Answer
                   <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#0f0f11', border: '1px solid #2a2a30', color: '#6b6b72' }}>
                     SPACE
                   </kbd>

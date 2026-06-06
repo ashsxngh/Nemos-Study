@@ -57,7 +57,7 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
   const notifications: { id: string; message: string; time: string }[] = []
 
   return (
-    <header className="flex items-center h-11 px-4 border-b border-[var(--border)] bg-[var(--bg-surface)] shrink-0 gap-3">
+    <header className="flex items-center h-11 px-5 border-b border-[var(--border)] bg-[var(--bg-surface)] shrink-0 gap-3">
       <div className="flex-1 min-w-0">
         {breadcrumbs ?? (
           title && (

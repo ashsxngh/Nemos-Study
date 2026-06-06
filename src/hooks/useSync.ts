@@ -277,6 +277,7 @@ export interface SyncStatus {
   syncing: boolean
   lastSynced: Date | null
   error: string | null
+  manualPush: () => Promise<void>
 }
 
 export function useSync(): SyncStatus {
@@ -536,5 +537,10 @@ export function useSync(): SyncStatus {
     }
   }, [])
 
-  return { syncing, lastSynced, error }
+  const manualPush = useCallback(async () => {
+    const state = useLibraryStore.getState()
+    await handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
+  }, [handlePush])
+
+  return { syncing, lastSynced, error, manualPush }
 }

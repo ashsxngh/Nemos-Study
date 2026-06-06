@@ -13,6 +13,7 @@ interface AppState {
   lastOpenNoteId: string | null
   syncing: boolean
   syncError: string | null
+  manualSync: (() => Promise<void>) | null
 
   setTheme: (theme: Theme) => void
   toggleSidebar: () => void
@@ -25,6 +26,7 @@ interface AppState {
   setLastOpenNote: (id: string | null) => void
   setSyncing: (v: boolean) => void
   setSyncError: (e: string | null) => void
+  setManualSync: (fn: (() => Promise<void>) | null) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -38,6 +40,7 @@ export const useAppStore = create<AppState>()(
       lastOpenNoteId: null,
       syncing: false,
       syncError: null,
+      manualSync: null,
 
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -57,6 +60,7 @@ export const useAppStore = create<AppState>()(
       setLastOpenNote: (id) => set({ lastOpenNoteId: id }),
       setSyncing: (v) => set({ syncing: v }),
       setSyncError: (e) => set({ syncError: e }),
+      setManualSync: (fn) => set({ manualSync: fn }),
     }),
     {
       name: 'nemos-app',

@@ -117,11 +117,13 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteFolder: (id) => {
-        const { folders, decks, cards, srsData, fsrsData, pendingDeletes } = get()
+        const { folders, decks, cards, srsData, fsrsData, reviewLogs, sessions, pendingDeletes } = get()
         const descendantIds = getAllDescendantFolderIds(folders, id)
         const allFolderIds = [id, ...descendantIds]
         const deckIdsToDelete = decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id)
         const cardIdsToDelete = cards.filter((c) => deckIdsToDelete.includes(c.deckId)).map((c) => c.id)
+        const cardIdSet = new Set(cardIdsToDelete)
+        const deckIdSet = new Set(deckIdsToDelete)
         const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         cardIdsToDelete.forEach((cid) => {
@@ -134,6 +136,8 @@ export const useLibraryStore = create<LibraryState>()(
           cards: cards.filter((c) => !cardIdsToDelete.includes(c.id)),
           srsData: newSrsData,
           fsrsData: newFsrsData,
+          reviewLogs: reviewLogs.filter((l) => !cardIdSet.has(l.cardId)),
+          sessions: sessions.filter((s) => !deckIdSet.has(s.deckId ?? '')),
           pendingDeletes: {
             folders: [...pendingDeletes.folders, ...allFolderIds],
             decks: [...pendingDeletes.decks, ...deckIdsToDelete],
@@ -175,6 +179,7 @@ export const useLibraryStore = create<LibraryState>()(
         const deck = decks.find((d) => d.id === id)
         const deckCards = cards.filter((c) => c.deckId === id)
         const cardIdsToDelete = deckCards.map((c) => c.id)
+        const cardIdSet = new Set(cardIdsToDelete)
         const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         cardIdsToDelete.forEach((cid) => {
@@ -212,6 +217,8 @@ export const useLibraryStore = create<LibraryState>()(
           cards: s.cards.filter((c) => c.deckId !== id),
           srsData: newSrsData,
           fsrsData: newFsrsData,
+          reviewLogs: s.reviewLogs.filter((l) => !cardIdSet.has(l.cardId)),
+          sessions: s.sessions.filter((sess) => sess.deckId !== id),
           pendingDeletes: {
             ...s.pendingDeletes,
             decks: [...s.pendingDeletes.decks, id],
@@ -339,6 +346,7 @@ export const useLibraryStore = create<LibraryState>()(
 
         if (algorithm === 'fsrs') {
           const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
+          const wasNew = existing.repetitions === 0
           const fsrsParams = {
             ...DEFAULT_FSRS_PARAMS,
             weights: fsrsWeights,
@@ -347,6 +355,10 @@ export const useLibraryStore = create<LibraryState>()(
             requestRetention: fsrsTargetRetention,
           }
           const updated = fsrsSchedule(existing, rating, fsrsParams)
+          // Cards graduating from new should be reviewable the same day
+          if (wasNew && rating >= 3) {
+            updated.dueDate = new Date().toISOString()
+          }
 
           // Derive a compatible interval for the review log
           const daysDiff =
@@ -371,6 +383,7 @@ export const useLibraryStore = create<LibraryState>()(
         } else {
           const existing = get().srsData[cardId]
           if (!existing) return
+          const wasNew = existing.repetitions === 0
           const updated = scheduleCard(existing, rating, {
             easyBonus,
             hardInterval,
@@ -378,6 +391,10 @@ export const useLibraryStore = create<LibraryState>()(
             startingEase,
             graduatingInterval,
           })
+          // Cards graduating from new should be reviewable the same day
+          if (wasNew && rating >= 3) {
+            updated.dueDate = new Date().toISOString()
+          }
           const log: ReviewLog = {
             id: generateId(),
             sessionId: 'manual',

@@ -127,6 +127,8 @@ function ImportContent() {
   const [skipFirstRow, setSkipFirstRow] = useState(false)
   const [deckName, setDeckName] = useState('')
   const [folderId, setFolderId] = useState<string | null>(null)
+  const [importMode, setImportMode] = useState<'new' | 'existing'>('new')
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null)
 
   // Parsed result
   const [parsedCards, setParsedCards] = useState<ParsedCard[] | null>(null)
@@ -200,6 +202,8 @@ function ImportContent() {
 
       if (targetDeckId) {
         finalDeckId = targetDeckId
+      } else if (importMode === 'existing' && selectedDeckId) {
+        finalDeckId = selectedDeckId
       } else {
         const name = deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'
         const deck = createDeck(name, folderId)
@@ -211,7 +215,14 @@ function ImportContent() {
         createCard(finalDeckId, card.front, card.back, type)
       }
 
-      const label = targetDeck ? `"${targetDeck.name}"` : `"${deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'}"`
+      const existingName = importMode === 'existing' && selectedDeckId
+        ? decks.find((d) => d.id === selectedDeckId)?.name
+        : null
+      const label = targetDeck
+        ? `"${targetDeck.name}"`
+        : existingName
+        ? `"${existingName}"`
+        : `"${deckName.trim() || fileName.replace(/\.[^.]+$/, '') || 'Imported Deck'}"`
       addToast({
         type: 'success',
         message: `Imported ${parsedCards.length} card${parsedCards.length !== 1 ? 's' : ''} into ${label}`,
@@ -395,34 +406,81 @@ function ImportContent() {
                   </div>
                 ) : (
                   <>
-                    {/* Deck name */}
+                    {/* Import mode toggle */}
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-[var(--text-secondary)]">Deck name</label>
-                      <input
-                        type="text"
-                        placeholder="Enter deck name…"
-                        value={deckName}
-                        onChange={(e) => setDeckName(e.target.value)}
-                        className="w-full h-7 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
-                      />
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Import into</label>
+                      <div className="flex gap-1 p-0.5 bg-[var(--bg-hover)] rounded-[var(--radius-sm)]">
+                        <button
+                          onClick={() => setImportMode('new')}
+                          className={cn(
+                            'flex-1 text-[10px] py-1 rounded-sm font-medium transition-colors',
+                            importMode === 'new'
+                              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+                              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                          )}
+                        >
+                          New Deck
+                        </button>
+                        <button
+                          onClick={() => setImportMode('existing')}
+                          className={cn(
+                            'flex-1 text-[10px] py-1 rounded-sm font-medium transition-colors',
+                            importMode === 'existing'
+                              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+                              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                          )}
+                        >
+                          Existing Deck
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Target folder */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-[var(--text-secondary)]">Target folder</label>
-                      <select
-                        value={folderId ?? ''}
-                        onChange={(e) => setFolderId(e.target.value || null)}
-                        className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                      >
-                        <option value="">No folder</option>
-                        {folders.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {importMode === 'existing' ? (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-[var(--text-secondary)]">Select deck</label>
+                        <select
+                          value={selectedDeckId ?? ''}
+                          onChange={(e) => setSelectedDeckId(e.target.value || null)}
+                          className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                        >
+                          <option value="">Choose a deck…</option>
+                          {decks.filter((d) => !d.isArchived).map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Deck name */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-[var(--text-secondary)]">Deck name</label>
+                          <input
+                            type="text"
+                            placeholder="Enter deck name…"
+                            value={deckName}
+                            onChange={(e) => setDeckName(e.target.value)}
+                            className="w-full h-7 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
+                          />
+                        </div>
+
+                        {/* Target folder */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-[var(--text-secondary)]">Target folder</label>
+                          <select
+                            value={folderId ?? ''}
+                            onChange={(e) => setFolderId(e.target.value || null)}
+                            className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          >
+                            <option value="">No folder</option>
+                            {folders.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -448,7 +506,10 @@ function ImportContent() {
                     variant="primary"
                     size="sm"
                     loading={importing}
-                    disabled={!parsedCards || parsedCards.length === 0 || importing}
+                    disabled={
+                      !parsedCards || parsedCards.length === 0 || importing ||
+                      (!targetDeckId && importMode === 'existing' && !selectedDeckId)
+                    }
                     onClick={handleImport}
                   >
                     Import {parsedCards ? `${parsedCards.length} cards` : 'cards'}
