@@ -73,7 +73,7 @@ export const useNotesStore = create<NoteState>()(
     {
       name: 'nemos-notes',
       skipHydration: true,
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
     }
   )
 )

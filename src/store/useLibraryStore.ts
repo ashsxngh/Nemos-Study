@@ -555,7 +555,7 @@ export const useLibraryStore = create<LibraryState>()(
     {
       name: 'nemos-library',
       skipHydration: true,
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
     }
   )
 )

@@ -52,7 +52,7 @@ function toSnake(obj: unknown): unknown {
   return obj
 }
 
-// ─── Realtime-pending tracker ─────────────────────────────────────────────────
+// ─── Realtime-pending tracker (for insert echo dedup only) ───────────────────
 
 const realtimePending = {
   folders:    new Set<string>(),
@@ -62,36 +62,20 @@ const realtimePending = {
   notes:      new Set<string>(),
 }
 
-function mergeWithPending<T extends { id: string }>(
-  label: string,
+// Merge server rows with local rows, always keeping local-only items.
+// Local-only items are cards/decks/etc that were created locally but haven't
+// been pushed to Supabase yet (e.g. created within the debounce window before reload).
+// Server wins for any item that exists on both sides.
+function mergeKeepLocal<T extends { id: string }>(
   serverRows: T[],
   currentRows: T[],
-  pendingIds: Set<string>,
 ): T[] {
   const serverMap = new Map(serverRows.map((r) => [r.id, r]))
-  const serverIds = [...serverMap.keys()]
-  const currentIds = currentRows.map((r) => r.id)
-  const pendingArr = [...pendingIds]
-
-  const realtimeOnly = currentRows.filter(
-    (r) => !serverMap.has(r.id) && pendingIds.has(r.id),
-  )
-  const dropped = currentRows.filter(
-    (r) => !serverMap.has(r.id) && !pendingIds.has(r.id),
-  )
-
-  if (dropped.length > 0 || realtimeOnly.length > 0 || currentIds.some(id => !serverMap.has(id))) {
-    console.log(`[SYNC] mergeWithPending(${label})`, {
-      serverIds,
-      currentIds,
-      pendingIds: pendingArr,
-      kept_from_realtime: realtimeOnly.map(r => r.id),
-      dropped: dropped.map(r => r.id),
-      result_count: serverRows.length + realtimeOnly.length,
-    })
+  const localOnly = currentRows.filter((r) => !serverMap.has(r.id))
+  if (localOnly.length > 0) {
+    console.log(`[SYNC] mergeKeepLocal: preserving ${localOnly.length} local-only item(s)`, localOnly.map(r => r.id))
   }
-
-  return [...serverRows, ...realtimeOnly]
+  return [...serverRows, ...localOnly]
 }
 
 // ─── Pull ─────────────────────────────────────────────────────────────────────
@@ -102,7 +86,6 @@ async function pullFromSupabase(): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
 
-  console.log('[SYNC] pullFromSupabase: START — realtimePending.decks:', [...realtimePending.decks])
 
   const [
     foldersRes,
@@ -129,11 +112,6 @@ async function pullFromSupabase(): Promise<void> {
   const reviewLogs = (logsRes.data  ?? []).map((r) => toCamel(r) as ReviewLog)
   const notes   = (notesRes.data   ?? []).map((r) => toCamel(r) as Note)
 
-  console.log('[SYNC] pullFromSupabase: GOT RESULTS —', {
-    decks_from_server: decks.map(d => ({ id: d.id, name: d.name })),
-    realtimePending_decks_now: [...realtimePending.decks],
-    store_decks_now: useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })),
-  })
 
   // srsData is stored as a Record<cardId, SRSData> in the store
   const srsData: Record<string, SRSData> = {}
@@ -143,19 +121,17 @@ async function pullFromSupabase(): Promise<void> {
   }
 
   useLibraryStore.setState((current) => ({
-    folders:    mergeWithPending('folders',    folders,    current.folders,    realtimePending.folders),
-    decks:      mergeWithPending('decks',      decks,      current.decks,      realtimePending.decks),
-    cards:      mergeWithPending('cards',      cards,      current.cards,      realtimePending.cards),
+    folders:    mergeKeepLocal(folders,    current.folders),
+    decks:      mergeKeepLocal(decks,      current.decks),
+    cards:      mergeKeepLocal(cards,      current.cards),
     srsData:    { ...current.srsData, ...srsData },
     sessions,
-    reviewLogs: mergeWithPending('reviewLogs', reviewLogs, current.reviewLogs, realtimePending.reviewLogs),
+    reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs),
   }))
   useNotesStore.setState((current) => ({
-    notes: mergeWithPending('notes', notes, current.notes, realtimePending.notes),
+    notes: mergeKeepLocal(notes, current.notes),
   }))
 
-  console.log('[SYNC] pullFromSupabase: DONE — clearing realtimePending. Store decks after merge:',
-    useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })))
 
   realtimePending.folders.clear()
   realtimePending.decks.clear()
@@ -333,11 +309,9 @@ export function useSync(): SyncStatus {
   useEffect(() => {
     let cancelled = false
 
-    // Rehydrate localStorage synchronously first so the UI has instant data
-    // from the previous session. This must happen before pullFromSupabase() so
-    // the async Supabase response (and any realtime events that arrive while it
-    // is in-flight) always lands on top of the localStorage snapshot — never
-    // the other way around.
+    // Rehydrate from localStorage first so the UI has instant data.
+    // Pull from Supabase then merges on top (server wins for conflicts,
+    // local-only items are preserved in case push hasn't completed yet).
     useLibraryStore.persist.rehydrate()
     useNotesStore.persist.rehydrate()
 
@@ -380,11 +354,10 @@ export function useSync(): SyncStatus {
         console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
         return
       }
-      console.log('[SYNC] store change detected — scheduling push in 1.5s. decks:', state.decks.map(d => ({ id: d.id, name: d.name })))
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
       libraryDebounceRef.current = setTimeout(() => {
         handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
-      }, 1500)
+      }, 400)
     })
     return () => {
       unsub()
@@ -399,7 +372,7 @@ export function useSync(): SyncStatus {
       if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current)
       notesDebounceRef.current = setTimeout(() => {
         handleNotesPush(state.notes)
-      }, 1500)
+      }, 400)
     })
     return () => {
       unsub()
@@ -444,30 +417,19 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'decks' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
-        console.log(`[SYNC] realtime decks ${eventType}`, {
-          payload_new: newRow,
-          realtimePending_before: [...realtimePending.decks],
-          store_decks_before: useLibraryStore.getState().decks.map(d => ({ id: d.id, name: d.name })),
-        })
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const deck = toCamel(newRow) as Deck
-          if (eventType === 'INSERT') {
-            realtimePending.decks.add(deck.id)
-            console.log('[SYNC] realtime decks INSERT — added to realtimePending:', deck.id, '— realtimePending now:', [...realtimePending.decks])
-          }
+          if (eventType === 'INSERT') realtimePending.decks.add(deck.id)
           useLibraryStore.setState((state) => {
             const exists = state.decks.some((d) => d.id === deck.id)
-            const next = {
+            return {
               decks: exists
                 ? state.decks.map((d) => d.id === deck.id ? deck : d)
                 : [...state.decks, deck],
             }
-            console.log(`[SYNC] realtime decks ${eventType} — store updated. exists=${exists}, new deck count:`, next.decks.length)
-            return next
           })
         } else if (eventType === 'DELETE') {
           const id = (oldRow as { id: string }).id
-          console.log('[SYNC] realtime decks DELETE id:', id)
           useLibraryStore.setState((state) => ({
             decks: state.decks.filter((d) => d.id !== id),
           }))
