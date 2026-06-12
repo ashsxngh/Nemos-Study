@@ -237,6 +237,7 @@ export const useLibraryStore = create<LibraryState>()(
           type,
           front,
           back,
+          hint: '',
           tags: [],
           isPinned: false,
           isArchived: false,

@@ -323,7 +323,9 @@ export function importFromJSON(jsonText: string): ImportedBackup {
   return {
     folders: Array.isArray(parsed.folders) ? parsed.folders : [],
     decks: Array.isArray(parsed.decks) ? parsed.decks : [],
-    cards: Array.isArray(parsed.cards) ? parsed.cards : [],
+    cards: Array.isArray(parsed.cards)
+      ? parsed.cards.map((c: Card) => ({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' }))
+      : [],
     srsData:
       parsed.srsData && typeof parsed.srsData === 'object'
         ? (parsed.srsData as Record<string, SRSData>)

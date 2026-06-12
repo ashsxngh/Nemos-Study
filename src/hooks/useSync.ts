@@ -184,7 +184,10 @@ async function pushToSupabase(
       ? supabase.from('decks').upsert(decks.map(withUserId), upsertOpts)
       : null,
     cards.length
-      ? supabase.from('cards').upsert(cards.map(withUserId), upsertOpts)
+      ? supabase.from('cards').upsert(
+          cards.map((c) => withUserId({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' })),
+          upsertOpts,
+        )
       : null,
     Object.keys(srsData).length
       ? supabase.from('srs_data').upsert(

@@ -17,7 +17,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta name="theme-color" content="#0c0c0d" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body className="h-full">
+      <body className="h-full" suppressHydrationWarning>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
