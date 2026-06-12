@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle } from 'lucide-react'
+import { Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAppStore } from '@/store/useAppStore'
@@ -9,6 +9,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { exportAsJSON, exportDecksAsCSV } from '@/lib/export'
 import { importFromCSV, importFromJSON } from '@/lib/import'
+import { optimizeFsrsWeights, MIN_REVIEWS_FOR_OPTIMIZATION } from '@/lib/srs'
 import { cn } from '@/lib/utils'
 import type { Theme } from '@/lib/types'
 
@@ -144,9 +145,40 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 export function SettingsPage() {
   const [activeSection, setActiveSection] = useState('appearance')
   const { theme, setTheme, addToast } = useAppStore()
-  const { folders, decks, cards, srsData, sessions, createCard } = useLibraryStore()
+  const { folders, decks, cards, srsData, sessions, createCard, reviewLogs } = useLibraryStore()
   const settings = useSettingsStore()
   const { updateSettings, resetSettings } = settings
+
+  // ── FSRS weight optimization ───────────────────────────────────────────────
+  const handleOptimizeWeights = () => {
+    const result = optimizeFsrsWeights(
+      reviewLogs.map((l) => ({ cardId: l.cardId, rating: l.rating, reviewedAt: l.reviewedAt }))
+    )
+    if (!result) {
+      addToast({
+        type: 'warning',
+        message: `Not enough review history yet (needs ~${MIN_REVIEWS_FOR_OPTIMIZATION}+ repeat reviews). Keep studying and try again.`,
+      })
+      return
+    }
+    updateSettings({ fsrsWeights: result.weights })
+    addToast({ type: 'success', message: `Weights optimized from ${result.reviewCount} reviews.` })
+  }
+
+  // ── Projected daily load ───────────────────────────────────────────────────
+  const projectedLoad = (() => {
+    const timed = reviewLogs.filter((l) => l.responseMs > 0)
+    const avgSec = timed.length > 0
+      ? Math.min(30, Math.max(3, timed.reduce((s, l) => s + l.responseMs, 0) / timed.length / 1000 + 3))
+      : 9
+    const weekAgo = Date.now() - 7 * 86400000
+    const recentReviews = reviewLogs.filter((l) => new Date(l.reviewedAt).getTime() >= weekAgo).length
+    const avgDailyReviews = Math.round(recentReviews / 7)
+    const projectedCards = settings.newCardsPerDay + Math.min(settings.maxReviewsPerDay, avgDailyReviews)
+    const minutes = Math.max(1, Math.round((projectedCards * avgSec) / 60))
+    const pct = Math.min(100, Math.round((minutes / Math.max(settings.dailyMinuteTarget, 1)) * 100))
+    return { minutes, pct, projectedCards }
+  })()
 
   // CSV import state
   const csvInputRef = useRef<HTMLInputElement>(null)
@@ -438,6 +470,24 @@ export function SettingsPage() {
                     </div>
                   </div>
 
+                  {/* Optimize weights from review history */}
+                  <div className="mt-4 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-[var(--accent-subtle)] flex items-center justify-center shrink-0">
+                        <Sparkles size={15} className="text-[var(--accent)]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[var(--text-primary)]">Optimize weights</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                          Tune the scheduler to your actual recall — based on {reviewLogs.length.toLocaleString()} reviews.
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="primary" size="sm" onClick={handleOptimizeWeights}>
+                      Optimize Now
+                    </Button>
+                  </div>
+
                   <div className="mt-3 flex justify-end">
                     <Button
                       variant="ghost"
@@ -462,6 +512,34 @@ export function SettingsPage() {
           {activeSection === 'burnout' && (
             <section>
               <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Burnout &amp; Workload</h2>
+
+              {/* Projected daily load */}
+              <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4 mb-3 flex items-center gap-5">
+                <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="28" fill="transparent" stroke="var(--bg-active)" strokeWidth="5" />
+                    <circle
+                      cx="32" cy="32" r="28" fill="transparent"
+                      stroke="var(--accent)" strokeWidth="5" strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 28}
+                      strokeDashoffset={2 * Math.PI * 28 * (1 - projectedLoad.pct / 100)}
+                    />
+                  </svg>
+                  <span className="absolute text-[10px] font-bold text-[var(--text-primary)]">
+                    {projectedLoad.pct}%
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">
+                    ~{projectedLoad.minutes} min/day
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    Projected load — about {projectedLoad.projectedCards} cards/day at your current limits
+                    and review pace, vs your {settings.dailyMinuteTarget} min daily target.
+                  </p>
+                </div>
+              </div>
+
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
 
                 {/* Burnout warning - cards */}
@@ -523,6 +601,16 @@ export function SettingsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Auto-suspend leeches */}
+                <SettingRow label="Auto-suspend leeches" description="Archive cards automatically once they hit the leech threshold, so they stop clogging reviews">
+                  <Toggle checked={settings.autoSuspendLeeches} onChange={(v) => updateSettings({ autoSuspendLeeches: v })} />
+                </SettingRow>
+
+                {/* Session progress bar */}
+                <SettingRow label="Show session progress bar" description="Display the green/red progress bar at the top of study sessions">
+                  <Toggle checked={settings.showSessionProgress} onChange={(v) => updateSettings({ showSessionProgress: v })} />
+                </SettingRow>
 
                 {/* Auto-advance */}
                 <SettingRow label="Auto-advance after rating" description="Automatically move to the next card after rating">

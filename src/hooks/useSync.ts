@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
+import { migrateLegacyIds } from '@/lib/migrateLegacyIds'
 import type {
   Folder,
   Deck,
@@ -315,12 +316,18 @@ export function useSync(): SyncStatus {
     // Rehydrate from localStorage first so the UI has instant data.
     // Pull from Supabase then merges on top (server wins for conflicts,
     // local-only items are preserved in case push hasn't completed yet).
-    useLibraryStore.persist.rehydrate()
-    useNotesStore.persist.rehydrate()
+    const init = async () => {
+      await useLibraryStore.persist.rehydrate()
+      await useNotesStore.persist.rehydrate()
+      // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
+      // don't fail Supabase's uuid columns. No-op when nothing is legacy.
+      migrateLegacyIds()
+      console.log('[SYNC] useSync mount: starting initial pull')
+      await pullFromSupabase()
+    }
 
-    console.log('[SYNC] useSync mount: starting initial pull')
     setSyncing(true)
-    pullFromSupabase()
+    init()
       .then(() => {
         if (!cancelled) {
           console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')

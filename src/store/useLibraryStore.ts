@@ -343,7 +343,24 @@ export const useLibraryStore = create<LibraryState>()(
           fsrsWeights,
           fsrsTargetRetention,
           fsrsMaxInterval,
+          leechThreshold,
+          autoSuspendLeeches,
         } = useSettingsStore.getState()
+
+        // Auto-suspend leeches: archive + tag the card once lapses hit the threshold
+        const suspendIfLeech = (cards: Card[], lapses: number): Card[] => {
+          if (!autoSuspendLeeches || rating !== 1 || lapses < leechThreshold) return cards
+          return cards.map((c) =>
+            c.id === cardId
+              ? {
+                  ...c,
+                  isArchived: true,
+                  tags: c.tags.includes('leech') ? c.tags : [...c.tags, 'leech'],
+                  updatedAt: new Date().toISOString(),
+                }
+              : c
+          )
+        }
 
         if (algorithm === 'fsrs') {
           const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
@@ -380,6 +397,7 @@ export const useLibraryStore = create<LibraryState>()(
           set((s) => ({
             fsrsData: { ...s.fsrsData, [cardId]: updated },
             reviewLogs: [...s.reviewLogs, log],
+            cards: suspendIfLeech(s.cards, updated.lapses),
           }))
         } else {
           const existing = get().srsData[cardId]
@@ -410,6 +428,7 @@ export const useLibraryStore = create<LibraryState>()(
           set((s) => ({
             srsData: { ...s.srsData, [cardId]: updated },
             reviewLogs: [...s.reviewLogs, log],
+            cards: suspendIfLeech(s.cards, updated.lapses),
           }))
         }
       },
@@ -423,7 +442,8 @@ export const useLibraryStore = create<LibraryState>()(
         const { cards, fsrsData, srsData } = get()
         const { algorithm, newCardsPerDay } = useSettingsStore.getState()
         const todayStr = new Date().toISOString().slice(0, 10)
-        const pool = deckId ? cards.filter((c) => c.deckId === deckId) : cards
+        const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
+          .filter((c) => !c.isArchived)
 
         // Count new cards already studied today (repetitions went from 0→1 today)
         const studiedNewToday = pool.filter((c) => {
@@ -455,7 +475,8 @@ export const useLibraryStore = create<LibraryState>()(
       getReviewsDue: (deckId) => {
         const { cards, fsrsData, srsData, decks, folders } = get()
         const { algorithm } = useSettingsStore.getState()
-        const pool = deckId ? cards.filter((c) => c.deckId === deckId) : cards
+        const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
+          .filter((c) => !c.isArchived)
         const now = new Date()
 
         // Collect IDs of cards pulled forward by exam deadlines

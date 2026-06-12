@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
-  Archive, Trash2, Play, GripVertical,
+  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown,
 } from 'lucide-react'
 import {
   DndContext,
@@ -38,7 +38,7 @@ const FOLDER_COLORS: Record<FolderColor, string> = {
   pink: 'text-pink-400',
 }
 
-type ViewMode = 'grid' | 'list'
+type ViewMode = 'grid' | 'list' | 'table'
 type SortBy = 'alpha' | 'due' | 'mastery' | 'recent'
 
 interface LibraryBrowserProps {
@@ -370,12 +370,24 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               >
                 <List size={13} />
               </button>
+              <button
+                onClick={() => setView('table')}
+                title="Tree table view"
+                className={cn(
+                  'w-7 h-7 flex items-center justify-center transition-colors',
+                  view === 'table'
+                    ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
+                )}
+              >
+                <Rows3 size={13} />
+              </button>
             </div>
           </div>
         </div>
 
         {/* Sort + tag filter toolbar (shown when there are decks) */}
-        {visibleDecks.length > 0 && (
+        {view !== 'table' && visibleDecks.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 mb-5">
             {/* Sort dropdown */}
             <select
@@ -447,14 +459,19 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         )}
 
         {/* Search empty state */}
-        {visibleFolders.length === 0 && visibleDecks.length === 0 && search && (
+        {view !== 'table' && visibleFolders.length === 0 && visibleDecks.length === 0 && search && (
           <div className="flex flex-col items-center justify-center py-16 text-[var(--text-muted)] text-sm">
             No results for &quot;{search}&quot;
           </div>
         )}
 
+        {/* Tree table view */}
+        {view === 'table' && (visibleFolders.length > 0 || visibleDecks.length > 0 || search) && (
+          <LibraryTreeTable rootId={currentFolderId} search={search} onOpenDeck={openDeck} />
+        )}
+
         {/* Folders section */}
-        {visibleFolders.length > 0 && (
+        {view !== 'table' && visibleFolders.length > 0 && (
           <section className="mb-6">
             <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-3">
               Folders
@@ -515,7 +532,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         )}
 
         {/* Decks section */}
-        {sortedDecks.length > 0 && (
+        {view !== 'table' && sortedDecks.length > 0 && (
           <section>
             <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-3">
               Decks
@@ -580,7 +597,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         )}
 
         {/* Empty filtered state — decks exist but filtered out */}
-        {visibleDecks.length > 0 && sortedDecks.length === 0 && (
+        {view !== 'table' && visibleDecks.length > 0 && sortedDecks.length === 0 && (
           <div className="flex flex-col items-center justify-center py-10 text-[var(--text-muted)] text-xs">
             No decks match the selected tags.
           </div>
@@ -601,6 +618,231 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         ) : null}
       </DragOverlay>
     </DndContext>
+  )
+}
+
+// ── Tree table view ───────────────────────────────────────────────────────────
+
+interface DeckCounts {
+  newCount: number
+  dueCount: number
+  total: number
+}
+
+function LibraryTreeTable({
+  rootId,
+  search,
+  onOpenDeck,
+}: {
+  rootId: string | null
+  search: string
+  onOpenDeck: (deckId: string) => void
+}) {
+  const {
+    folders, decks, getDeckCards, getNewCards, getReviewsDue,
+    updateFolder, deleteFolder, updateDeck, deleteDeck,
+  } = useLibraryStore()
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const q = search.toLowerCase()
+
+  const toggleFolder = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const deckCounts = (deckId: string): DeckCounts => ({
+    newCount: getNewCards(deckId).length,
+    dueCount: getReviewsDue(deckId).length,
+    total: getDeckCards(deckId).length,
+  })
+
+  const folderCounts = (folderId: string): DeckCounts => {
+    const direct = decks
+      .filter((d) => d.folderId === folderId)
+      .map((d) => deckCounts(d.id))
+    const nested = folders
+      .filter((f) => f.parentId === folderId)
+      .map((f) => folderCounts(f.id))
+    return [...direct, ...nested].reduce(
+      (acc, c) => ({
+        newCount: acc.newCount + c.newCount,
+        dueCount: acc.dueCount + c.dueCount,
+        total: acc.total + c.total,
+      }),
+      { newCount: 0, dueCount: 0, total: 0 }
+    )
+  }
+
+  // Search helpers — a folder is visible if it or anything inside it matches
+  const subtreeMatches = (folderId: string): boolean => {
+    if (decks.some((d) => d.folderId === folderId && d.name.toLowerCase().includes(q))) return true
+    return folders.some(
+      (f) => f.parentId === folderId && (f.name.toLowerCase().includes(q) || subtreeMatches(f.id))
+    )
+  }
+
+  const folderMenu = (folder: FolderType): DropdownItem[] => [
+    {
+      label: folder.isStarred ? 'Unstar' : 'Star',
+      icon: <Star size={12} />,
+      onClick: () => updateFolder(folder.id, { isStarred: !folder.isStarred }),
+    },
+    {
+      label: folder.isArchived ? 'Unarchive' : 'Archive',
+      icon: <Archive size={12} />,
+      onClick: () => updateFolder(folder.id, { isArchived: !folder.isArchived }),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 size={12} />,
+      danger: true,
+      onClick: () => {
+        if (window.confirm(`Delete folder "${folder.name}" and all its contents?`)) {
+          deleteFolder(folder.id)
+        }
+      },
+    },
+  ]
+
+  const deckMenu = (deck: DeckType): DropdownItem[] => [
+    {
+      label: deck.isStarred ? 'Unstar' : 'Star',
+      icon: <Star size={12} />,
+      onClick: () => updateDeck(deck.id, { isStarred: !deck.isStarred }),
+    },
+    {
+      label: deck.isArchived ? 'Unarchive' : 'Archive',
+      icon: <Archive size={12} />,
+      onClick: () => updateDeck(deck.id, { isArchived: !deck.isArchived }),
+    },
+    {
+      label: 'Delete',
+      icon: <Trash2 size={12} />,
+      danger: true,
+      onClick: () => {
+        if (window.confirm(`Delete deck "${deck.name}"?`)) {
+          deleteDeck(deck.id)
+        }
+      },
+    },
+  ]
+
+  const renderRows = (parentId: string | null, depth: number): React.ReactNode[] => {
+    const rows: React.ReactNode[] = []
+
+    const childFolders = folders.filter((f) => {
+      if (f.parentId !== parentId) return false
+      return !q || f.name.toLowerCase().includes(q) || subtreeMatches(f.id)
+    })
+    const childDecks = decks.filter((d) => {
+      if (d.folderId !== parentId) return false
+      return !q || d.name.toLowerCase().includes(q)
+    })
+
+    for (const folder of childFolders) {
+      const counts = folderCounts(folder.id)
+      // Searching auto-expands; otherwise respect collapsed state
+      const isOpen = q ? true : !collapsed.has(folder.id)
+      rows.push(
+        <div
+          key={`folder-${folder.id}`}
+          className="grid grid-cols-12 gap-2 items-center px-4 py-2.5 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
+          onClick={() => toggleFolder(folder.id)}
+        >
+          <div
+            className="col-span-6 flex items-center gap-2 min-w-0"
+            style={{ paddingLeft: depth * 20 }}
+          >
+            {isOpen ? (
+              <ChevronDown size={13} className="text-[var(--text-muted)] shrink-0" />
+            ) : (
+              <ChevronRight size={13} className="text-[var(--text-muted)] shrink-0" />
+            )}
+            <Folder size={15} className={cn('shrink-0', FOLDER_COLORS[folder.color])} />
+            <span className="text-sm font-medium text-[var(--text-primary)] truncate">{folder.name}</span>
+            {folder.isStarred && <Star size={11} className="text-yellow-400 fill-yellow-400 shrink-0" />}
+          </div>
+          <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">
+            {counts.newCount > 0 ? counts.newCount : '–'}
+          </div>
+          <div className={cn('col-span-1 text-center text-xs font-semibold', counts.dueCount > 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+            {counts.dueCount > 0 ? counts.dueCount : '–'}
+          </div>
+          <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">{counts.total}</div>
+          <div className="col-span-3 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+            <ItemDropdown items={folderMenu(folder)} />
+          </div>
+        </div>
+      )
+      if (isOpen) rows.push(...renderRows(folder.id, depth + 1))
+    }
+
+    for (const deck of childDecks) {
+      const counts = deckCounts(deck.id)
+      rows.push(
+        <div
+          key={`deck-${deck.id}`}
+          className="grid grid-cols-12 gap-2 items-center px-4 py-2.5 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group border-l-2 border-transparent hover:border-[var(--accent)]"
+          onClick={() => onOpenDeck(deck.id)}
+        >
+          <div
+            className="col-span-6 flex items-center gap-2 min-w-0"
+            style={{ paddingLeft: depth * 20 + 17 }}
+          >
+            <BookOpen size={14} className="text-[var(--accent)] shrink-0" />
+            <span className="text-sm text-[var(--text-primary)] truncate group-hover:text-[var(--accent)] transition-colors">
+              {deck.name}
+            </span>
+            {deck.isStarred && <Star size={11} className="text-yellow-400 fill-yellow-400 shrink-0" />}
+          </div>
+          <div className={cn('col-span-1 text-center text-xs', counts.newCount > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]')}>
+            {counts.newCount > 0 ? counts.newCount : '–'}
+          </div>
+          <div className={cn('col-span-1 text-center text-xs font-semibold', counts.dueCount > 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+            {counts.dueCount > 0 ? counts.dueCount : '–'}
+          </div>
+          <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">{counts.total}</div>
+          <div className="col-span-3 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <a
+              href={`/study/session?deck=${deck.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
+            >
+              <Play size={9} /> Study
+            </a>
+            <ItemDropdown items={deckMenu(deck)} />
+          </div>
+        </div>
+      )
+    }
+
+    return rows
+  }
+
+  const rows = renderRows(rootId, 0)
+
+  return (
+    <div className="border border-[var(--border)] rounded-[var(--radius)] overflow-hidden bg-[var(--bg-surface)]">
+      {/* Header */}
+      <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-hover)] text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+        <div className="col-span-6">Name</div>
+        <div className="col-span-1 text-center">New</div>
+        <div className="col-span-1 text-center">Due</div>
+        <div className="col-span-1 text-center">Total</div>
+        <div className="col-span-3 text-right">Actions</div>
+      </div>
+      {rows.length > 0 ? (
+        <div className="divide-y divide-[var(--border)]">{rows}</div>
+      ) : (
+        <div className="py-10 text-center text-xs text-[var(--text-muted)]">
+          {search ? `No results for "${search}"` : 'Nothing here yet.'}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -29,6 +29,8 @@ interface SettingsData {
   showAnswerTimer: boolean
   autoAdvance: boolean
   leechThreshold: number
+  autoSuspendLeeches: boolean
+  showSessionProgress: boolean
 
   // Goals
   dailyCardTarget: number
@@ -75,6 +77,8 @@ const defaults: SettingsData = {
   showAnswerTimer: false,
   autoAdvance: false,
   leechThreshold: 8,
+  autoSuspendLeeches: false,
+  showSessionProgress: true,
 
   dailyCardTarget: 50,
   dailyMinuteTarget: 30,

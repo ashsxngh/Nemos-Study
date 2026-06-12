@@ -52,9 +52,10 @@ export function fsrsSchedule(
   state: FSRSState,
   grade: 1 | 2 | 3 | 4,
   params: FSRSParams = DEFAULT_FSRS_PARAMS,
+  reviewedAt?: Date,
 ): FSRSState {
   const w = params.weights
-  const now = new Date()
+  const now = reviewedAt ?? new Date()
 
   // Days since last review (for retrievability calculation)
   const t = state.lastReviewedAt
@@ -150,6 +151,93 @@ export function fsrsRetrievability(state: FSRSState): number {
   const t =
     (Date.now() - new Date(state.lastReviewedAt).getTime()) / (1000 * 60 * 60 * 24)
   return Math.pow(1 + t / (9 * state.stability), -1)
+}
+
+// ── FSRS weight optimization ──────────────────────────────────────────────────
+
+export interface OptimizeInput {
+  cardId: string
+  rating: Difficulty
+  reviewedAt: string
+}
+
+export interface OptimizeResult {
+  weights: number[]
+  reviewCount: number   // number of predictions the fit was based on
+  logLoss: number
+}
+
+export const MIN_REVIEWS_FOR_OPTIMIZATION = 50
+
+/**
+ * Coarse-grid optimizer: replays the review history and tunes two knobs —
+ * a scale on the initial-stability weights (w0–w3) and a shift on the
+ * stability-growth weight (w8) — to minimize log-loss between predicted
+ * retrievability and actual recall outcomes (rating 1 = forgot).
+ */
+export function optimizeFsrsWeights(
+  logs: OptimizeInput[],
+  base: FSRSParams = DEFAULT_FSRS_PARAMS,
+): OptimizeResult | null {
+  // Group logs by card, chronologically
+  const byCard = new Map<string, OptimizeInput[]>()
+  for (const log of logs) {
+    const list = byCard.get(log.cardId)
+    if (list) list.push(log)
+    else byCard.set(log.cardId, [log])
+  }
+  for (const list of byCard.values()) {
+    list.sort((a, b) => new Date(a.reviewedAt).getTime() - new Date(b.reviewedAt).getTime())
+  }
+
+  function evaluate(weights: number[]): { loss: number; n: number } {
+    const params: FSRSParams = { ...base, weights }
+    let loss = 0
+    let n = 0
+    for (const [cardId, list] of byCard) {
+      let state = fsrsInitCard(cardId, 'optimizer')
+      for (const log of list) {
+        const reviewedAt = new Date(log.reviewedAt)
+        // Predict recall for every review after the first
+        if (state.lastReviewedAt && state.stability > 0) {
+          const t = Math.max(
+            0,
+            (reviewedAt.getTime() - new Date(state.lastReviewedAt).getTime()) / 86400000,
+          )
+          const r = Math.min(0.99, Math.max(0.01, Math.pow(1 + t / (9 * state.stability), -1)))
+          const recalled = log.rating >= 2
+          loss += recalled ? -Math.log(r) : -Math.log(1 - r)
+          n++
+        }
+        state = fsrsSchedule(state, log.rating, params, reviewedAt)
+      }
+    }
+    return { loss: n > 0 ? loss / n : Infinity, n }
+  }
+
+  // Check we have enough inter-review predictions to fit against
+  const baseline = evaluate(base.weights)
+  if (baseline.n < MIN_REVIEWS_FOR_OPTIMIZATION) return null
+
+  const stabilityScales = [0.5, 0.65, 0.8, 1.0, 1.25, 1.5, 1.8, 2.2]
+  const growthShifts = [-0.4, -0.2, 0, 0.2, 0.4]
+
+  let best = { weights: base.weights, loss: baseline.loss }
+  for (const scale of stabilityScales) {
+    for (const shift of growthShifts) {
+      const weights = [...base.weights]
+      for (let i = 0; i <= 3; i++) weights[i] = Math.max(0.05, weights[i] * scale)
+      weights[8] = weights[8] + shift
+      const { loss } = evaluate(weights)
+      if (loss < best.loss) best = { weights, loss }
+    }
+  }
+
+  return {
+    weights: best.weights.map((w) => Math.round(w * 10000) / 10000),
+    reviewCount: baseline.n,
+    logLoss: Math.round(best.loss * 10000) / 10000,
+  }
 }
 
 export interface SRSSettings {

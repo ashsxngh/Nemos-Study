@@ -14,6 +14,8 @@ import {
   Trash2,
   History,
   RefreshCw,
+  Focus,
+  X,
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -81,7 +83,7 @@ function SessionContent() {
     cards: allCards,
   } = useLibraryStore()
 
-  const { studyShortcuts, algorithm } = useSettingsStore()
+  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget } = useSettingsStore()
 
   const cardShownAtRef = useRef<number>(Date.now())
 
@@ -99,6 +101,9 @@ function SessionContent() {
 
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | null>(null)
+
+  // Zen mode — distraction-free fullscreen session
+  const [zenMode, setZenMode] = useState(false)
 
   // Options menu
   const [showOptionsMenu, setShowOptionsMenu] = useState(false)
@@ -194,6 +199,33 @@ function SessionContent() {
     if (algorithm === 'fsrs') return (fsrsData[currentCard.id]?.repetitions ?? 0) === 0
     return (srsData[currentCard.id]?.repetitions ?? 0) === 0
   })()
+
+  /* Card metadata — last seen + difficulty, derived from SRS data */
+  const cardMeta = (() => {
+    if (!currentCard) return null
+    const lastReviewedAt = algorithm === 'fsrs'
+      ? fsrsData[currentCard.id]?.lastReviewedAt
+      : srsData[currentCard.id]?.lastReviewedAt
+    if (!lastReviewedAt) return null
+
+    const days = Math.floor((Date.now() - new Date(lastReviewedAt).getTime()) / 86400000)
+    const lastSeen = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
+
+    let difficulty: 'Easy' | 'Medium' | 'Hard'
+    if (algorithm === 'fsrs') {
+      const d = fsrsData[currentCard.id]?.difficulty ?? 0
+      difficulty = d > 7 ? 'Hard' : d > 4.5 ? 'Medium' : 'Easy'
+    } else {
+      const ef = srsData[currentCard.id]?.easeFactor ?? 2.5
+      difficulty = ef < 2.0 ? 'Hard' : ef < 2.4 ? 'Medium' : 'Easy'
+    }
+    return { lastSeen, difficulty }
+  })()
+
+  /* Daily progress — today's reviews vs daily card target */
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayReviewCount = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === todayStr).length
+  const dailyPct = Math.min(100, Math.round((todayReviewCount / Math.max(dailyCardTarget, 1)) * 100))
 
   /* ── Rate a card ── */
   const handleRate = useCallback(
@@ -336,6 +368,16 @@ function SessionContent() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
         handleUndo()
+        return
+      }
+
+      if (e.key === 'Escape') {
+        setZenMode(false)
+        return
+      }
+
+      if ((e.key === 'z' || e.key === 'Z') && !e.ctrlKey && !e.metaKey) {
+        setZenMode((v) => !v)
         return
       }
 
@@ -492,20 +534,26 @@ function SessionContent() {
     .sort((a, b) => new Date(b.reviewedAt).getTime() - new Date(a.reviewedAt).getTime())
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#1a1a1c' }}>
+    <div
+      className={cn('flex flex-col', zenMode ? 'fixed inset-0 z-50' : 'h-full')}
+      style={{ background: '#1a1a1c' }}
+    >
       {/* ── Progress bar ── */}
-      <div className="h-[3px] w-full shrink-0 flex" style={{ background: '#2a2a30' }}>
-        <div
-          className="h-full transition-all duration-300"
-          style={{ width: `${greenPct}%`, background: '#4ade80' }}
-        />
-        <div
-          className="h-full transition-all duration-300"
-          style={{ width: `${redPct}%`, background: '#f87171' }}
-        />
-      </div>
+      {showSessionProgress && !zenMode && (
+        <div className="h-[3px] w-full shrink-0 flex" style={{ background: '#2a2a30' }}>
+          <div
+            className="h-full transition-all duration-300"
+            style={{ width: `${greenPct}%`, background: '#4ade80' }}
+          />
+          <div
+            className="h-full transition-all duration-300"
+            style={{ width: `${redPct}%`, background: '#f87171' }}
+          />
+        </div>
+      )}
 
       {/* ── Top bar ── */}
+      {!zenMode && (
       <div
         className="flex items-center h-11 px-4 gap-3 shrink-0"
         style={{ background: '#1a1a1c', borderBottom: '1px solid #2a2a30' }}
@@ -533,6 +581,34 @@ function SessionContent() {
 
         <div className="flex-1" />
 
+        {/* Daily progress */}
+        <div
+          className="hidden md:flex items-center gap-2 mr-1"
+          title={`${todayReviewCount} of ${dailyCardTarget} cards reviewed today`}
+        >
+          <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: '#6b6b72' }}>
+            Today
+          </span>
+          <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: '#2a2a30' }}>
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${dailyPct}%`, background: '#818cf8' }}
+            />
+          </div>
+          <span className="text-[10px] tabular-nums font-semibold" style={{ color: '#818cf8' }}>
+            {dailyPct}%
+          </span>
+        </div>
+
+        <button
+          onClick={() => setZenMode(true)}
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
+          style={{ color: '#6b6b72' }}
+          title="Zen mode (Z)"
+        >
+          <Focus size={14} />
+        </button>
+
         <button
           onClick={handleShuffle}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
@@ -546,10 +622,39 @@ function SessionContent() {
           {currentIndex + 1} / {queue.length}
         </span>
       </div>
+      )}
+
+      {/* ── Zen mode exit button ── */}
+      {zenMode && (
+        <button
+          onClick={() => setZenMode(false)}
+          className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
+          style={{ background: '#222225', border: '1px solid #2a2a30', color: '#6b6b72' }}
+          title="Exit Zen mode (Esc)"
+        >
+          <X size={12} />
+          Exit Zen
+        </button>
+      )}
 
       {/* ── Scrollable card area ── */}
       <div className="flex-1 px-4 py-6 overflow-y-auto">
-        <div className="w-full max-w-2xl mx-auto pt-6">
+        <div className={cn('w-full max-w-2xl mx-auto', zenMode ? 'pt-12' : 'pt-6')}>
+
+          {/* Zen mode header — deck chip + counter */}
+          {zenMode && (
+            <div className="flex flex-col items-center gap-2 mb-8 animate-fade-in">
+              <span
+                className="text-[10px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
+                style={{ background: '#1c1c2e', color: '#818cf8', border: '1px solid #2a2a50' }}
+              >
+                {deckName}
+              </span>
+              <span className="text-xs tabular-nums" style={{ color: '#6b6b72' }}>
+                Card {currentIndex + 1} of {queue.length}
+              </span>
+            </div>
+          )}
 
           {/* Card with swipe animation */}
           <div
@@ -567,6 +672,34 @@ function SessionContent() {
               }}
             >
               <ReviewCard card={currentCard} showAnswer={showAnswer} onTypedCheck={flipCard} />
+
+              {/* Card meta — last seen + difficulty */}
+              {cardMeta && (
+                <div
+                  className="flex items-center justify-between px-4 py-2 border-t"
+                  style={{ borderColor: '#2a2a30' }}
+                >
+                  <span className="text-[11px]" style={{ color: '#6b6b72' }}>
+                    Last seen {cardMeta.lastSeen}
+                  </span>
+                  <span className="text-[11px]" style={{ color: '#6b6b72' }}>
+                    Difficulty:{' '}
+                    <span
+                      className="font-medium"
+                      style={{
+                        color:
+                          cardMeta.difficulty === 'Hard'
+                            ? '#f87171'
+                            : cardMeta.difficulty === 'Medium'
+                              ? '#fbbf24'
+                              : '#4ade80',
+                      }}
+                    >
+                      {cardMeta.difficulty}
+                    </span>
+                  </span>
+                </div>
+              )}
 
               {!showAnswer && currentCard.type !== 'typed' && currentCard.type !== 'cloze' && (
                 <button
@@ -611,6 +744,7 @@ function SessionContent() {
         style={{ background: '#1a1a1c', borderTop: '1px solid #2a2a30' }}
       >
         {/* ← Back */}
+        {!zenMode && (
         <button
           onClick={handleBack}
           disabled={!canGoBack}
@@ -625,6 +759,7 @@ function SessionContent() {
         >
           <ArrowLeft size={15} />
         </button>
+        )}
 
         {/* ↩ Undo */}
         {undoStack.length > 0 && (
@@ -640,6 +775,7 @@ function SessionContent() {
         )}
 
         {/* → Skip */}
+        {!zenMode && (
         <button
           onClick={handleSkip}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:brightness-110"
@@ -648,6 +784,7 @@ function SessionContent() {
         >
           <ArrowRight size={15} />
         </button>
+        )}
 
         <div className="flex-1" />
 
@@ -698,7 +835,7 @@ function SessionContent() {
         <div className="flex-1" />
 
         {/* … Options */}
-        <div className="relative">
+        <div className={cn('relative', zenMode && 'hidden')}>
           <button
             ref={optionsButtonRef}
             onClick={() => setShowOptionsMenu((v) => !v)}
