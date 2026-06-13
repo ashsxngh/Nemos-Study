@@ -26,9 +26,10 @@ import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, truncate } from '@/lib/utils'
 import { isDue } from '@/lib/srs'
-import type { Card } from '@/lib/types'
+import type { Card, SRSData } from '@/lib/types'
 
 const TYPE_LABELS: Record<string, string> = {
   basic: 'Basic',
@@ -42,13 +43,29 @@ const TYPE_LABELS: Record<string, string> = {
 interface SortableCardRowProps {
   card: Card
   isDueCard: boolean
+  srs?: SRSData
   onEdit: (card: Card) => void
   onDelete: (id: string) => void
   onResetSRS: (id: string) => void
 }
 
-function SortableCardRow({ card, isDueCard, onEdit, onDelete, onResetSRS }: SortableCardRowProps) {
+function fmtDate(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function fmtRelative(iso: string | null) {
+  if (!iso) return null
+  const diff = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(diff / 86400000)
+  if (days === 0) return 'today'
+  if (days === 1) return '1d ago'
+  return `${days}d ago`
+}
+
+function SortableCardRow({ card, isDueCard, srs, onEdit, onDelete, onResetSRS }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
+  const { cardFields } = useSettingsStore()
   const {
     attributes,
     listeners,
@@ -92,6 +109,36 @@ function SortableCardRow({ card, isDueCard, onEdit, onDelete, onResetSRS }: Sort
           {isDueCard && <Badge variant="accent">Due</Badge>}
         </div>
         <span className="text-xs text-[var(--text-muted)] truncate block">{truncate(card.back, 60)}</span>
+        {Object.values(cardFields).some(Boolean) && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+            {cardFields.progress && (
+              <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                <span className="w-2.5 h-2.5 rounded-full border border-[var(--text-muted)] inline-block shrink-0" />
+                {srs ? `${srs.interval} DAY${srs.interval === 1 ? '' : 'S'}` : 'NEW'}
+              </span>
+            )}
+            {cardFields.retention && srs && (
+              <span className="text-[11px] text-[var(--text-muted)]">↺ {srs.masteryPercent}%</span>
+            )}
+            {cardFields.lastReview && (
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {srs?.lastReviewedAt ? `Reviewed ${fmtRelative(srs.lastReviewedAt)}` : 'Never reviewed'}
+              </span>
+            )}
+            {cardFields.dueDate && srs && (
+              <span className="text-[11px] text-[var(--text-muted)]">Due {fmtDate(srs.dueDate)}</span>
+            )}
+            {cardFields.tagsList && card.tags.length > 0 && (
+              <span className="text-[11px] text-[var(--text-muted)]">{card.tags.map((t) => `#${t}`).join(' ')}</span>
+            )}
+            {cardFields.createdAt && (
+              <span className="text-[11px] text-[var(--text-muted)]">Created {fmtDate(card.createdAt)}</span>
+            )}
+            {cardFields.updatedAt && (
+              <span className="text-[11px] text-[var(--text-muted)]">Updated {fmtDate(card.updatedAt)}</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -269,6 +316,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
                       key={card.id}
                       card={card}
                       isDueCard={due}
+                      srs={srs}
                       onEdit={setEditingCard}
                       onDelete={setConfirmDeleteId}
                       onResetSRS={(id) => resetCardSRS(id)}

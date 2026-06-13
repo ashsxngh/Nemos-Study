@@ -284,7 +284,7 @@ function parseHeaderFormat(text: string): { front: string; back: string }[] {
 export function detectFormat(
   filename: string,
   text: string
-): 'anki' | 'csv' | 'tsv' | 'markdown' | 'json' | 'unknown' {
+): 'anki' | 'apkg' | 'csv' | 'tsv' | 'markdown' | 'json' | 'unknown' {
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
 
   // Extension-based detection (highest priority)
@@ -293,7 +293,7 @@ export function detectFormat(
   if (ext === 'csv') return 'csv'
   if (ext === 'tsv') return 'tsv'
   if (ext === 'anki') return 'anki'
-  if (ext === 'apkg') return 'unknown'
+  if (ext === 'apkg') return 'apkg'
 
   // Content sniffing for .txt and other extensions
   const firstLine = text.trimStart().split(/\r?\n/)[0] ?? ''

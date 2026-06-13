@@ -57,7 +57,7 @@ interface LibraryState {
   setSRSData: (cardId: string, srs: SRSData) => void
   removeLastLog: () => void
   resetCardSRS: (cardId: string) => void
-  clearPendingDeletes: () => void
+  clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[] }) => void
 
   // Query helpers
   getNewCards: (deckId?: string) => Card[]
@@ -433,8 +433,17 @@ export const useLibraryStore = create<LibraryState>()(
         }
       },
 
-      clearPendingDeletes: () => {
-        set({ pendingDeletes: { folders: [], decks: [], cards: [] } })
+      clearPendingDeletes: (processed) => {
+        const folderSet = new Set(processed.folders)
+        const deckSet   = new Set(processed.decks)
+        const cardSet   = new Set(processed.cards)
+        set((s) => ({
+          pendingDeletes: {
+            folders: s.pendingDeletes.folders.filter((id) => !folderSet.has(id)),
+            decks:   s.pendingDeletes.decks.filter((id) => !deckSet.has(id)),
+            cards:   s.pendingDeletes.cards.filter((id) => !cardSet.has(id)),
+          },
+        }))
       },
 
       // ── Query helpers ────────────────────────────────────────────────────────

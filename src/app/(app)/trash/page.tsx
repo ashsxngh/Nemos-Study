@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { useTrashStore, type TrashEntry } from '@/store/useTrashStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
 const TRASH_TTL_DAYS = 14
@@ -116,6 +117,38 @@ export default function TrashPage() {
     purgeExpired()
   }, [purgeExpired])
 
+  // Direct Supabase deletion — safety net in case the earlier pendingDeletes
+  // push silently failed and the row is still live in the database.
+  function deleteFromSupabase(entry: TrashEntry) {
+    if (!isSupabaseConfigured()) return
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      if (entry.type === 'card' && entry.card) {
+        supabase.from('srs_data').delete().eq('card_id', entry.card.id).then(() => {
+          supabase.from('cards').delete().eq('id', entry.card!.id)
+        })
+      } else if (entry.type === 'deck' && entry.deck) {
+        const cardIds = (entry.deckCards ?? []).map((c) => c.id)
+        const run = async () => {
+          if (cardIds.length) {
+            await supabase.from('srs_data').delete().in('card_id', cardIds)
+            await supabase.from('cards').delete().in('id', cardIds)
+          }
+          await supabase.from('decks').delete().eq('id', entry.deck!.id)
+        }
+        run()
+      } else if (entry.type === 'note' && entry.note) {
+        supabase.from('notes').delete().eq('id', entry.note.id)
+      }
+    })
+  }
+
+  function handleForeverDelete(entry: TrashEntry) {
+    remove(entry.id)
+    deleteFromSupabase(entry)
+  }
+
   function handleRestore(entry: TrashEntry) {
     if (entry.type === 'card' && entry.card) {
       useLibraryStore.setState((s) => ({
@@ -172,7 +205,11 @@ export default function TrashPage() {
                 <Button
                   variant="danger"
                   size="sm"
-                  onClick={() => { clear(); setConfirmClear(false) }}
+                  onClick={() => {
+                    items.forEach((entry) => deleteFromSupabase(entry))
+                    clear()
+                    setConfirmClear(false)
+                  }}
                 >
                   Yes, clear all
                 </Button>
@@ -233,7 +270,7 @@ export default function TrashPage() {
                       key={entry.id}
                       entry={entry}
                       onRestore={() => handleRestore(entry)}
-                      onDelete={() => remove(entry.id)}
+                      onDelete={() => handleForeverDelete(entry)}
                     />
                   ))}
                 </div>

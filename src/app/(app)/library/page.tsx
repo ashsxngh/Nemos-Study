@@ -65,6 +65,7 @@ export default function LibraryPage() {
       <CreateFolderDialog
         open={folderDialogOpen}
         onClose={() => setFolderDialogOpen(false)}
+        defaultParentId={currentFolderId}
       />
       <CreateDeckDialog
         open={deckDialogOpen}

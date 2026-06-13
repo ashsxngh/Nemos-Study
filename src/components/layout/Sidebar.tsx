@@ -22,6 +22,7 @@ import {
   Inbox,
   RefreshCw,
   Cloud,
+  WifiOff,
 } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
 import { cn } from '@/lib/utils'
@@ -46,7 +47,7 @@ const STUDY_ITEMS = [
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncing, manualSync } = useAppStore()
+  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncing, syncError, manualSync } = useAppStore()
   const { decks, folders, cards, createDeck, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -100,50 +101,52 @@ export function Sidebar() {
           </div>
         </div>
 
-        <div className="px-1.5 pt-2 pb-1 space-y-0.5">
+        <div className="flex flex-col items-center pt-2 pb-1 gap-0.5">
           <Tooltip content="Search" shortcut={['Ctrl', 'K']} side="right">
-            <button onClick={openCommandPalette} className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors w-full">
+            <button onClick={openCommandPalette} className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">
               <Search size={14} />
             </button>
           </Tooltip>
         </div>
 
-        <nav className="px-1.5 space-y-0.5">
+        <nav className="flex flex-col items-center gap-0.5">
           {STUDY_ITEMS.map(({ id, label, href, icon: Icon, countKey }) => (
             <Tooltip key={id} content={label} side="right">
-              <div className="relative">
-                <Link href={href} className={cn('flex items-center justify-center w-9 h-9 rounded-lg transition-colors w-full', isActive(href) ? 'nav-active' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]')}>
+              <div className="relative w-9 h-9">
+                <Link href={href} className={cn('flex items-center justify-center w-9 h-9 rounded-lg transition-colors', isActive(href) ? 'nav-active' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]')}>
                   <Icon size={14} />
                 </Link>
                 {counts[countKey] > 0 && (
-                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[var(--accent)] rounded-full" />
+                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-[var(--accent)] rounded-full pointer-events-none" />
                 )}
               </div>
             </Tooltip>
           ))}
-          <div className="h-px bg-[var(--border)] mx-1 my-1" />
+          <div className="h-px bg-[var(--border)] w-6 my-1" />
           {NAV_ITEMS.map(({ id, label, href, icon: Icon }) => (
             <Tooltip key={id} content={label} side="right">
-              <Link href={href} className={cn('flex items-center justify-center w-9 h-9 rounded-lg transition-colors w-full', isActive(href) ? 'nav-active' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]')}>
+              <Link href={href} className={cn('flex items-center justify-center w-9 h-9 rounded-lg transition-colors', isActive(href) ? 'nav-active' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]')}>
                 <Icon size={14} />
               </Link>
             </Tooltip>
           ))}
         </nav>
 
-        <div className="mt-auto px-1.5 pb-2 pt-1 border-t border-[var(--border)] space-y-0.5">
-          <Tooltip content={syncing ? 'Saving…' : 'Save to cloud'} side="right">
-            <button onClick={() => manualSync?.()} disabled={!manualSync || syncing} className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors w-full disabled:opacity-40">
-              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
-            </button>
-          </Tooltip>
+        <div className="mt-auto flex flex-col items-center pb-2 pt-1 border-t border-[var(--border)] gap-0.5">
+          {syncError && (
+            <Tooltip content="Sync failed — click to retry" side="right">
+              <button onClick={() => manualSync?.()} className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[var(--danger-subtle)] transition-colors">
+                <WifiOff size={13} className="text-[var(--danger)]" />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip content="Settings" side="right">
-            <button onClick={() => setSettingsOpen(true)} className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors w-full">
+            <button onClick={() => setSettingsOpen(true)} className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
               <Settings size={13} />
             </button>
           </Tooltip>
           <Tooltip content="Trash" side="right">
-            <Link href="/trash" className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors w-full">
+            <Link href="/trash" className="flex items-center justify-center w-9 h-9 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
               <Trash2 size={13} />
             </Link>
           </Tooltip>
@@ -317,16 +320,16 @@ export function Sidebar() {
 
       {/* Bottom actions */}
       <div className="px-3 pb-3 pt-2 border-t border-[var(--border)] shrink-0 space-y-0.5">
-        {/* Sync status */}
-        <button
-          onClick={() => manualSync?.()}
-          disabled={!manualSync || syncing}
-          className="flex items-center gap-2.5 h-8 px-2.5 w-full rounded-lg text-xs transition-colors text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <RefreshCw size={13} className={cn('shrink-0', syncing && 'animate-spin text-[var(--accent)]')} />
-          <span className="flex-1 text-left">{syncing ? 'Saving…' : 'Save to cloud'}</span>
-          {!syncing && <Cloud size={11} className="text-[var(--text-muted)]" />}
-        </button>
+        {/* Sync status — only visible on error */}
+        {syncError && (
+          <button
+            onClick={() => manualSync?.()}
+            className="flex items-center gap-2.5 h-8 px-2.5 w-full rounded-lg text-xs transition-colors text-[var(--danger)] hover:bg-[var(--danger-subtle)]"
+          >
+            <WifiOff size={13} className="shrink-0" />
+            <span className="flex-1 text-left">Sync failed — retry</span>
+          </button>
+        )}
 
         <button
           onClick={() => setSettingsOpen(true)}

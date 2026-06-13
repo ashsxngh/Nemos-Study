@@ -49,6 +49,17 @@ interface SettingsData {
     skip: string        // skip card
     back: string        // go back
   }
+
+  // Card appearance (deck page)
+  cardFields: {
+    progress: boolean
+    lastReview: boolean
+    dueDate: boolean
+    retention: boolean
+    tagsList: boolean
+    createdAt: boolean
+    updatedAt: boolean
+  }
 }
 
 interface SettingsState extends SettingsData {
@@ -93,6 +104,16 @@ const defaults: SettingsData = {
     remembered: ' ',
     skip: 'ArrowRight',
     back: 'ArrowLeft',
+  },
+
+  cardFields: {
+    progress: true,
+    lastReview: false,
+    dueDate: false,
+    retention: false,
+    tagsList: false,
+    createdAt: false,
+    updatedAt: false,
   },
 }
 

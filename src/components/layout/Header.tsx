@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bell, Sun, Moon, User, RefreshCw, WifiOff, CheckCircle2 } from 'lucide-react'
+import { Bell, Sun, Moon, User, WifiOff, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/store/useAppStore'
 import { Button } from '@/components/ui/Button'
@@ -16,7 +16,7 @@ interface HeaderProps {
 }
 
 export function Header({ title, actions, breadcrumbs }: HeaderProps) {
-  const { theme, setTheme, toasts, syncing, syncError } = useAppStore()
+  const { theme, setTheme, toasts, syncError, manualSync } = useAppStore()
   const isDark = theme === 'dark'
   const router = useRouter()
 
@@ -69,12 +69,11 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
       <div className="flex items-center gap-1 shrink-0">
         {actions}
 
-        {syncing && (
-          <RefreshCw size={12} className="animate-spin text-[var(--accent)] shrink-0" aria-label="Syncing" />
-        )}
-        {!syncing && syncError && (
-          <Tooltip content="Sync error">
-            <WifiOff size={12} className="text-[var(--danger)] shrink-0" aria-label="Sync error" />
+        {syncError && (
+          <Tooltip content="Sync failed — click to retry" side="bottom">
+            <button onClick={() => manualSync?.()} className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)] hover:bg-[var(--danger-subtle)] transition-colors">
+              <WifiOff size={12} className="text-[var(--danger)]" aria-label="Sync error" />
+            </button>
           </Tooltip>
         )}
 

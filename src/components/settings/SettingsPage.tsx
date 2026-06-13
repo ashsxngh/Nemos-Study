@@ -308,7 +308,7 @@ export function SettingsPage() {
           {activeSection === 'appearance' && (
             <section>
               <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Appearance</h2>
-              <div className="space-y-5">
+              <div className="space-y-6">
                 <div>
                   <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">Theme</label>
                   <div className="flex gap-2">
@@ -327,6 +327,71 @@ export function SettingsPage() {
                         {label}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* Card appearance */}
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)] mb-0.5">Customize card appearance</p>
+                  <p className="text-xs text-[var(--text-muted)] mb-3">Choose what information appears under a card in the deck page.</p>
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-2.5 mb-4">
+                    {(
+                      [
+                        { key: 'progress', label: 'Progress' },
+                        { key: 'lastReview', label: 'Last review' },
+                        { key: 'dueDate', label: 'Due date' },
+                        { key: 'retention', label: 'Retention' },
+                        { key: 'tagsList', label: 'Tags list' },
+                        { key: 'createdAt', label: 'Created at' },
+                        { key: 'updatedAt', label: 'Updated at' },
+                      ] as { key: keyof typeof settings.cardFields; label: string }[]
+                    ).map(({ key, label }) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={settings.cardFields[key]}
+                          onChange={(e) =>
+                            updateSettings({ cardFields: { ...settings.cardFields, [key]: e.target.checked } })
+                          }
+                          className="w-4 h-4 rounded accent-[var(--accent)] cursor-pointer"
+                        />
+                        <span className="text-sm text-[var(--text-primary)]">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Live preview */}
+                  <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+                    <p className="text-sm font-semibold text-[var(--text-primary)] mb-1">Example card</p>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+                      {settings.cardFields.progress && (
+                        <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                          <span className="w-3 h-3 rounded-full border border-[var(--text-muted)] inline-block" />
+                          8 DAYS
+                        </span>
+                      )}
+                      {settings.cardFields.retention && (
+                        <span className="text-[11px] text-[var(--text-muted)]">↺ 82%</span>
+                      )}
+                      {settings.cardFields.lastReview && (
+                        <span className="text-[11px] text-[var(--text-muted)]">Reviewed 2d ago</span>
+                      )}
+                      {settings.cardFields.dueDate && (
+                        <span className="text-[11px] text-[var(--text-muted)]">Due Jun 15</span>
+                      )}
+                      {settings.cardFields.tagsList && (
+                        <span className="text-[11px] text-[var(--text-muted)]">#biology</span>
+                      )}
+                      {settings.cardFields.createdAt && (
+                        <span className="text-[11px] text-[var(--text-muted)]">Created Jun 1</span>
+                      )}
+                      {settings.cardFields.updatedAt && (
+                        <span className="text-[11px] text-[var(--text-muted)]">Updated Jun 10</span>
+                      )}
+                      {!Object.values(settings.cardFields).some(Boolean) && (
+                        <span className="text-[11px] text-[var(--text-muted)] italic">No fields selected</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

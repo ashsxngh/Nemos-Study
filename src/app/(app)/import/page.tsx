@@ -3,13 +3,13 @@
 import { Suspense, useCallback, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Upload, X, FileText } from 'lucide-react'
+import { ArrowLeft, Upload, X, FileText, Folder as FolderIcon, ChevronRight } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
 import { cn, truncate } from '@/lib/utils'
-import type { CardType } from '@/lib/types'
+import type { CardType, Folder, Deck } from '@/lib/types'
 import {
   detectFormat,
   parseDelimited,
@@ -104,6 +104,246 @@ function parseFile(
   }
 }
 
+// ── Folder/Deck tree helpers ──────────────────────────────────────────────────
+
+interface FolderNode {
+  folder: Folder
+  depth: number
+  children: FolderNode[]
+}
+
+function buildFolderTree(folders: Folder[]): FolderNode[] {
+  const nodeMap = new Map<string, FolderNode>()
+  for (const f of folders) {
+    nodeMap.set(f.id, { folder: f, depth: 0, children: [] })
+  }
+  const roots: FolderNode[] = []
+  for (const f of folders) {
+    const node = nodeMap.get(f.id)!
+    if (f.parentId && nodeMap.has(f.parentId)) {
+      nodeMap.get(f.parentId)!.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  }
+  function setDepth(node: FolderNode, d: number) {
+    node.depth = d
+    for (const c of node.children) setDepth(c, d + 1)
+  }
+  roots.forEach((n) => setDepth(n, 0))
+  return roots
+}
+
+function flattenFolderTree(nodes: FolderNode[]): FolderNode[] {
+  const out: FolderNode[] = []
+  function walk(ns: FolderNode[]) {
+    for (const n of ns) { out.push(n); walk(n.children) }
+  }
+  walk(nodes)
+  return out
+}
+
+// ── FolderTreePicker ──────────────────────────────────────────────────────────
+
+function FolderTreeRow({
+  node,
+  value,
+  expanded,
+  onSelect,
+  onToggle,
+}: {
+  node: FolderNode
+  value: string | null
+  expanded: Set<string>
+  onSelect: (id: string | null) => void
+  onToggle: (id: string) => void
+}) {
+  const hasChildren = node.children.length > 0
+  const isOpen = expanded.has(node.folder.id)
+  const isSelected = value === node.folder.id
+
+  return (
+    <>
+      <div
+        style={{ paddingLeft: `${10 + node.depth * 14}px` }}
+        className={cn(
+          'flex items-center pr-1.5 transition-colors',
+          isSelected
+            ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+        )}
+      >
+        {/* Expand/collapse toggle — only shown when folder has children */}
+        <button
+          type="button"
+          onClick={() => hasChildren && onToggle(node.folder.id)}
+          className={cn(
+            'flex items-center justify-center w-4 h-6 shrink-0 transition-colors',
+            hasChildren ? 'hover:text-[var(--text-primary)] cursor-pointer' : 'cursor-default opacity-0 pointer-events-none'
+          )}
+          tabIndex={hasChildren ? 0 : -1}
+        >
+          <ChevronRight
+            size={11}
+            className={cn('transition-transform duration-150', isOpen && 'rotate-90')}
+          />
+        </button>
+
+        {/* Folder name — selectable */}
+        <button
+          type="button"
+          onClick={() => onSelect(node.folder.id)}
+          className={cn(
+            'flex items-center gap-1.5 flex-1 min-w-0 py-1.5 text-left',
+            isSelected ? 'font-medium' : ''
+          )}
+        >
+          <FolderIcon size={11} className="shrink-0 opacity-60" />
+          <span className="truncate">{node.folder.name}</span>
+        </button>
+      </div>
+
+      {/* Children — only rendered when expanded */}
+      {isOpen && node.children.map((child) => (
+        <FolderTreeRow
+          key={child.folder.id}
+          node={child}
+          value={value}
+          expanded={expanded}
+          onSelect={onSelect}
+          onToggle={onToggle}
+        />
+      ))}
+    </>
+  )
+}
+
+function FolderTreePicker({
+  folders,
+  value,
+  onChange,
+}: {
+  folders: Folder[]
+  value: string | null
+  onChange: (id: string | null) => void
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const roots = buildFolderTree(folders.filter((f) => !f.isArchived))
+
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  return (
+    <div className="max-h-[176px] overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--border)] text-xs">
+      {/* No folder option */}
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        className={cn(
+          'w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 transition-colors',
+          value === null
+            ? 'bg-[var(--accent)]/10 text-[var(--accent)] font-medium'
+            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+        )}
+      >
+        <span className="w-4 shrink-0" />
+        No folder
+      </button>
+
+      {roots.map((node) => (
+        <FolderTreeRow
+          key={node.folder.id}
+          node={node}
+          value={value}
+          expanded={expanded}
+          onSelect={onChange}
+          onToggle={toggle}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── DeckTreePicker ────────────────────────────────────────────────────────────
+
+function DeckTreePicker({
+  decks,
+  folders,
+  value,
+  onChange,
+}: {
+  decks: Deck[]
+  folders: Folder[]
+  value: string | null
+  onChange: (id: string | null) => void
+}) {
+  const activeDecks = decks.filter((d) => !d.isArchived)
+  const flat = flattenFolderTree(buildFolderTree(folders.filter((f) => !f.isArchived)))
+  const unfoldered = activeDecks.filter((d) => !d.folderId)
+
+  return (
+    <div className="max-h-[200px] overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--border)] text-xs">
+      {activeDecks.length === 0 && (
+        <div className="px-2.5 py-3 text-[var(--text-muted)] text-center">No decks yet</div>
+      )}
+
+      {/* Decks with no folder */}
+      {unfoldered.map((deck) => (
+        <button
+          key={deck.id}
+          type="button"
+          onClick={() => onChange(deck.id)}
+          className={cn(
+            'w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 transition-colors',
+            value === deck.id
+              ? 'bg-[var(--accent)]/10 text-[var(--accent)] font-medium'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+          )}
+        >
+          {deck.name}
+        </button>
+      ))}
+
+      {/* Folders as section headers with nested decks */}
+      {flat.map((node) => {
+        const folderDecks = activeDecks.filter((d) => d.folderId === node.folder.id)
+        if (folderDecks.length === 0) return null
+        return (
+          <div key={node.folder.id}>
+            <div
+              style={{ paddingLeft: `${10 + node.depth * 12}px` }}
+              className="flex items-center gap-1 pr-2.5 py-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide select-none"
+            >
+              <FolderIcon size={9} className="shrink-0" />
+              {node.folder.name}
+            </div>
+            {folderDecks.map((deck) => (
+              <button
+                key={deck.id}
+                type="button"
+                onClick={() => onChange(deck.id)}
+                style={{ paddingLeft: `${20 + node.depth * 12}px` }}
+                className={cn(
+                  'w-full text-left flex items-center pr-2.5 py-1.5 transition-colors',
+                  value === deck.id
+                    ? 'bg-[var(--accent)]/10 text-[var(--accent)] font-medium'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                )}
+              >
+                {deck.name}
+              </button>
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 function ImportContent() {
@@ -123,7 +363,7 @@ function ImportContent() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Settings
-  const [delimiterRaw, setDelimiterRaw] = useState('\\t')
+  const [delimiterRaw, setDelimiterRaw] = useState(',')
   const [skipFirstRow, setSkipFirstRow] = useState(false)
   const [deckName, setDeckName] = useState('')
   const [folderId, setFolderId] = useState<string | null>(null)
@@ -138,25 +378,42 @@ function ImportContent() {
   const [importing, setImporting] = useState(false)
 
   const detectedFormat = fileName ? detectFormat(fileName, fileText) : null
+  const isAnkiPkg = detectedFormat === 'apkg'
   const showDelimiterSettings =
-    detectedFormat === 'csv' ||
-    detectedFormat === 'tsv' ||
-    detectedFormat === 'unknown' ||
-    detectedFormat === null
+    !isAnkiPkg &&
+    (detectedFormat === 'csv' ||
+      detectedFormat === 'tsv' ||
+      detectedFormat === 'unknown' ||
+      detectedFormat === null)
 
   // ── File processing ────────────────────────────────────────────────────────
 
   const processFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
+      const name = file.name
+      setFileName(name)
+      setFileText('')
+      const baseName = name.replace(/\.[^.]+$/, '')
+      if (!targetDeckId) setDeckName(baseName)
+
+      if (name.toLowerCase().endsWith('.apkg')) {
+        try {
+          const buf = await file.arrayBuffer()
+          const { parseAnkiPackage } = await import('@/lib/ankiPackage')
+          const cards = await parseAnkiPackage(buf)
+          setParsedCards(cards.length > 0 ? cards : null)
+          setParseError(cards.length === 0 ? 'No cards found in this Anki package.' : null)
+        } catch (err) {
+          setParsedCards(null)
+          setParseError(err instanceof Error ? err.message : 'Failed to parse Anki package.')
+        }
+        return
+      }
+
       const reader = new FileReader()
       reader.onload = (e) => {
         const text = (e.target?.result as string) ?? ''
-        const name = file.name
-        setFileName(name)
         setFileText(text)
-        const baseName = name.replace(/\.[^.]+$/, '')
-        if (!targetDeckId) setDeckName(baseName)
-
         const { cards, error } = parseFile(name, text, delimiterRaw, skipFirstRow)
         setParsedCards(cards.length > 0 ? cards : null)
         setParseError(error)
@@ -304,7 +561,7 @@ function ImportContent() {
                       </p>
                       {detectedFormat && detectedFormat !== 'unknown' && (
                         <p className="text-xs text-[var(--text-muted)] mt-0.5 uppercase tracking-wide">
-                          {detectedFormat} detected
+                          {detectedFormat === 'apkg' ? 'Anki Package' : detectedFormat} detected
                         </p>
                       )}
                     </div>
@@ -331,7 +588,7 @@ function ImportContent() {
                         {isDragOver ? 'Drop to import' : 'Drop files here'}
                       </p>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
-                        Supported: CSV, TSV, TXT, MD, JSON
+                        CSV, TSV, TXT, MD, JSON, Anki (.anki, .apkg)
                       </p>
                     </div>
                     <Button
@@ -349,7 +606,7 @@ function ImportContent() {
                 ref={fileInputRef}
                 type="file"
                 multiple={false}
-                accept=".csv,.tsv,.txt,.md,.json,.anki"
+                accept=".csv,.tsv,.txt,.md,.json,.anki,.apkg"
                 className="hidden"
                 onChange={handleFileInputChange}
               />
@@ -360,7 +617,7 @@ function ImportContent() {
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-4">
                 <h2 className="text-sm font-semibold text-[var(--text-primary)]">Import Settings</h2>
 
-                {/* Delimiter input */}
+                {/* Delimiter input (text formats only) */}
                 {showDelimiterSettings && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[var(--text-secondary)]">
@@ -377,24 +634,26 @@ function ImportContent() {
                       className="w-full h-8 px-2.5 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] font-mono"
                     />
                     <p className="text-[10px] text-[var(--text-muted)]">
-                      Use <code className="font-mono">\t</code> for tab (default)
+                      Use <code className="font-mono">\t</code> for tab
                     </p>
                   </div>
                 )}
 
-                {/* Skip first row */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={skipFirstRow}
-                    onChange={(e) => {
-                      setSkipFirstRow(e.target.checked)
-                      reParse(delimiterRaw, e.target.checked)
-                    }}
-                    className="accent-[var(--accent)]"
-                  />
-                  <span className="text-xs text-[var(--text-secondary)]">First row is header</span>
-                </label>
+                {/* Skip first row (text formats only) */}
+                {!isAnkiPkg && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={skipFirstRow}
+                      onChange={(e) => {
+                        setSkipFirstRow(e.target.checked)
+                        reParse(delimiterRaw, e.target.checked)
+                      }}
+                      className="accent-[var(--accent)]"
+                    />
+                    <span className="text-xs text-[var(--text-secondary)]">First row is header</span>
+                  </label>
+                )}
 
                 {/* Target deck */}
                 {targetDeck ? (
@@ -438,16 +697,12 @@ function ImportContent() {
                     {importMode === 'existing' ? (
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-[var(--text-secondary)]">Select deck</label>
-                        <select
-                          value={selectedDeckId ?? ''}
-                          onChange={(e) => setSelectedDeckId(e.target.value || null)}
-                          className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                        >
-                          <option value="">Choose a deck…</option>
-                          {decks.filter((d) => !d.isArchived).map((d) => (
-                            <option key={d.id} value={d.id}>{d.name}</option>
-                          ))}
-                        </select>
+                        <DeckTreePicker
+                          decks={decks}
+                          folders={folders}
+                          value={selectedDeckId}
+                          onChange={setSelectedDeckId}
+                        />
                       </div>
                     ) : (
                       <>
@@ -463,21 +718,14 @@ function ImportContent() {
                           />
                         </div>
 
-                        {/* Target folder */}
+                        {/* Target folder — tree picker */}
                         <div className="space-y-1.5">
                           <label className="text-xs font-medium text-[var(--text-secondary)]">Target folder</label>
-                          <select
-                            value={folderId ?? ''}
-                            onChange={(e) => setFolderId(e.target.value || null)}
-                            className="w-full h-7 px-2 text-xs bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                          >
-                            <option value="">No folder</option>
-                            {folders.map((f) => (
-                              <option key={f.id} value={f.id}>
-                                {f.name}
-                              </option>
-                            ))}
-                          </select>
+                          <FolderTreePicker
+                            folders={folders}
+                            value={folderId}
+                            onChange={setFolderId}
+                          />
                         </div>
                       </>
                     )}

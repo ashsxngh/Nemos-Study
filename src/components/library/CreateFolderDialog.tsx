@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -31,6 +31,10 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
   const [color, setColor] = useState<FolderColor>('default')
   const [parentId, setParentId] = useState<string>(defaultParentId ?? '')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) setParentId(defaultParentId ?? '')
+  }, [open, defaultParentId])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

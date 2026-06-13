@@ -106,29 +106,56 @@ async function pullFromSupabase(): Promise<void> {
     supabase.from('notes').select('*').eq('user_id', user.id),
   ])
 
-  const folders = (foldersRes.data ?? []).map((r) => toCamel(r) as Folder)
-  const decks   = (decksRes.data   ?? []).map((r) => toCamel(r) as Deck)
-  const cards   = (cardsRes.data   ?? []).map((r) => toCamel(r) as Card)
+  // Filter out anything that's locally queued for deletion so a pull never
+  // resurrects an item the user just deleted before the push debounce fired.
+  const { pendingDeletes } = useLibraryStore.getState()
+  const pendingFolderSet = new Set(pendingDeletes.folders)
+  const pendingDeckSet   = new Set(pendingDeletes.decks)
+  const pendingCardSet   = new Set(pendingDeletes.cards)
+
+  const folders = (foldersRes.data ?? [])
+    .map((r) => toCamel(r) as Folder)
+    .filter((f) => !pendingFolderSet.has(f.id))
+  const decks = (decksRes.data ?? [])
+    .map((r) => toCamel(r) as Deck)
+    .filter((d) => !pendingDeckSet.has(d.id))
+  const cards = (cardsRes.data ?? [])
+    .map((r) => toCamel(r) as Card)
+    .filter((c) => !pendingCardSet.has(c.id))
   const sessions = (sessionsRes.data ?? []).map((r) => toCamel(r) as ReviewSession)
   const reviewLogs = (logsRes.data  ?? []).map((r) => toCamel(r) as ReviewLog)
   const notes   = (notesRes.data   ?? []).map((r) => toCamel(r) as Note)
 
 
-  // srsData is stored as a Record<cardId, SRSData> in the store
+  // srsData is stored as a Record<cardId, SRSData> in the store.
+  // Only keep entries for cards that survived the pending-delete filter — this
+  // prevents orphaned srs_data rows (for deleted deck cards) from being pulled
+  // back in and later re-upserted to Supabase on the next push.
+  const survivingCardSet = new Set(cards.map((c) => c.id))
   const srsData: Record<string, SRSData> = {}
   for (const row of srsRes.data ?? []) {
     const s = toCamel(row) as SRSData
-    srsData[s.cardId] = s
+    if (!pendingCardSet.has(s.cardId) && survivingCardSet.has(s.cardId)) {
+      srsData[s.cardId] = s
+    }
   }
 
-  useLibraryStore.setState((current) => ({
-    folders:    mergeKeepLocal(folders,    current.folders),
-    decks:      mergeKeepLocal(decks,      current.decks),
-    cards:      mergeKeepLocal(cards,      current.cards),
-    srsData:    { ...current.srsData, ...srsData },
-    sessions,
-    reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs),
-  }))
+  useLibraryStore.setState((current) => {
+    const mergedCards = mergeKeepLocal(cards, current.cards)
+    const mergedCardSet = new Set(mergedCards.map((c) => c.id))
+    return {
+      folders:    mergeKeepLocal(folders, current.folders),
+      decks:      mergeKeepLocal(decks,   current.decks),
+      cards:      mergedCards,
+      // Strip srsData entries for cards that aren't in the final merged set.
+      // This cleans up orphans from deleted decks that survived in Supabase.
+      srsData: Object.fromEntries(
+        Object.entries({ ...current.srsData, ...srsData }).filter(([id]) => mergedCardSet.has(id))
+      ),
+      sessions,
+      reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs),
+    }
+  })
   useNotesStore.setState((current) => ({
     notes: mergeKeepLocal(notes, current.notes),
   }))
@@ -177,6 +204,17 @@ async function pushToSupabase(
     sessions: sessions.length,
   })
 
+  // Only upsert srs_data for cards that exist in the active card set.
+  // This prevents orphaned entries (e.g. from a deleted deck whose cards were
+  // briefly re-pulled from Supabase before the delete push ran) from being
+  // written back. Also excludes cards about to be deleted to avoid a deadlock
+  // (upsert + delete on the same row in the same push → PostgreSQL 40P01).
+  const activeCardSet  = new Set(cards.map((c) => c.id))
+  const cardDeleteSet  = new Set(pendingDeletes?.cards ?? [])
+  const srsToUpsert = Object.values(srsData).filter(
+    (s) => activeCardSet.has(s.cardId) && !cardDeleteSet.has(s.cardId)
+  )
+
   const [foldersRes, decksRes, cardsRes, srsRes, sessionsRes] = await Promise.all([
     folders.length
       ? supabase.from('folders').upsert(folders.map(withUserId), upsertOpts)
@@ -190,9 +228,9 @@ async function pushToSupabase(
           upsertOpts,
         )
       : null,
-    Object.keys(srsData).length
+    srsToUpsert.length
       ? supabase.from('srs_data').upsert(
-          Object.values(srsData).map(withUserId),
+          srsToUpsert.map(withUserId),
           { onConflict: 'card_id' },
         )
       : null,
@@ -216,17 +254,34 @@ async function pushToSupabase(
   }
   console.log('[SYNC] pushToSupabase: all upserts succeeded')
 
-  // Execute pending deletes
+  // Execute pending deletes — cards/srs first, then decks, then folders
+  // so child rows are gone before their parents (avoids any implicit ordering issues).
   if (pendingDeletes) {
-    if (pendingDeletes.folders.length) {
-      await supabase.from('folders').delete().in('id', pendingDeletes.folders)
+    if (pendingDeletes.cards.length) {
+      const delCards = await supabase.from('cards').delete().in('id', pendingDeletes.cards)
+      if (delCards.error) {
+        console.error('[SYNC] pushToSupabase: cards delete error', delCards.error)
+        throw new Error(`cards delete: ${delCards.error.message} (code ${delCards.error.code})`)
+      }
+      const delSrs = await supabase.from('srs_data').delete().in('card_id', pendingDeletes.cards)
+      if (delSrs.error) {
+        console.error('[SYNC] pushToSupabase: srs_data delete error', delSrs.error)
+        throw new Error(`srs_data delete: ${delSrs.error.message} (code ${delSrs.error.code})`)
+      }
     }
     if (pendingDeletes.decks.length) {
-      await supabase.from('decks').delete().in('id', pendingDeletes.decks)
+      const delDecks = await supabase.from('decks').delete().in('id', pendingDeletes.decks)
+      if (delDecks.error) {
+        console.error('[SYNC] pushToSupabase: decks delete error', delDecks.error)
+        throw new Error(`decks delete: ${delDecks.error.message} (code ${delDecks.error.code})`)
+      }
     }
-    if (pendingDeletes.cards.length) {
-      await supabase.from('cards').delete().in('id', pendingDeletes.cards)
-      await supabase.from('srs_data').delete().in('card_id', pendingDeletes.cards)
+    if (pendingDeletes.folders.length) {
+      const delFolders = await supabase.from('folders').delete().in('id', pendingDeletes.folders)
+      if (delFolders.error) {
+        console.error('[SYNC] pushToSupabase: folders delete error', delFolders.error)
+        throw new Error(`folders delete: ${delFolders.error.message} (code ${delFolders.error.code})`)
+      }
     }
     if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length) {
       console.log('[SYNC] pushToSupabase: deletes complete')
@@ -268,23 +323,47 @@ export function useSync(): SyncStatus {
   const libraryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notesDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
+  const pushInFlightRef = useRef(false)
+  // Shared across tabs via BroadcastChannel — notifies peers of completed pushes.
+  const syncChannel = useRef<BroadcastChannel | null>(null)
 
-  const handlePush = useCallback(async (
-    folders: Folder[],
-    decks: Deck[],
-    cards: Card[],
-    srsData: Record<string, SRSData>,
-    sessions: ReviewSession[],
-    pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
-  ) => {
-    console.log('[SYNC] handlePush: pushing', { decks: decks.map(d => ({ id: d.id, name: d.name })) })
+  const handlePush = useCallback(async () => {
+    if (pushInFlightRef.current) {
+      console.log('[SYNC] handlePush: push already in-flight, skipping')
+      return
+    }
+    pushInFlightRef.current = true
     setSyncing(true)
     setError(null)
     try {
-      await pushToSupabase(folders, decks, cards, srsData, sessions, pendingDeletes)
-      // Clear pending deletes after successful push
-      if (pendingDeletes && (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length)) {
-        useLibraryStore.getState().clearPendingDeletes()
+      const doPush = async () => {
+        // Re-read state inside the Web Lock — if we waited for another tab's
+        // push to finish, realtime events + BroadcastChannel messages will have
+        // already corrected our local state by the time we get here.
+        const s = useLibraryStore.getState()
+        console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
+        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.sessions, s.pendingDeletes)
+        // Clear only the IDs that were in this push — new deletes queued
+        // while in-flight are preserved for the next push.
+        if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length) {
+          useLibraryStore.getState().clearPendingDeletes(s.pendingDeletes)
+          // Immediately tell other tabs which items were deleted so they strip
+          // them from their local state before their own push acquires the lock.
+          syncChannel.current?.postMessage({
+            type: 'push-complete',
+            deletedFolders: s.pendingDeletes.folders,
+            deletedDecks:   s.pendingDeletes.decks,
+            deletedCards:   s.pendingDeletes.cards,
+          })
+        }
+      }
+      // navigator.locks serialises pushes across all tabs for the same origin.
+      // The lock is automatically released when the tab closes, so there is no
+      // risk of permanent starvation.
+      if (typeof navigator !== 'undefined' && 'locks' in navigator) {
+        await navigator.locks.request('nemos-sync-push', doPush)
+      } else {
+        await doPush()
       }
       console.log('[SYNC] handlePush: push COMPLETE')
       setLastSynced(new Date())
@@ -292,6 +371,7 @@ export function useSync(): SyncStatus {
       console.error('[SYNC] handlePush: push ERROR', err)
       setError(err instanceof Error ? err.message : 'Sync failed')
     } finally {
+      pushInFlightRef.current = false
       setSyncing(false)
     }
   }, [])
@@ -306,6 +386,42 @@ export function useSync(): SyncStatus {
       setError(err instanceof Error ? err.message : 'Sync failed')
     } finally {
       setSyncing(false)
+    }
+  }, [])
+
+  // BroadcastChannel — receive deletion events from other tabs and strip those
+  // items from local state immediately, before this tab's next push acquires
+  // the Web Lock. This prevents a tab with stale state from re-upserting items
+  // that another tab just deleted.
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return
+    const bc = new BroadcastChannel('nemos-sync')
+    syncChannel.current = bc
+    bc.onmessage = (e: MessageEvent) => {
+      if (e.data?.type !== 'push-complete') return
+      const deletedFolders: string[] = e.data.deletedFolders ?? []
+      const deletedDecks: string[]   = e.data.deletedDecks   ?? []
+      const deletedCards: string[]   = e.data.deletedCards   ?? []
+      if (!deletedFolders.length && !deletedDecks.length && !deletedCards.length) return
+      console.log('[SYNC] BroadcastChannel: another tab deleted items, applying locally', { deletedFolders, deletedDecks, deletedCards })
+      const fSet = new Set(deletedFolders)
+      const dSet = new Set(deletedDecks)
+      const cSet = new Set(deletedCards)
+      useLibraryStore.setState((s) => ({
+        folders: s.folders.filter((f) => !fSet.has(f.id)),
+        decks:   s.decks.filter((d)   => !dSet.has(d.id)),
+        cards:   s.cards.filter((c)   => !cSet.has(c.id)),
+        srsData: Object.fromEntries(Object.entries(s.srsData).filter(([id]) => !cSet.has(id))),
+        pendingDeletes: {
+          folders: s.pendingDeletes.folders.filter((id) => !fSet.has(id)),
+          decks:   s.pendingDeletes.decks.filter((id)   => !dSet.has(id)),
+          cards:   s.pendingDeletes.cards.filter((id)   => !cSet.has(id)),
+        },
+      }))
+    }
+    return () => {
+      bc.close()
+      syncChannel.current = null
     }
   }, [])
 
@@ -336,7 +452,7 @@ export function useSync(): SyncStatus {
           // Push any local changes that existed before pull completed (e.g. cards created during load)
           const state = useLibraryStore.getState()
           if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length) {
-            handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
+            handlePush()
           }
         } else {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
@@ -359,14 +475,14 @@ export function useSync(): SyncStatus {
 
   // Subscribe to library store changes with 1.5s debounce
   useEffect(() => {
-    const unsub = useLibraryStore.subscribe((state) => {
+    const unsub = useLibraryStore.subscribe(() => {
       if (!mountedRef.current) {
         console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
         return
       }
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
       libraryDebounceRef.current = setTimeout(() => {
-        handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
+        handlePush()
       }, 400)
     })
     return () => {
@@ -406,6 +522,8 @@ export function useSync(): SyncStatus {
           const folder = toCamel(newRow) as Folder
           if (eventType === 'INSERT') realtimePending.folders.add(folder.id)
           useLibraryStore.setState((state) => {
+            // Don't resurrect items that are pending local deletion
+            if (state.pendingDeletes.folders.includes(folder.id)) return {}
             const exists = state.folders.some((f) => f.id === folder.id)
             return {
               folders: exists
@@ -431,6 +549,7 @@ export function useSync(): SyncStatus {
           const deck = toCamel(newRow) as Deck
           if (eventType === 'INSERT') realtimePending.decks.add(deck.id)
           useLibraryStore.setState((state) => {
+            if (state.pendingDeletes.decks.includes(deck.id)) return {}
             const exists = state.decks.some((d) => d.id === deck.id)
             return {
               decks: exists
@@ -456,6 +575,7 @@ export function useSync(): SyncStatus {
           const card = toCamel(newRow) as Card
           if (eventType === 'INSERT') realtimePending.cards.add(card.id)
           useLibraryStore.setState((state) => {
+            if (state.pendingDeletes.cards.includes(card.id)) return {}
             const exists = state.cards.some((c) => c.id === card.id)
             return {
               cards: exists
@@ -510,8 +630,7 @@ export function useSync(): SyncStatus {
   }, [])
 
   const manualPush = useCallback(async () => {
-    const state = useLibraryStore.getState()
-    await handlePush(state.folders, state.decks, state.cards, state.srsData, state.sessions, state.pendingDeletes)
+    await handlePush()
   }, [handlePush])
 
   return { syncing, lastSynced, error, manualPush }
