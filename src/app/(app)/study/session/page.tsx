@@ -381,9 +381,16 @@ function SessionContent() {
         return
       }
 
+      // E = edit current card (works before and after flip)
+      if (e.key === 'e' || e.key === 'E') {
+        setShowEditDialog(true)
+        return
+      }
+
       const k = e.key
 
-      if (e.code === 'Space') {
+      // Space or ↓ = flip (before answer) or Remember (after answer)
+      if (e.code === 'Space' || e.key === 'ArrowDown') {
         e.preventDefault()
         if (!showAnswer) flipCard()
         else handleRate(4)
@@ -391,6 +398,9 @@ function SessionContent() {
       }
 
       if (showAnswer) {
+        // R = Remember
+        if (k === 'r' || k === 'R') { handleRate(4); return }
+
         if (k === studyShortcuts.forgot || k === studyShortcuts.forgot.toUpperCase()) {
           handleRate(1)
           return
@@ -402,6 +412,9 @@ function SessionContent() {
         if (k === studyShortcuts.skip) { handleSkip(); return }
         if (k === studyShortcuts.back) { handleBack(); return }
       }
+
+      // S = skip (works before and after flip)
+      if (k === 's' || k === 'S') { handleSkip(); return }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)

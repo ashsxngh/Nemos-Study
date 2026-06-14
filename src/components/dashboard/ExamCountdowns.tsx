@@ -1,14 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { Calendar, Plus, X, ChevronDown, ChevronUp, BookOpen, Folder, AlertTriangle } from 'lucide-react'
+import { Calendar, Plus, X, ChevronDown, ChevronUp, ChevronRight, BookOpen, Folder, AlertTriangle, Check } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Progress } from '@/components/ui/Progress'
 import { cn } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { computeExamRetentionStats, getExamCards, getExamDeckIds } from '@/lib/examScheduler'
-import type { Exam } from '@/lib/types'
+import type { Exam, Deck, Folder as FolderType } from '@/lib/types'
 
 function daysUntil(dateStr: string): number {
   const today = new Date()
@@ -27,8 +27,114 @@ function retentionColor(r: number) {
   return 'danger' as const
 }
 
+function DeckFolderTree({ exam, decks, folders, examDeckIds }: {
+  exam: Exam
+  decks: Deck[]
+  folders: FolderType[]
+  examDeckIds: string[]
+}) {
+  const { addDeckToExam, removeDeckFromExam, addFolderToExam, removeFolderFromExam } = useExamStore()
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+
+  const toggleFolder = (id: string) =>
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const isFolderLinked = (id: string) => (exam.folderIds ?? []).includes(id)
+  const isDeckLinked = (id: string) => examDeckIds.includes(id)
+
+  const rootFolders = folders.filter((f) => !f.parentId && !f.isArchived)
+  const rootDecks   = decks.filter((d) => !d.folderId && !d.isArchived)
+
+  return (
+    <div className="space-y-0.5">
+      {rootFolders.map((folder) => {
+        const isExpanded = expandedFolders.has(folder.id)
+        const linked = isFolderLinked(folder.id)
+        const childDecks = decks.filter((d) => d.folderId === folder.id && !d.isArchived)
+        return (
+          <div key={folder.id}>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => toggleFolder(folder.id)}
+                className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] shrink-0"
+              >
+                <ChevronRight size={11} className={cn('transition-transform duration-150', isExpanded && 'rotate-90')} />
+              </button>
+              <button
+                onClick={() =>
+                  linked ? removeFolderFromExam(exam.id, folder.id) : addFolderToExam(exam.id, folder.id)
+                }
+                className={cn(
+                  'flex-1 flex items-center gap-1.5 text-[10px] px-1.5 py-1 rounded-[var(--radius-sm)] transition-colors',
+                  linked
+                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-active)]'
+                )}
+              >
+                <Folder size={11} className="shrink-0" />
+                <span className="flex-1 text-left truncate">{folder.name}</span>
+                {linked && <Check size={10} className="shrink-0" />}
+              </button>
+            </div>
+            {isExpanded && childDecks.map((deck) => {
+              const deckLinked = isDeckLinked(deck.id)
+              return (
+                <button
+                  key={deck.id}
+                  onClick={() =>
+                    deckLinked ? removeDeckFromExam(exam.id, deck.id) : addDeckToExam(exam.id, deck.id)
+                  }
+                  className={cn(
+                    'w-full flex items-center gap-1.5 text-[10px] pl-8 pr-2 py-1 rounded-[var(--radius-sm)] transition-colors',
+                    deckLinked
+                      ? 'text-[var(--accent)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-active)]'
+                  )}
+                >
+                  <BookOpen size={10} className="shrink-0" />
+                  <span className="flex-1 text-left truncate">{deck.name}</span>
+                  {deckLinked && <Check size={10} className="shrink-0" />}
+                </button>
+              )
+            })}
+          </div>
+        )
+      })}
+      {rootDecks.map((deck) => {
+        const linked = isDeckLinked(deck.id)
+        return (
+          <button
+            key={deck.id}
+            onClick={() =>
+              linked ? removeDeckFromExam(exam.id, deck.id) : addDeckToExam(exam.id, deck.id)
+            }
+            className={cn(
+              'w-full flex items-center gap-1.5 text-[10px] px-1.5 py-1 rounded-[var(--radius-sm)] transition-colors',
+              linked
+                ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-active)]'
+            )}
+          >
+            <ChevronRight size={11} className="shrink-0 text-transparent" />
+            <BookOpen size={11} className="shrink-0" />
+            <span className="flex-1 text-left truncate">{deck.name}</span>
+            {linked && <Check size={10} className="shrink-0 ml-auto" />}
+          </button>
+        )
+      })}
+      {rootFolders.length === 0 && rootDecks.length === 0 && (
+        <p className="text-[10px] text-[var(--text-muted)] px-2 py-1">No decks or folders yet</p>
+      )}
+    </div>
+  )
+}
+
 function ExamRow({ exam }: { exam: Exam }) {
-  const { deleteExam, addDeckToExam, removeDeckFromExam, addFolderToExam, removeFolderFromExam, setTargetRetention } = useExamStore()
+  const { deleteExam, setTargetRetention } = useExamStore()
   const { decks, folders, cards, fsrsData } = useLibraryStore()
   const [expanded, setExpanded] = useState(false)
 
@@ -36,10 +142,6 @@ function ExamRow({ exam }: { exam: Exam }) {
   const examCards = getExamCards(exam, decks, cards, folders)
   const stats = computeExamRetentionStats(exam, examCards, fsrsData)
   const examDeckIds = getExamDeckIds(exam, decks, folders)
-  const linkedDecks = decks.filter((d) => exam.deckIds.includes(d.id))
-  const linkedFolders = folders.filter((f) => (exam.folderIds ?? []).includes(f.id))
-  const unlinkedDecks = decks.filter((d) => !examDeckIds.includes(d.id) && !d.isArchived)
-  const unlinkedFolders = folders.filter((f) => !(exam.folderIds ?? []).includes(f.id) && !f.isArchived)
 
   const retPct = Math.round(stats.avgRetention * 100)
 
@@ -131,69 +233,16 @@ function ExamRow({ exam }: { exam: Exam }) {
             </span>
           </div>
 
-          {/* Linked folders */}
-          {linkedFolders.length > 0 && (
-            <div>
-              <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1">Folders</p>
-              <div className="space-y-1">
-                {linkedFolders.map((f) => (
-                  <div key={f.id} className="flex items-center gap-2">
-                    <Folder size={11} className="text-[var(--accent)] shrink-0" />
-                    <span className="text-xs text-[var(--text-primary)] flex-1 truncate">{f.name}</span>
-                    <button onClick={() => removeFolderFromExam(exam.id, f.id)} className="text-[var(--text-muted)] hover:text-[var(--danger)]">
-                      <X size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Linked decks */}
-          {linkedDecks.length > 0 && (
-            <div>
-              <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1">Decks</p>
-              <div className="space-y-1">
-                {linkedDecks.map((d) => (
-                  <div key={d.id} className="flex items-center gap-2">
-                    <BookOpen size={11} className="text-[var(--accent)] shrink-0" />
-                    <span className="text-xs text-[var(--text-primary)] flex-1 truncate">{d.name}</span>
-                    <button onClick={() => removeDeckFromExam(exam.id, d.id)} className="text-[var(--text-muted)] hover:text-[var(--danger)]">
-                      <X size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Add folder */}
-          {unlinkedFolders.length > 0 && (
-            <select
-              className="w-full text-[10px] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
-              value=""
-              onChange={(e) => { if (e.target.value) addFolderToExam(exam.id, e.target.value) }}
-            >
-              <option value="">+ Add a folder (all cards inside)…</option>
-              {unlinkedFolders.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-          )}
-
-          {/* Add deck */}
-          {unlinkedDecks.length > 0 && (
-            <select
-              className="w-full text-[10px] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
-              value=""
-              onChange={(e) => { if (e.target.value) addDeckToExam(exam.id, e.target.value) }}
-            >
-              <option value="">+ Add a deck…</option>
-              {unlinkedDecks.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          )}
+          {/* Deck/folder tree — click to link or unlink */}
+          <div>
+            <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1">Link decks &amp; folders</p>
+            <DeckFolderTree
+              exam={exam}
+              decks={decks}
+              folders={folders}
+              examDeckIds={examDeckIds}
+            />
+          </div>
         </div>
       )}
     </div>

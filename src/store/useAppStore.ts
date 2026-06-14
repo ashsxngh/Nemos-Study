@@ -8,6 +8,7 @@ interface AppState {
   theme: Theme
   sidebarCollapsed: boolean
   commandPaletteOpen: boolean
+  shortcutsPanelOpen: boolean
   toasts: ToastData[]
   lastOpenDeckId: string | null
   lastOpenNoteId: string | null
@@ -20,6 +21,8 @@ interface AppState {
   setSidebarCollapsed: (v: boolean) => void
   openCommandPalette: () => void
   closeCommandPalette: () => void
+  openShortcutsPanel: () => void
+  closeShortcutsPanel: () => void
   addToast: (toast: Omit<ToastData, 'id'>) => void
   removeToast: (id: string) => void
   setLastOpenDeck: (id: string | null) => void
@@ -35,6 +38,7 @@ export const useAppStore = create<AppState>()(
       theme: 'dark',
       sidebarCollapsed: false,
       commandPaletteOpen: false,
+      shortcutsPanelOpen: false,
       toasts: [],
       lastOpenDeckId: null,
       lastOpenNoteId: null,
@@ -47,6 +51,8 @@ export const useAppStore = create<AppState>()(
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
+      openShortcutsPanel: () => set({ shortcutsPanelOpen: true }),
+      closeShortcutsPanel: () => set({ shortcutsPanelOpen: false }),
       addToast: (toast) =>
         set((s) => ({
           toasts: [

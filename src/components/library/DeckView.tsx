@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download } from 'lucide-react'
 import {
@@ -44,9 +44,11 @@ interface SortableCardRowProps {
   card: Card
   isDueCard: boolean
   srs?: SRSData
+  selected?: boolean
   onEdit: (card: Card) => void
   onDelete: (id: string) => void
   onResetSRS: (id: string) => void
+  onClick?: () => void
 }
 
 function fmtDate(iso: string) {
@@ -63,7 +65,7 @@ function fmtRelative(iso: string | null) {
   return `${days}d ago`
 }
 
-function SortableCardRow({ card, isDueCard, srs, onEdit, onDelete, onResetSRS }: SortableCardRowProps) {
+function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onClick }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
   const { cardFields } = useSettingsStore()
   const {
@@ -85,9 +87,12 @@ function SortableCardRow({ card, isDueCard, srs, onEdit, onDelete, onResetSRS }:
     <div
       ref={setNodeRef}
       style={style}
+      onClick={onClick}
       className={cn(
-        'flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] border border-transparent',
-        'hover:border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors group',
+        'flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] border transition-colors group cursor-pointer',
+        selected
+          ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+          : 'border-transparent hover:border-[var(--border)] hover:bg-[var(--bg-hover)]',
         isDragging && 'z-10 shadow-lg bg-[var(--bg-hover)] border-[var(--border)]'
       )}
     >
@@ -213,6 +218,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const [addingCard, setAddingCard] = useState(false)
   const [editingCard, setEditingCard] = useState<Card | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [selectedIdx, setSelectedIdx] = useState<number>(-1)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -232,6 +238,45 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
       updateCard(card.id, { order: index * 10 })
     })
   }
+
+  const anyDialogOpen = addingCard || !!editingCard || !!confirmDeleteId
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (anyDialogOpen) return
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      if (e.key === 'Escape') { setSelectedIdx(-1); return }
+
+      if (e.key === 'n' || e.key === 'N') { setAddingCard(true); return }
+
+      if (e.key === 'r' || e.key === 'R') {
+        router.push(`/study/session?deck=${deckId}`)
+        return
+      }
+
+      if ((e.key === 'ArrowDown' || e.key === 'j') && cards.length > 0) {
+        e.preventDefault()
+        setSelectedIdx((i) => Math.min(i + 1, cards.length - 1))
+        return
+      }
+      if ((e.key === 'ArrowUp' || e.key === 'k') && cards.length > 0) {
+        e.preventDefault()
+        setSelectedIdx((i) => Math.max(i - 1, 0))
+        return
+      }
+
+      const selected = selectedIdx >= 0 ? cards[selectedIdx] : null
+      if (!selected) return
+
+      if (e.key === 'e' || e.key === 'E') { setEditingCard(selected); return }
+      if (e.key === 'd' || e.key === 'D') { setConfirmDeleteId(selected.id); return }
+      if (e.code === 'Space') { e.preventDefault(); setEditingCard(selected); return }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [anyDialogOpen, cards, selectedIdx, deckId, router])
 
   if (!deck) {
     return (
@@ -308,7 +353,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
           >
             <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-1">
-                {cards.map((card) => {
+                {cards.map((card, idx) => {
                   const srs = srsData[card.id]
                   const due = srs ? isDue(srs) : true
                   return (
@@ -317,9 +362,11 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
                       card={card}
                       isDueCard={due}
                       srs={srs}
+                      selected={selectedIdx === idx}
                       onEdit={setEditingCard}
                       onDelete={setConfirmDeleteId}
                       onResetSRS={(id) => resetCardSRS(id)}
+                      onClick={() => setSelectedIdx(idx === selectedIdx ? -1 : idx)}
                     />
                   )
                 })}

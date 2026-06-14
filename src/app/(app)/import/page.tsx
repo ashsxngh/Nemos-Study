@@ -24,6 +24,7 @@ import {
 interface ParsedCard {
   front: string
   back: string
+  type?: CardType
   tags?: string[]
 }
 
@@ -351,7 +352,7 @@ function ImportContent() {
   const searchParams = useSearchParams()
   const targetDeckId = searchParams.get('deckId')
 
-  const { decks, folders, createDeck, createCard } = useLibraryStore()
+  const { decks, folders, createDeck, importCards } = useLibraryStore()
   const { addToast } = useAppStore()
 
   const targetDeck = targetDeckId ? decks.find((d) => d.id === targetDeckId) : null
@@ -467,10 +468,13 @@ function ImportContent() {
         finalDeckId = deck.id
       }
 
-      for (const card of parsedCards) {
-        const type = detectCardType(card.front, card.back)
-        createCard(finalDeckId, card.front, card.back, type)
-      }
+      importCards(
+        finalDeckId,
+        parsedCards.map((card) => ({
+          ...card,
+          type: card.type ?? detectCardType(card.front, card.back),
+        })),
+      )
 
       const existingName = importMode === 'existing' && selectedDeckId
         ? decks.find((d) => d.id === selectedDeckId)?.name

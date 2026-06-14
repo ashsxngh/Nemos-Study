@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, ImagePlus, Eye, Edit2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -40,6 +40,8 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
   const [showPreview, setShowPreview] = useState(false)
 
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const frontRef = useRef<HTMLTextAreaElement>(null)
+  const backRef = useRef<HTMLTextAreaElement>(null)
 
   // Sync when card prop changes (e.g. switching between cards)
   useEffect(() => {
@@ -83,6 +85,76 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
     setErrors(e)
     return Object.keys(e).length === 0
   }
+
+  const doSave = useCallback(() => {
+    const result = validate(ignoreDuplicate)
+    if (!result || result === 'duplicate') return
+    if (card) {
+      updateCard(card.id, { front: front.trim(), back, type, tags })
+    } else {
+      createCard(deckId, front.trim(), back, type)
+      setFront(''); setBack(''); setTags([]); setTagInput(''); setImagePreview(null)
+    }
+    onDone?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [front, back, type, tags, ignoreDuplicate, card, deckId])
+
+  const applyFormat = useCallback((
+    ref: React.RefObject<HTMLTextAreaElement | null>,
+    value: string,
+    setValue: (v: string) => void,
+    before: string,
+    after: string,
+  ) => {
+    const el = ref.current
+    if (!el) return
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const selected = value.slice(start, end)
+    const newValue = value.slice(0, start) + before + selected + after + value.slice(end)
+    setValue(newValue)
+    requestAnimationFrame(() => {
+      el.focus()
+      if (selected) {
+        el.setSelectionRange(start + before.length, start + before.length + selected.length)
+      } else {
+        el.setSelectionRange(start + before.length, start + before.length)
+      }
+    })
+  }, [])
+
+  const handleTextareaKeyDown = useCallback((
+    e: React.KeyboardEvent<HTMLTextAreaElement>,
+    ref: React.RefObject<HTMLTextAreaElement | null>,
+    value: string,
+    setValue: (v: string) => void,
+  ) => {
+    const ctrl = e.ctrlKey || e.metaKey
+
+    if (ctrl && e.key === 'Enter') {
+      e.preventDefault()
+      doSave()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onDone?.()
+      return
+    }
+    if (!ctrl) return
+
+    if (e.key === 'b') { e.preventDefault(); applyFormat(ref, value, setValue, '**', '**'); return }
+    if (e.key === 'i') { e.preventDefault(); applyFormat(ref, value, setValue, '*', '*'); return }
+    if (e.key === 'h') { e.preventDefault(); applyFormat(ref, value, setValue, '==', '=='); return }
+    if (e.key === 'o') { e.preventDefault(); setType('image'); imageInputRef.current?.click(); return }
+
+    if (e.shiftKey) {
+      if (e.key === 'X') { e.preventDefault(); applyFormat(ref, value, setValue, '~~', '~~'); return }
+      if (e.key === 'F') { e.preventDefault(); applyFormat(ref, value, setValue, '```\n', '\n```'); return }
+      if (e.key === 'M') { e.preventDefault(); applyFormat(ref, value, setValue, '$', '$'); return }
+      if (e.key === 'L') { e.preventDefault(); applyFormat(ref, value, setValue, '{{c1::', '}}'); return }
+    }
+  }, [doSave, applyFormat, onDone])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -176,6 +248,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
           Front <span className="text-[var(--text-muted)] font-normal">(markdown supported)</span>
         </label>
         <textarea
+          ref={frontRef}
           rows={3}
           placeholder={type === 'cloze' ? 'The {{c1::mitochondria}} is the powerhouse of the cell.' : 'Question or prompt…'}
           value={front}
@@ -183,6 +256,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
             setFront(e.target.value)
             if (errors.front) setErrors((prev) => ({ ...prev, front: undefined }))
           }}
+          onKeyDown={(e) => handleTextareaKeyDown(e, frontRef, front, setFront)}
           className={cn(
             'w-full bg-[var(--bg-hover)] border rounded-[var(--radius-sm)]',
             'text-[var(--text-primary)] text-sm placeholder:text-[var(--text-muted)]',
@@ -293,6 +367,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
             Back <span className="text-[var(--text-muted)] font-normal">(markdown supported)</span>
           </label>
           <textarea
+            ref={backRef}
             rows={3}
             placeholder="Answer or explanation…"
             value={back}
@@ -300,6 +375,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
               setBack(e.target.value)
               if (errors.back) setErrors((prev) => ({ ...prev, back: undefined }))
             }}
+            onKeyDown={(e) => handleTextareaKeyDown(e, backRef, back, setBack)}
             className={cn(
               'w-full bg-[var(--bg-hover)] border rounded-[var(--radius-sm)]',
               'text-[var(--text-primary)] text-sm placeholder:text-[var(--text-muted)]',

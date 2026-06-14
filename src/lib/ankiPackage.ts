@@ -1,5 +1,20 @@
 import JSZip from 'jszip'
 
+// Strip HTML markup from Anki field content (Anki always stores HTML).
+// Converts <br> to newlines, strips all other tags, decodes entities.
+function stripAnkiHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim()
+}
+
 // ── Minimal SQLite B-tree reader ──────────────────────────────────────────────
 // Only handles ordinary rowid tables, UTF-8 text, no WAL, no encryption.
 // Supports overflow pages for large cell payloads.
@@ -148,13 +163,18 @@ function findRootPage(db: Uint8Array, psz: number, tableName: string): number | 
 
 // Parse an Anki SQLite database (.anki2 / .anki21) and return cards.
 //
-// The notes table schema (id is INTEGER PRIMARY KEY → omitted from payload):
-//   payload col 0: guid   (text)
-//   payload col 1: mid    (integer)
-//   payload col 2: mod    (integer)
-//   payload col 3: usn    (integer)
-//   payload col 4: tags   (text)
-//   payload col 5: flds   (text, fields separated by 0x1f)
+// In SQLite, INTEGER PRIMARY KEY columns are stored as serial type 0 (NULL
+// placeholder) in the record payload — so the actual column indices are:
+//   payload col 0: id     (null, actual value is the B-tree rowid)
+//   payload col 1: guid   (text)
+//   payload col 2: mid    (integer)
+//   payload col 3: mod    (integer)
+//   payload col 4: usn    (integer)
+//   payload col 5: tags   (text)
+//   payload col 6: flds   (text, fields separated by 0x1f)
+//
+// We also detect the correct column dynamically by searching for the \x1f
+// separator to guard against databases that omit the null id placeholder.
 function parseAnkiSqlite(db: Uint8Array): { front: string; back: string; tags: string[] }[] {
   if (db.length < 100 || utf8(db, 0, 15) !== 'SQLite format 3') {
     throw new Error('Not a valid SQLite database')
@@ -170,12 +190,24 @@ function parseAnkiSqlite(db: Uint8Array): { front: string; back: string; tags: s
 
   const results: { front: string; back: string; tags: string[] }[] = []
   for (const row of rows) {
-    const flds = row[5]
-    const tagsRaw = row[4]
-    if (typeof flds !== 'string') continue
-    const parts = flds.split('\x1f')
-    const front = (parts[0] ?? '').trim()
-    const back = (parts[1] ?? '').trim()
+    // Find flds by searching for the \x1f field separator.
+    // Standard layout has id as null placeholder at [0], so flds is at [6] and
+    // tags at [5]. Fall back to [5]/[4] in case id is omitted from the header.
+    let flds: SqlVal
+    let tagsRaw: SqlVal
+    if (typeof row[6] === 'string' && row[6].includes('\x1f')) {
+      flds = row[6]
+      tagsRaw = row[5]
+    } else if (typeof row[5] === 'string' && row[5].includes('\x1f')) {
+      flds = row[5]
+      tagsRaw = row[4]
+    } else {
+      continue
+    }
+
+    const parts = (flds as string).split('\x1f')
+    const front = stripAnkiHtml(parts[0] ?? '')
+    const back = stripAnkiHtml(parts[1] ?? '')
     if (!front) continue
     const tags = typeof tagsRaw === 'string' ? tagsRaw.trim().split(/\s+/).filter(Boolean) : []
     results.push({ front, back, tags })
@@ -193,6 +225,16 @@ export async function parseAnkiPackage(
     zip = await JSZip.loadAsync(buffer)
   } catch {
     throw new Error('Not a valid Anki package (.apkg must be a ZIP file)')
+  }
+
+  // Anki 23.10+ uses collection.anki21b (zstd-compressed), which requires
+  // decompression before SQLite parsing. Detect it early so the error is clear.
+  if (zip.file('collection.anki21b') && !zip.file('collection.anki21') && !zip.file('collection.anki2')) {
+    throw new Error(
+      'This package uses Anki\'s new compressed format (Anki 23.10+). ' +
+      'To import it, open Anki → File → Export, choose "Anki Deck Package (.apkg)" ' +
+      'and enable "Legacy support (Anki 2.1 scheduler)" before exporting.'
+    )
   }
 
   // Anki 2.1.26+ uses collection.anki21; older versions use collection.anki2

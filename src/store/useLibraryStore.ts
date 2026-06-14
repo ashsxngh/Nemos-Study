@@ -20,6 +20,71 @@ import { generateId } from '@/lib/utils'
 
 const USER_ID = 'local-user'
 
+// ── IndexedDB storage ──────────────────────────────────────────────────────────
+// localStorage caps at ~5MB — enough for a few hundred cards but not 20k+.
+// IDB has no practical limit (bounded only by device storage).
+// We also auto-migrate any existing localStorage data on first read.
+function createIDBStorage() {
+  const DB_NAME = 'nemos-idb'
+  const STORE = 'kv'
+  let _db: IDBDatabase | null = null
+
+  function open(): Promise<IDBDatabase> {
+    if (_db) return Promise.resolve(_db)
+    return new Promise((res, rej) => {
+      const req = indexedDB.open(DB_NAME, 1)
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE)
+      req.onsuccess = () => { _db = req.result; res(_db) }
+      req.onerror = () => rej(req.error)
+    })
+  }
+
+  function idbGet(key: string): Promise<string | null> {
+    return open().then((db) => new Promise((res, rej) => {
+      const req = db.transaction(STORE).objectStore(STORE).get(key)
+      req.onsuccess = () => res((req.result as string) ?? null)
+      req.onerror = () => rej(req.error)
+    }))
+  }
+
+  function idbPut(key: string, value: string): Promise<void> {
+    return open().then((db) => new Promise<void>((res, rej) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).put(value, key)
+      tx.oncomplete = () => res()
+      tx.onerror = () => rej(tx.error)
+    }))
+  }
+
+  function idbDel(key: string): Promise<void> {
+    return open().then((db) => new Promise<void>((res, rej) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      tx.objectStore(STORE).delete(key)
+      tx.oncomplete = () => res()
+      tx.onerror = () => rej(tx.error)
+    }))
+  }
+
+  return {
+    async getItem(key: string): Promise<string | null> {
+      const val = await idbGet(key)
+      if (val !== null) return val
+      // One-time migration: if data exists in localStorage, move it to IDB.
+      try {
+        const lsVal = localStorage.getItem(key)
+        if (lsVal !== null) {
+          await idbPut(key, lsVal)
+          localStorage.removeItem(key)
+          return lsVal
+        }
+      } catch { /* localStorage may not be available in all contexts */ }
+      return null
+    },
+    setItem: idbPut,
+    removeItem: idbDel,
+  }
+}
+
 interface PendingDeletes {
   folders: string[]
   decks: string[]
@@ -47,7 +112,8 @@ interface LibraryState {
   deleteDeck: (id: string) => void
 
   // Card actions
-  createCard: (deckId: string, front: string, back: string, type?: CardType) => Card
+  createCard: (deckId: string, front: string, back: string, type?: CardType, tags?: string[]) => Card
+  importCards: (deckId: string, cards: Array<{ front: string; back: string; type?: CardType; tags?: string[] }>) => void
   updateCard: (id: string, updates: Partial<Pick<Card, 'front' | 'back' | 'type' | 'hint' | 'tags' | 'isPinned' | 'isArchived' | 'order'>>) => void
   deleteCard: (id: string) => void
 
@@ -228,7 +294,7 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       // ── Card actions ────────────────────────────────────────────────────────
-      createCard: (deckId, front, back, type = 'basic') => {
+      createCard: (deckId, front, back, type = 'basic', tags = []) => {
         const now = new Date().toISOString()
         const card: Card = {
           id: generateId(),
@@ -238,7 +304,7 @@ export const useLibraryStore = create<LibraryState>()(
           front,
           back,
           hint: '',
-          tags: [],
+          tags: tags ?? [],
           isPinned: false,
           isArchived: false,
           linkedCardIds: [],
@@ -255,6 +321,45 @@ export const useLibraryStore = create<LibraryState>()(
           fsrsData: { ...s.fsrsData, [card.id]: fsrs },
         }))
         return card
+      },
+
+      // Bulk import — builds all cards + SRS entries in-memory then does a single
+      // set() call. Avoids the O(n²) cost of calling createCard() n times (each
+      // call spreads the full cards array and triggers a storage serialization).
+      importCards: (deckId, rawCards) => {
+        if (!rawCards.length) return
+        const now = new Date().toISOString()
+        const baseOrder = get().cards.filter((c) => c.deckId === deckId).length
+        const newCards: Card[] = []
+        const newSrsData: Record<string, SRSData> = {}
+        const newFsrsData: Record<string, FSRSState> = {}
+        rawCards.forEach((raw, i) => {
+          const card: Card = {
+            id: generateId(),
+            deckId,
+            userId: USER_ID,
+            type: raw.type ?? 'basic',
+            front: raw.front,
+            back: raw.back,
+            hint: '',
+            tags: raw.tags ?? [],
+            isPinned: false,
+            isArchived: false,
+            linkedCardIds: [],
+            prerequisiteCardIds: [],
+            order: baseOrder + i,
+            createdAt: now,
+            updatedAt: now,
+          }
+          newSrsData[card.id] = createInitialSRSData(card.id, USER_ID)
+          newFsrsData[card.id] = fsrsInitCard(card.id, USER_ID)
+          newCards.push(card)
+        })
+        set((s) => ({
+          cards: [...s.cards, ...newCards],
+          srsData: { ...s.srsData, ...newSrsData },
+          fsrsData: { ...s.fsrsData, ...newFsrsData },
+        }))
       },
 
       updateCard: (id, updates) => {
@@ -586,7 +691,10 @@ export const useLibraryStore = create<LibraryState>()(
     {
       name: 'nemos-library',
       skipHydration: true,
-      storage: createJSONStorage(() => localStorage),
+      // IDB has no practical size limit — localStorage caps at ~5–10 MB which
+      // is too small for large decks (20k cards ≈ 16 MB). createIDBStorage()
+      // also auto-migrates existing localStorage data on first read.
+      storage: createJSONStorage(createIDBStorage),
     }
   )
 )

@@ -196,6 +196,10 @@ async function pushToSupabase(
   const upsertOpts = { onConflict: 'id' } as const
   const withUserId = (r: unknown) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })
 
+  // PostgREST sends .in() filters as URL query params — large arrays exceed
+  // server URL-length limits (~8KB). Batch deletes to stay well under that.
+  const BATCH = 100
+
   console.log('[SYNC] pushToSupabase: upserting to Supabase as user', user.id, {
     folders: folders.length,
     decks: decks.length,
@@ -215,72 +219,84 @@ async function pushToSupabase(
     (s) => activeCardSet.has(s.cardId) && !cardDeleteSet.has(s.cardId)
   )
 
-  const [foldersRes, decksRes, cardsRes, srsRes, sessionsRes] = await Promise.all([
+  // Upsert in batches — large payloads can exceed PostgREST body/row limits.
+  async function upsertBatched<T>(
+    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'review_sessions',
+    rows: T[],
+    opts: { onConflict: string },
+  ): Promise<void> {
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const chunk = rows.slice(i, i + BATCH)
+      const res = await supabase.from(table).upsert(chunk as never[], opts)
+      if (res.error) {
+        console.error(`[SYNC] pushToSupabase: upsert error on "${table}" (batch ${i / BATCH}):`, res.error)
+        throw new Error(`${table}: ${res.error.message} (code ${res.error.code})`)
+      }
+    }
+  }
+
+  await Promise.all([
     folders.length
-      ? supabase.from('folders').upsert(folders.map(withUserId), upsertOpts)
+      ? upsertBatched('folders', folders.map(withUserId), upsertOpts)
       : null,
     decks.length
-      ? supabase.from('decks').upsert(decks.map(withUserId), upsertOpts)
+      ? upsertBatched('decks', decks.map(withUserId), upsertOpts)
       : null,
     cards.length
-      ? supabase.from('cards').upsert(
+      ? upsertBatched(
+          'cards',
           cards.map((c) => withUserId({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' })),
           upsertOpts,
         )
       : null,
     srsToUpsert.length
-      ? supabase.from('srs_data').upsert(
-          srsToUpsert.map(withUserId),
-          { onConflict: 'card_id' },
-        )
+      ? upsertBatched('srs_data', srsToUpsert.map(withUserId), { onConflict: 'card_id' })
       : null,
     sessions.length
-      ? supabase.from('review_sessions').upsert(sessions.map(withUserId), upsertOpts)
+      ? upsertBatched('review_sessions', sessions.map(withUserId), upsertOpts)
       : null,
   ])
 
-  const checks: [string, typeof foldersRes][] = [
-    ['folders', foldersRes],
-    ['decks', decksRes],
-    ['cards', cardsRes],
-    ['srs_data', srsRes],
-    ['review_sessions', sessionsRes],
-  ]
-  for (const [table, res] of checks) {
-    if (res?.error) {
-      console.error(`[SYNC] pushToSupabase: upsert error on "${table}":`, res.error)
-      throw new Error(`${table}: ${res.error.message} (code ${res.error.code})`)
-    }
-  }
   console.log('[SYNC] pushToSupabase: all upserts succeeded')
 
   // Execute pending deletes — cards/srs first, then decks, then folders
   // so child rows are gone before their parents (avoids any implicit ordering issues).
+  // Each delete is batched: .in() with hundreds of IDs exceeds PostgREST's URL
+  // length limit and returns "Bad Request".
   if (pendingDeletes) {
     if (pendingDeletes.cards.length) {
-      const delCards = await supabase.from('cards').delete().in('id', pendingDeletes.cards)
-      if (delCards.error) {
-        console.error('[SYNC] pushToSupabase: cards delete error', delCards.error)
-        throw new Error(`cards delete: ${delCards.error.message} (code ${delCards.error.code})`)
-      }
-      const delSrs = await supabase.from('srs_data').delete().in('card_id', pendingDeletes.cards)
-      if (delSrs.error) {
-        console.error('[SYNC] pushToSupabase: srs_data delete error', delSrs.error)
-        throw new Error(`srs_data delete: ${delSrs.error.message} (code ${delSrs.error.code})`)
+      for (let i = 0; i < pendingDeletes.cards.length; i += BATCH) {
+        const chunk = pendingDeletes.cards.slice(i, i + BATCH)
+        const delCards = await supabase.from('cards').delete().in('id', chunk)
+        if (delCards.error) {
+          console.error('[SYNC] pushToSupabase: cards delete error', delCards.error)
+          throw new Error(`cards delete: ${delCards.error.message} (code ${delCards.error.code})`)
+        }
+        const delSrs = await supabase.from('srs_data').delete().in('card_id', chunk)
+        if (delSrs.error) {
+          console.error('[SYNC] pushToSupabase: srs_data delete error', delSrs.error)
+          throw new Error(`srs_data delete: ${delSrs.error.message} (code ${delSrs.error.code})`)
+        }
       }
     }
     if (pendingDeletes.decks.length) {
-      const delDecks = await supabase.from('decks').delete().in('id', pendingDeletes.decks)
-      if (delDecks.error) {
-        console.error('[SYNC] pushToSupabase: decks delete error', delDecks.error)
-        throw new Error(`decks delete: ${delDecks.error.message} (code ${delDecks.error.code})`)
+      for (let i = 0; i < pendingDeletes.decks.length; i += BATCH) {
+        const chunk = pendingDeletes.decks.slice(i, i + BATCH)
+        const delDecks = await supabase.from('decks').delete().in('id', chunk)
+        if (delDecks.error) {
+          console.error('[SYNC] pushToSupabase: decks delete error', delDecks.error)
+          throw new Error(`decks delete: ${delDecks.error.message} (code ${delDecks.error.code})`)
+        }
       }
     }
     if (pendingDeletes.folders.length) {
-      const delFolders = await supabase.from('folders').delete().in('id', pendingDeletes.folders)
-      if (delFolders.error) {
-        console.error('[SYNC] pushToSupabase: folders delete error', delFolders.error)
-        throw new Error(`folders delete: ${delFolders.error.message} (code ${delFolders.error.code})`)
+      for (let i = 0; i < pendingDeletes.folders.length; i += BATCH) {
+        const chunk = pendingDeletes.folders.slice(i, i + BATCH)
+        const delFolders = await supabase.from('folders').delete().in('id', chunk)
+        if (delFolders.error) {
+          console.error('[SYNC] pushToSupabase: folders delete error', delFolders.error)
+          throw new Error(`folders delete: ${delFolders.error.message} (code ${delFolders.error.code})`)
+        }
       }
     }
     if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length) {

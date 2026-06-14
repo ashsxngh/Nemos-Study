@@ -1,4 +1,4 @@
-import type { Folder, Deck, Card, SRSData } from '@/lib/types'
+import type { Folder, Deck, Card, SRSData, CardType } from '@/lib/types'
 
 /**
  * Parse a delimited row respecting RFC 4180 quoted fields.
@@ -57,12 +57,16 @@ function parseCSVRow(row: string): string[] {
   return parseDelimitedRow(row, ',')
 }
 
+const VALID_CARD_TYPES = new Set(['basic', 'cloze', 'typed', 'image'])
+
 /**
- * Parse CSV text as an array of front/back pairs.
+ * Parse CSV text into card objects.
  * Supports both plain "front,back" format and the Nemo export format
  * (deck_name, front, back, type, tags).
  */
-export function importFromCSV(csvText: string): { front: string; back: string }[] {
+export function importFromCSV(
+  csvText: string
+): { front: string; back: string; type?: CardType; tags?: string[] }[] {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0)
   if (lines.length === 0) return []
 
@@ -72,7 +76,7 @@ export function importFromCSV(csvText: string): { front: string; back: string }[
     firstRow[0]?.toLowerCase() === 'deck_name'
 
   const dataLines = hasHeader ? lines.slice(1) : lines
-  const results: { front: string; back: string }[] = []
+  const results: { front: string; back: string; type?: CardType; tags?: string[] }[] = []
 
   for (const line of dataLines) {
     const fields = parseCSVRow(line)
@@ -82,7 +86,11 @@ export function importFromCSV(csvText: string): { front: string; back: string }[
     if (hasHeader && firstRow[0]?.toLowerCase() === 'deck_name') {
       const front = (fields[1] ?? '').trim()
       const back = (fields[2] ?? '').trim()
-      if (front) results.push({ front, back })
+      const rawType = (fields[3] ?? '').trim()
+      const rawTags = (fields[4] ?? '').trim()
+      const type = VALID_CARD_TYPES.has(rawType) ? (rawType as CardType) : undefined
+      const tags = rawTags ? rawTags.split(';').map((t) => t.trim()).filter(Boolean) : undefined
+      if (front) results.push({ front, back, type, tags })
     } else {
       // Simple two-column format: front, back
       const front = (fields[0] ?? '').trim()

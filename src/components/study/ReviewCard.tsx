@@ -18,15 +18,20 @@ interface ReviewCardProps {
   onTypedCheck?: () => void
 }
 
-const CLOZE_RE = /\{\{c\d+::([^}]+)\}\}/g
+// Matches {{cN::answer}} and {{cN::answer::hint}}. Capture group 1 is the full content
+// (possibly "answer::hint"); callers extract the answer by splitting on the first "::".
+const CLOZE_RE = /\{\{c\d+::([^}]*)\}\}/g
 
-// Extract cloze answers in order
+// Extract cloze answers in order. Handles both {{c1::answer}} and {{c1::answer::hint}}.
 function parseClozeAnswers(text: string): string[] {
   const answers: string[] = []
-  const re = /\{\{c\d+::([^}]+)\}\}/g
+  const re = /\{\{c\d+::([^}]*)\}\}/g
   let match: RegExpExecArray | null
   while ((match = re.exec(text)) !== null) {
-    answers.push(match[1])
+    // content may be "answer::hint" — take only the answer part
+    const content = match[1]
+    const sep = content.indexOf('::')
+    answers.push(sep >= 0 ? content.slice(0, sep) : content)
   }
   return answers
 }
@@ -47,7 +52,10 @@ function parseCloze(text: string, reveal: boolean): React.ReactNode {
   CLOZE_RE.lastIndex = 0
   while ((match = CLOZE_RE.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index))
-    const answer = match[1]
+    // Strip hint: "answer::hint" → "answer"
+    const content = match[1]
+    const sep = content.indexOf('::')
+    const answer = sep >= 0 ? content.slice(0, sep) : content
     if (reveal) {
       parts.push(
         <span key={match.index} className="text-[var(--accent)] font-bold px-0.5">{answer}</span>
@@ -99,6 +107,17 @@ function CardContent({ content }: { content: string }) {
           <blockquote className="border-l-2 border-[var(--accent)] pl-3 text-[#9b9ba4] italic my-2">
             {children}
           </blockquote>
+        ),
+        table: ({ children }) => (
+          <div className="overflow-x-auto my-2">
+            <table className="min-w-full border-collapse text-sm text-left">{children}</table>
+          </div>
+        ),
+        th: ({ children }) => (
+          <th className="px-3 py-1.5 border border-[#2a2a30] bg-[#0f0f11] font-semibold text-[#e8e8ea]">{children}</th>
+        ),
+        td: ({ children }) => (
+          <td className="px-3 py-1.5 border border-[#2a2a30] text-[#c8c8cc]">{children}</td>
         ),
       }}
     >
