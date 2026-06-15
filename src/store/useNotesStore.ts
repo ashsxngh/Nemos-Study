@@ -10,9 +10,11 @@ const USER_ID = 'local-user'
 
 interface NoteState {
   notes: Note[]
+  pendingDeletedNotes: string[]
   createNote: (title?: string, folderId?: string) => Note
   updateNote: (id: string, updates: Partial<Pick<Note, 'title' | 'content' | 'tags' | 'isStarred' | 'isArchived'>>) => void
   deleteNote: (id: string) => void
+  clearPendingDeletedNotes: (ids: string[]) => void
   getNotesByFolder: (folderId?: string | null) => Note[]
 }
 
@@ -20,6 +22,7 @@ export const useNotesStore = create<NoteState>()(
   persist(
     (set, get) => ({
       notes: [],
+      pendingDeletedNotes: [],
 
       createNote: (title = '', folderId) => {
         const now = new Date().toISOString()
@@ -61,7 +64,17 @@ export const useNotesStore = create<NoteState>()(
             note,
           })
         }
-        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }))
+        set((s) => ({
+          notes: s.notes.filter((n) => n.id !== id),
+          pendingDeletedNotes: [...s.pendingDeletedNotes, id],
+        }))
+      },
+
+      clearPendingDeletedNotes: (ids) => {
+        const idSet = new Set(ids)
+        set((s) => ({
+          pendingDeletedNotes: s.pendingDeletedNotes.filter((id) => !idSet.has(id)),
+        }))
       },
 
       getNotesByFolder: (folderId) => {

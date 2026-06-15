@@ -2,10 +2,12 @@
 
 import { create } from 'zustand'
 import type { Card, ReviewLog, SRSData } from '@/lib/types'
+import type { FSRSState } from '@/lib/srs'
 
 interface UndoEntry {
   cardId: string
   prevSRS: SRSData
+  prevFSRS?: FSRSState
   logId: string
 }
 
@@ -31,7 +33,7 @@ interface StudyState {
   nextCard: () => void
   addLog: (log: Omit<ReviewLog, 'id' | 'sessionId'>) => void
   reset: () => void
-  pushUndo: (cardId: string, prevSRS: SRSData, logId: string) => void
+  pushUndo: (cardId: string, prevSRS: SRSData, logId: string, prevFSRS?: FSRSState) => void
   popUndo: () => UndoEntry | undefined
   pushRedo: (cardId: string, newSRS: SRSData) => void
   popRedo: () => RedoEntry | undefined
@@ -88,9 +90,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       redoStack: [],
     }),
 
-  pushUndo: (cardId, prevSRS, logId) =>
+  pushUndo: (cardId, prevSRS, logId, prevFSRS) =>
     set((s) => ({
-      undoStack: [...s.undoStack, { cardId, prevSRS, logId }],
+      undoStack: [...s.undoStack, { cardId, prevSRS, prevFSRS, logId }],
       redoStack: [],
     })),
 

@@ -139,8 +139,10 @@ export interface Exam {
   priority: 'low' | 'medium' | 'high'
   deckIds: string[]
   folderIds: string[]
-  targetRetention: number  // 0–1, e.g. 0.85 = 85% recall on exam day
+  targetRetention: number  // 0–1, e.g. 0.90 = 90% recall on exam day
   createdAt: string
+  rating?: number                   // 1–5 stars, set after exam date passes
+  predictedRetentionAtExam?: number // avgRetention captured at rating time (0–1)
 }
 
 export interface Goal {

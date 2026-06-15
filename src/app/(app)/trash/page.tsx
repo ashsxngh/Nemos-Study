@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { useTrashStore, type TrashEntry } from '@/store/useTrashStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
+import { useAppStore } from '@/store/useAppStore'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
@@ -119,34 +120,44 @@ export default function TrashPage() {
 
   // Direct Supabase deletion — safety net in case the earlier pendingDeletes
   // push silently failed and the row is still live in the database.
-  function deleteFromSupabase(entry: TrashEntry) {
+  async function deleteFromSupabase(entry: TrashEntry): Promise<void> {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    try {
       if (entry.type === 'card' && entry.card) {
-        supabase.from('srs_data').delete().eq('card_id', entry.card.id).then(() => {
-          supabase.from('cards').delete().eq('id', entry.card!.id)
-        })
+        const delSrs = await supabase.from('srs_data').delete().eq('card_id', entry.card.id)
+        if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
+        const delCard = await supabase.from('cards').delete().eq('id', entry.card.id)
+        if (delCard.error) throw new Error(`cards: ${delCard.error.message}`)
       } else if (entry.type === 'deck' && entry.deck) {
         const cardIds = (entry.deckCards ?? []).map((c) => c.id)
-        const run = async () => {
-          if (cardIds.length) {
-            await supabase.from('srs_data').delete().in('card_id', cardIds)
-            await supabase.from('cards').delete().in('id', cardIds)
-          }
-          await supabase.from('decks').delete().eq('id', entry.deck!.id)
+        if (cardIds.length) {
+          const delSrs = await supabase.from('srs_data').delete().in('card_id', cardIds)
+          if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
+          const delCards = await supabase.from('cards').delete().in('id', cardIds)
+          if (delCards.error) throw new Error(`cards: ${delCards.error.message}`)
         }
-        run()
+        const delDeck = await supabase.from('decks').delete().eq('id', entry.deck.id)
+        if (delDeck.error) throw new Error(`decks: ${delDeck.error.message}`)
       } else if (entry.type === 'note' && entry.note) {
-        supabase.from('notes').delete().eq('id', entry.note.id)
+        const delNote = await supabase.from('notes').delete().eq('id', entry.note.id)
+        if (delNote.error) throw new Error(`notes: ${delNote.error.message}`)
       }
-    })
+    } catch (err) {
+      console.error('[TRASH] deleteFromSupabase error:', err)
+      useAppStore.getState().addToast({
+        type: 'error',
+        message: `Failed to delete from server: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        duration: 5000,
+      })
+    }
   }
 
   function handleForeverDelete(entry: TrashEntry) {
     remove(entry.id)
-    deleteFromSupabase(entry)
+    void deleteFromSupabase(entry)
   }
 
   function handleRestore(entry: TrashEntry) {

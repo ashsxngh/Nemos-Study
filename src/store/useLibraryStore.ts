@@ -121,6 +121,7 @@ interface LibraryState {
   initCardSRS: (cardId: string) => void
   reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4) => void
   setSRSData: (cardId: string, srs: SRSData) => void
+  setFSRSData: (cardId: string, fsrs: FSRSState) => void
   removeLastLog: () => void
   resetCardSRS: (cardId: string) => void
   clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[] }) => void
@@ -420,6 +421,10 @@ export const useLibraryStore = create<LibraryState>()(
         set((s) => ({ srsData: { ...s.srsData, [cardId]: srs } }))
       },
 
+      setFSRSData: (cardId, fsrs) => {
+        set((s) => ({ fsrsData: { ...s.fsrsData, [cardId]: fsrs } }))
+      },
+
       removeLastLog: () => {
         set((s) => ({ reviewLogs: s.reviewLogs.slice(0, -1) }))
       },
@@ -490,7 +495,7 @@ export const useLibraryStore = create<LibraryState>()(
 
           const log: ReviewLog = {
             id: generateId(),
-            sessionId: 'manual',
+            sessionId: generateId(),
             cardId,
             userId: USER_ID,
             rating,
@@ -521,7 +526,7 @@ export const useLibraryStore = create<LibraryState>()(
           }
           const log: ReviewLog = {
             id: generateId(),
-            sessionId: 'manual',
+            sessionId: generateId(),
             cardId,
             userId: USER_ID,
             rating,

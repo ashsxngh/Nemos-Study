@@ -19,7 +19,9 @@ import {
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useExamStore } from '@/store/useExamStore'
 import { useAppStore } from '@/store/useAppStore'
+import { getWeakestCards } from '@/lib/examScheduler'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { ReviewCard } from '@/components/study/ReviewCard'
 import { ConfidenceRating } from '@/components/study/ConfidenceRating'
@@ -47,6 +49,7 @@ function SessionContent() {
   const router = useRouter()
 
   const deckId = searchParams.get('deck') ?? undefined
+  const examId = searchParams.get('examId') ?? undefined
   const modeParam = searchParams.get('mode')
 
   const {
@@ -75,6 +78,7 @@ function SessionContent() {
     getReviewsDue,
     reviewCard,
     decks,
+    folders,
     fsrsData,
     srsData,
     reviewLogs,
@@ -82,6 +86,8 @@ function SessionContent() {
     resetCardSRS,
     cards: allCards,
   } = useLibraryStore()
+
+  const { exams } = useExamStore()
 
   const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget } = useSettingsStore()
 
@@ -101,6 +107,8 @@ function SessionContent() {
 
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | null>(null)
+  // Blocks any second call to handleRate until the first fully completes
+  const ratingInFlightRef = useRef(false)
 
   // Zen mode — distraction-free fullscreen session
   const [zenMode, setZenMode] = useState(false)
@@ -120,16 +128,27 @@ function SessionContent() {
     if (modeParam === 'failed') return 'failed-only' as const
     if (modeParam === 'new') return 'new-only' as const
     if (modeParam === 'reviews') return 'reviews-only' as const
+    if (modeParam === 'weakest') return 'cram' as const
     return 'standard' as const
   })()
 
   /* Resolve deck name */
-  const deckName = deckId
+  const deckName = examId
+    ? (exams.find((e) => e.id === examId)?.name ?? 'Exam Study')
+    : deckId
     ? (decks.find((d) => d.id === deckId)?.name ?? 'Deck')
     : 'All cards'
 
   /* ── Card loading logic ── */
   const buildQueue = useCallback(() => {
+    // Exam "Study Weakest" mode: cards sorted ascending by FSRS retrievability
+    if (examId) {
+      const lib = useLibraryStore.getState()
+      const examObj = useExamStore.getState().exams.find((e) => e.id === examId)
+      if (!examObj) return []
+      return getWeakestCards(examObj, lib.decks, lib.cards, lib.folders, lib.fsrsData, 50)
+    }
+
     const { cards: rawCards, srsData: rawSrs } = useLibraryStore.getState()
     const pool = (deckId
       ? rawCards.filter((c) => c.deckId === deckId)
@@ -148,7 +167,7 @@ function SessionContent() {
     if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
     return getDueCards(deckId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, resolvedMode])
+  }, [deckId, examId, resolvedMode])
 
   /* ── Load cards on mount ── */
   useEffect(() => {
@@ -230,8 +249,10 @@ function SessionContent() {
   /* ── Rate a card ── */
   const handleRate = useCallback(
     (rating: Difficulty) => {
+      if (ratingInFlightRef.current) return
       const card = queue[currentIndex]
       if (!card || animatingOut) return
+      ratingInFlightRef.current = true
 
       const isNew = algorithm === 'fsrs'
         ? (useLibraryStore.getState().fsrsData[card.id]?.repetitions ?? 0) === 0
@@ -244,13 +265,16 @@ function SessionContent() {
           setAnimatingOut(null)
           requeueCurrentCard()
           setHistory((h) => [...h, currentIndex])
+          ratingInFlightRef.current = false
         }, 120)
         return
       }
 
       const responseMs = Date.now() - cardShownAtRef.current
-      const prevSRS = useLibraryStore.getState().srsData[card.id]
-      const prevMastery = deckId ? useLibraryStore.getState().getDeckMastery(deckId) : null
+      const libState = useLibraryStore.getState()
+      const prevSRS = libState.srsData[card.id]
+      const prevFSRS = libState.fsrsData[card.id]
+      const prevMastery = deckId ? libState.getDeckMastery(deckId) : null
 
       const logId = Math.random().toString(36).slice(2)
       addLog({
@@ -289,7 +313,7 @@ function SessionContent() {
         }
       }
 
-      if (prevSRS) pushUndo(card.id, prevSRS, logId)
+      if (prevSRS) pushUndo(card.id, prevSRS, logId, prevFSRS)
       setHistory((h) => [...h, currentIndex])
 
       // Animate then advance
@@ -297,6 +321,7 @@ function SessionContent() {
       setTimeout(() => {
         setAnimatingOut(null)
         nextCard()
+        ratingInFlightRef.current = false
       }, 180)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -307,8 +332,10 @@ function SessionContent() {
   const handleUndo = useCallback(() => {
     const entry = popUndo()
     if (!entry) return
-    useLibraryStore.getState().setSRSData(entry.cardId, entry.prevSRS)
-    useLibraryStore.getState().removeLastLog()
+    const lib = useLibraryStore.getState()
+    lib.setSRSData(entry.cardId, entry.prevSRS)
+    if (entry.prevFSRS) lib.setFSRSData(entry.cardId, entry.prevFSRS)
+    lib.removeLastLog()
     decrementIndex()
     if (rememberedCount > 0) setRememberedCount((c) => c - 1)
     useAppStore.getState().addToast({ type: 'info', message: 'Undid last review', duration: 2000 })

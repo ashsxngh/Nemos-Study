@@ -34,7 +34,7 @@ export function migrateLegacyIds(): void {
   lib.decks.forEach((d) => collect(d.id))
   lib.cards.forEach((c) => collect(c.id))
   lib.sessions.forEach((s) => collect(s.id))
-  lib.reviewLogs.forEach((l) => collect(l.id))
+  lib.reviewLogs.forEach((l) => { collect(l.id); collect(l.sessionId) })
   notes.forEach((n) => collect(n.id))
   exams.forEach((e) => collect(e.id))
 
@@ -99,6 +99,7 @@ export function migrateLegacyIds(): void {
       ...l,
       id: mapId(l.id) as string,
       cardId: mapId(l.cardId) as string,
+      sessionId: mapId(l.sessionId) as string,
     })),
     // Legacy ids were never accepted by the server, so there is nothing to
     // delete remotely — keep only valid UUIDs.

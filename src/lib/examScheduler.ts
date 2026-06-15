@@ -78,7 +78,7 @@ export function computeExamRetentionStats(
   const examDate = new Date(exam.date + 'T23:59:59')
   const now = new Date()
   const daysUntilExam = Math.max(1, (examDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-  const target = exam.targetRetention ?? 0.85
+  const target = exam.targetRetention ?? 0.90
 
   let newCards = 0
   let reviewed = 0
@@ -136,7 +136,7 @@ export function getPulledForwardCardIds(
   const now = new Date()
   if (examDate <= now) return []
 
-  const target = exam.targetRetention ?? 0.85
+  const target = exam.targetRetention ?? 0.90
 
   return cards
     .filter((c) => {
@@ -173,7 +173,7 @@ export function computeCardUrgencies(
     if (examDate <= now) continue
     const daysUntilExam = (examDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
     const examDeckIds = new Set(getExamDeckIds(exam, decks, folders))
-    const target = exam.targetRetention ?? 0.85
+    const target = exam.targetRetention ?? 0.90
 
     for (const card of cards) {
       if (!examDeckIds.has(card.deckId)) continue
@@ -205,4 +205,106 @@ export function dailyReviewsNeeded(
   const daysLeft = Math.max(1, (examDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
   const count = getPulledForwardCardIds(exam, cards, fsrsData).length
   return count > 0 ? Math.ceil(count / daysLeft) : 0
+}
+
+// ── Per-topic breakdown ───────────────────────────────────────────────────────
+
+export interface TopicBreakdown {
+  id: string
+  name: string
+  type: 'deck' | 'folder'
+  readiness: number  // 0–100 integer
+  cardCount: number
+}
+
+/**
+ * Returns a per-folder / per-deck readiness breakdown for the topics explicitly
+ * added to an exam. Folders are shown as a single aggregate (including subfolders).
+ * Items are sorted lowest-readiness first so the weakest topic is always at the top.
+ */
+export function computePerTopicBreakdown(
+  exam: Exam,
+  decks: Deck[],
+  cards: Card[],
+  folders: Folder[],
+  fsrsData: Record<string, FSRSState>,
+): TopicBreakdown[] {
+  const examDate = new Date(exam.date + 'T23:59:59')
+  const result: TopicBreakdown[] = []
+
+  // Each linked folder → aggregate all cards in it (including subfolder decks)
+  for (const folderId of exam.folderIds ?? []) {
+    const folder = folders.find((f) => f.id === folderId)
+    if (!folder) continue
+    const allFolderIds = [folderId, ...descendantFolderIds(folders, folderId)]
+    const deckIds = new Set(
+      decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id),
+    )
+    const folderCards = cards.filter((c) => deckIds.has(c.deckId))
+    const reviewed = folderCards.filter((c) => (fsrsData[c.id]?.repetitions ?? 0) > 0)
+    const avg =
+      reviewed.length > 0
+        ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
+          reviewed.length
+        : 0
+    result.push({
+      id: folderId,
+      name: folder.name,
+      type: 'folder',
+      readiness: Math.round(avg * 100),
+      cardCount: folderCards.length,
+    })
+  }
+
+  // Each individually-linked deck
+  for (const deckId of exam.deckIds) {
+    const deck = decks.find((d) => d.id === deckId)
+    if (!deck) continue
+    const deckCards = cards.filter((c) => c.deckId === deckId)
+    const reviewed = deckCards.filter((c) => (fsrsData[c.id]?.repetitions ?? 0) > 0)
+    const avg =
+      reviewed.length > 0
+        ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
+          reviewed.length
+        : 0
+    result.push({
+      id: deckId,
+      name: deck.name,
+      type: 'deck',
+      readiness: Math.round(avg * 100),
+      cardCount: deckCards.length,
+    })
+  }
+
+  return result.sort((a, b) => a.readiness - b.readiness)
+}
+
+// ── Weakest-card selection ────────────────────────────────────────────────────
+
+/**
+ * Returns up to `limit` cards from the exam, sorted ascending by predicted
+ * FSRS retrievability on exam day. New/unreviewed cards (retrievability = 0)
+ * surface first, making this ideal for a "study your weak spots" session.
+ */
+export function getWeakestCards(
+  exam: Exam,
+  decks: Deck[],
+  cards: Card[],
+  folders: Folder[],
+  fsrsData: Record<string, FSRSState>,
+  limit = 50,
+): Card[] {
+  const examDate = new Date(exam.date + 'T23:59:59')
+  const examCards = getExamCards(exam, decks, cards, folders)
+
+  return examCards
+    .map((c) => {
+      const state = fsrsData[c.id]
+      const retention =
+        state && state.repetitions > 0 ? fsrsRetentionAtDate(state, examDate) : 0
+      return { card: c, retention }
+    })
+    .sort((a, b) => a.retention - b.retention)
+    .slice(0, limit)
+    .map(({ card }) => card)
 }

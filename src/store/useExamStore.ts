@@ -17,6 +17,7 @@ interface ExamState {
   addFolderToExam: (examId: string, folderId: string) => void
   removeFolderFromExam: (examId: string, folderId: string) => void
   setTargetRetention: (examId: string, retention: number) => void
+  rateExam: (id: string, rating: number, predictedRetention: number) => void
 }
 
 export const useExamStore = create<ExamState>()(
@@ -34,7 +35,7 @@ export const useExamStore = create<ExamState>()(
           priority,
           deckIds,
           folderIds,
-          targetRetention: 0.85,
+          targetRetention: 0.90,
           createdAt: new Date().toISOString(),
         }
         set((s) => ({ exams: [...s.exams, exam] }))
@@ -94,6 +95,14 @@ export const useExamStore = create<ExamState>()(
         set((s) => ({
           exams: s.exams.map((e) =>
             e.id === examId ? { ...e, targetRetention: retention } : e
+          ),
+        }))
+      },
+
+      rateExam: (id, rating, predictedRetention) => {
+        set((s) => ({
+          exams: s.exams.map((e) =>
+            e.id === id ? { ...e, rating, predictedRetentionAtExam: predictedRetention } : e
           ),
         }))
       },

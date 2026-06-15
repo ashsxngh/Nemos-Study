@@ -63,18 +63,52 @@ const realtimePending = {
   notes:      new Set<string>(),
 }
 
-// Merge server rows with local rows, always keeping local-only items.
-// Local-only items are cards/decks/etc that were created locally but haven't
-// been pushed to Supabase yet (e.g. created within the debounce window before reload).
-// Server wins for any item that exists on both sides.
+// IDs that existed in localStorage when this session loaded (snapshotted once,
+// before the first pull). An item that is local-only AND in this set was deleted
+// on another device — drop it. An item that is local-only but NOT in this set
+// was created during this session (before push completed) — keep it.
+const preExistingIds = {
+  folders:    new Set<string>(),
+  decks:      new Set<string>(),
+  cards:      new Set<string>(),
+  notes:      new Set<string>(),
+  reviewLogs: new Set<string>(),
+}
+let preExistingSnapshotTaken = false
+
+function snapshotPreExistingIds(): void {
+  if (preExistingSnapshotTaken) return
+  const s  = useLibraryStore.getState()
+  const ns = useNotesStore.getState()
+  s.folders.forEach((f) => preExistingIds.folders.add(f.id))
+  s.decks.forEach((d)   => preExistingIds.decks.add(d.id))
+  s.cards.forEach((c)   => preExistingIds.cards.add(c.id))
+  s.reviewLogs.forEach((l) => preExistingIds.reviewLogs.add(l.id))
+  ns.notes.forEach((n)  => preExistingIds.notes.add(n.id))
+  preExistingSnapshotTaken = true
+}
+
+// Merge server rows with local state.
+// - Server always wins for items that exist on both sides.
+// - Local-only items present in preExistingSet were loaded from a previous session
+//   and are absent from the server = they were deleted on another device. Drop them.
+// - Local-only items NOT in preExistingSet were created this session before push
+//   completed. Keep them so they get pushed.
+// - When preExistingSet is omitted (review logs), all local-only rows are kept
+//   because review logs are append-only and never deleted by users.
 function mergeKeepLocal<T extends { id: string }>(
   serverRows: T[],
   currentRows: T[],
+  preExistingSet?: Set<string>,
 ): T[] {
   const serverMap = new Map(serverRows.map((r) => [r.id, r]))
-  const localOnly = currentRows.filter((r) => !serverMap.has(r.id))
+  const localOnly = currentRows.filter((r) => {
+    if (serverMap.has(r.id)) return false
+    if (preExistingSet?.has(r.id)) return false
+    return true
+  })
   if (localOnly.length > 0) {
-    console.log(`[SYNC] mergeKeepLocal: preserving ${localOnly.length} local-only item(s)`, localOnly.map(r => r.id))
+    console.log(`[SYNC] mergeKeepLocal: preserving ${localOnly.length} session-created local-only item(s)`, localOnly.map((r) => r.id))
   }
   return [...serverRows, ...localOnly]
 }
@@ -86,7 +120,6 @@ async function pullFromSupabase(): Promise<void> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return
-
 
   const [
     foldersRes,
@@ -106,47 +139,63 @@ async function pullFromSupabase(): Promise<void> {
     supabase.from('notes').select('*').eq('user_id', user.id),
   ])
 
-  // Filter out anything that's locally queued for deletion so a pull never
-  // resurrects an item the user just deleted before the push debounce fired.
+  // On error, log clearly and skip that table — local state is left untouched.
+  if (foldersRes.error)  console.error('[SYNC] pullFromSupabase: folders error', foldersRes.error)
+  if (decksRes.error)    console.error('[SYNC] pullFromSupabase: decks error', decksRes.error)
+  if (cardsRes.error)    console.error('[SYNC] pullFromSupabase: cards error', cardsRes.error)
+  if (srsRes.error)      console.error('[SYNC] pullFromSupabase: srs_data error', srsRes.error)
+  if (sessionsRes.error) console.error('[SYNC] pullFromSupabase: review_sessions error', sessionsRes.error)
+  if (logsRes.error)     console.error('[SYNC] pullFromSupabase: review_logs error', logsRes.error)
+  if (notesRes.error)    console.error('[SYNC] pullFromSupabase: notes error', notesRes.error)
+
+  // Filter out anything locally queued for deletion so a pull never resurrects
+  // an item the user deleted before the push debounce fired.
   const { pendingDeletes } = useLibraryStore.getState()
+  const { pendingDeletedNotes } = useNotesStore.getState()
   const pendingFolderSet = new Set(pendingDeletes.folders)
   const pendingDeckSet   = new Set(pendingDeletes.decks)
   const pendingCardSet   = new Set(pendingDeletes.cards)
+  const pendingNoteSet   = new Set(pendingDeletedNotes)
 
-  const folders = (foldersRes.data ?? [])
-    .map((r) => toCamel(r) as Folder)
-    .filter((f) => !pendingFolderSet.has(f.id))
-  const decks = (decksRes.data ?? [])
-    .map((r) => toCamel(r) as Deck)
-    .filter((d) => !pendingDeckSet.has(d.id))
-  const cards = (cardsRes.data ?? [])
-    .map((r) => toCamel(r) as Card)
-    .filter((c) => !pendingCardSet.has(c.id))
-  const sessions = (sessionsRes.data ?? []).map((r) => toCamel(r) as ReviewSession)
-  const reviewLogs = (logsRes.data  ?? []).map((r) => toCamel(r) as ReviewLog)
-  const notes   = (notesRes.data   ?? []).map((r) => toCamel(r) as Note)
+  // null = fetch errored → skip that table in setState (preserve local state).
+  const folders = foldersRes.error ? null :
+    (foldersRes.data ?? []).map((r) => toCamel(r) as Folder).filter((f) => !pendingFolderSet.has(f.id))
+  const decks = decksRes.error ? null :
+    (decksRes.data ?? []).map((r) => toCamel(r) as Deck).filter((d) => !pendingDeckSet.has(d.id))
+  const cards = cardsRes.error ? null :
+    (cardsRes.data ?? []).map((r) => toCamel(r) as Card).filter((c) => !pendingCardSet.has(c.id))
+  const sessions = sessionsRes.error ? null :
+    (sessionsRes.data ?? []).map((r) => toCamel(r) as ReviewSession)
+  const reviewLogs = logsRes.error ? null :
+    (logsRes.data ?? []).map((r) => toCamel(r) as ReviewLog)
+  const notes = notesRes.error ? null :
+    (notesRes.data ?? []).map((r) => toCamel(r) as Note).filter((n) => !pendingNoteSet.has(n.id))
 
-
-  // srsData is stored as a Record<cardId, SRSData> in the store.
-  // Only keep entries for cards that survived the pending-delete filter — this
-  // prevents orphaned srs_data rows (for deleted deck cards) from being pulled
-  // back in and later re-upserted to Supabase on the next push.
-  const survivingCardSet = new Set(cards.map((c) => c.id))
-  const srsData: Record<string, SRSData> = {}
-  for (const row of srsRes.data ?? []) {
-    const s = toCamel(row) as SRSData
-    if (!pendingCardSet.has(s.cardId) && survivingCardSet.has(s.cardId)) {
-      srsData[s.cardId] = s
+  // Build srsData record from server rows. null on error — preserve local.
+  // Pre-filter to fetched card IDs to avoid re-upserting orphaned rows; the
+  // setState merge below does a final pass using the full merged card set.
+  let fetchedSrsData: Record<string, SRSData> | null = null
+  if (!srsRes.error) {
+    fetchedSrsData = {}
+    const fetchedCardSet = new Set((cards ?? []).map((c) => c.id))
+    for (const row of srsRes.data ?? []) {
+      const s = toCamel(row) as SRSData
+      if (!pendingCardSet.has(s.cardId) && (cards === null || fetchedCardSet.has(s.cardId))) {
+        fetchedSrsData[s.cardId] = s
+      }
     }
   }
 
   useLibraryStore.setState((current) => {
-    const mergedDecks = mergeKeepLocal(decks, current.decks)
+    const mergedDecks = decks !== null
+      ? mergeKeepLocal(decks, current.decks, preExistingIds.decks)
+      : current.decks
     const mergedDeckSet = new Set(mergedDecks.map((d) => d.id))
 
-    // Remove cards whose deck no longer exists — these are orphans left behind
-    // when a deck was deleted but its cards survived in Supabase or local state.
-    const rawMergedCards = mergeKeepLocal(cards, current.cards)
+    // Remove cards whose deck no longer exists (orphans from deleted decks).
+    const rawMergedCards = cards !== null
+      ? mergeKeepLocal(cards, current.cards, preExistingIds.cards)
+      : current.cards
     const orphanCardIds = rawMergedCards
       .filter((c) => !mergedDeckSet.has(c.deckId))
       .map((c) => c.id)
@@ -165,22 +214,23 @@ async function pullFromSupabase(): Promise<void> {
       (id) => !current.pendingDeletes.cards.includes(id),
     )
 
+    // Merge srsData: server wins for existing entries, prune orphans.
+    const mergedSrsData = fetchedSrsData !== null
+      ? Object.fromEntries(
+          Object.entries({ ...current.srsData, ...fetchedSrsData }).filter(([id]) => mergedCardSet.has(id))
+        )
+      : Object.fromEntries(Object.entries(current.srsData).filter(([id]) => mergedCardSet.has(id)))
+
     return {
-      folders:    mergeKeepLocal(folders, current.folders),
-      decks:      mergedDecks,
-      cards:      mergedCards,
-      // Strip srsData entries for cards that aren't in the final merged set.
-      // This cleans up orphans from deleted decks that survived in Supabase.
-      srsData: Object.fromEntries(
-        Object.entries({ ...current.srsData, ...srsData }).filter(([id]) => mergedCardSet.has(id))
-      ),
-      // Strip fsrsData entries for removed/orphan cards (fsrsData is local-only,
-      // so deleteDeck cleans it on delete, but orphans re-introduced via pull need this).
+      ...(folders !== null ? { folders: mergeKeepLocal(folders, current.folders, preExistingIds.folders) } : {}),
+      decks: mergedDecks,
+      cards: mergedCards,
+      srsData: mergedSrsData,
       fsrsData: Object.fromEntries(
         Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id))
       ),
-      sessions,
-      reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs),
+      ...(sessions !== null ? { sessions } : {}),
+      ...(reviewLogs !== null ? { reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs) } : {}),
       ...(newOrphanIds.length > 0 ? {
         pendingDeletes: {
           ...current.pendingDeletes,
@@ -189,10 +239,12 @@ async function pullFromSupabase(): Promise<void> {
       } : {}),
     }
   })
-  useNotesStore.setState((current) => ({
-    notes: mergeKeepLocal(notes, current.notes),
-  }))
 
+  if (notes !== null) {
+    useNotesStore.setState((current) => ({
+      notes: mergeKeepLocal(notes, current.notes, preExistingIds.notes),
+    }))
+  }
 
   realtimePending.folders.clear()
   realtimePending.decks.clear()
@@ -209,6 +261,7 @@ async function pushToSupabase(
   cards: Card[],
   srsData: Record<string, SRSData>,
   sessions: ReviewSession[],
+  reviewLogs: ReviewLog[],
   pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
@@ -239,6 +292,7 @@ async function pushToSupabase(
     cards: cards.length,
     srsData: Object.keys(srsData).length,
     sessions: sessions.length,
+    reviewLogs: reviewLogs.length,
   })
 
   // Only upsert srs_data for cards that exist in the active card set.
@@ -254,7 +308,7 @@ async function pushToSupabase(
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
-    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'review_sessions',
+    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'review_sessions' | 'review_logs',
     rows: T[],
     opts: { onConflict: string },
   ): Promise<void> {
@@ -287,6 +341,9 @@ async function pushToSupabase(
       : null,
     sessions.length
       ? upsertBatched('review_sessions', sessions.map(withUserId), upsertOpts)
+      : null,
+    reviewLogs.length
+      ? upsertBatched('review_logs', reviewLogs.map(withUserId), upsertOpts)
       : null,
   ])
 
@@ -338,12 +395,26 @@ async function pushToSupabase(
   }
 }
 
-async function pushNotesToSupabase(notes: Note[]): Promise<void> {
+async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[]): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError) throw new Error(`Auth error: ${authError.message}`)
   if (!user) return
+
+  const BATCH = 100
+
+  if (pendingDeletedNotes.length) {
+    for (let i = 0; i < pendingDeletedNotes.length; i += BATCH) {
+      const chunk = pendingDeletedNotes.slice(i, i + BATCH)
+      const res = await supabase.from('notes').delete().in('id', chunk)
+      if (res.error) {
+        console.error('[SYNC] pushNotesToSupabase: delete error', res.error)
+        throw new Error(`notes delete: ${res.error.message} (code ${res.error.code})`)
+      }
+    }
+  }
+
   if (!notes.length) return
   const res = await supabase.from('notes').upsert(
     notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })),
@@ -391,7 +462,7 @@ export function useSync(): SyncStatus {
         // already corrected our local state by the time we get here.
         const s = useLibraryStore.getState()
         console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
-        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.sessions, s.pendingDeletes)
+        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.sessions, s.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
         if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length) {
@@ -425,11 +496,14 @@ export function useSync(): SyncStatus {
     }
   }, [])
 
-  const handleNotesPush = useCallback(async (notes: Note[]) => {
+  const handleNotesPush = useCallback(async (notes: Note[], pendingDeletedNotes: string[]) => {
     setSyncing(true)
     setError(null)
     try {
-      await pushNotesToSupabase(notes)
+      await pushNotesToSupabase(notes, pendingDeletedNotes)
+      if (pendingDeletedNotes.length) {
+        useNotesStore.getState().clearPendingDeletedNotes(pendingDeletedNotes)
+      }
       setLastSynced(new Date())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed')
@@ -479,14 +553,19 @@ export function useSync(): SyncStatus {
     let cancelled = false
 
     // Rehydrate from localStorage first so the UI has instant data.
-    // Pull from Supabase then merges on top (server wins for conflicts,
-    // local-only items are preserved in case push hasn't completed yet).
+    // Pull from Supabase then merges on top (server wins for conflicts;
+    // only session-created local items are preserved — pre-existing ones
+    // absent from the server were deleted elsewhere and are dropped).
     const init = async () => {
       await useLibraryStore.persist.rehydrate()
       await useNotesStore.persist.rehydrate()
       // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
       // don't fail Supabase's uuid columns. No-op when nothing is legacy.
       migrateLegacyIds()
+      // Snapshot which IDs currently exist in localStorage so that pull can
+      // distinguish "deleted on another device" (pre-existing + absent from
+      // server → drop) from "created this session" (not in snapshot → keep).
+      snapshotPreExistingIds()
       console.log('[SYNC] useSync mount: starting initial pull')
       await pullFromSupabase()
     }
@@ -546,7 +625,7 @@ export function useSync(): SyncStatus {
       if (!mountedRef.current) return
       if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current)
       notesDebounceRef.current = setTimeout(() => {
-        handleNotesPush(state.notes)
+        handleNotesPush(state.notes, state.pendingDeletedNotes)
       }, 400)
     })
     return () => {
