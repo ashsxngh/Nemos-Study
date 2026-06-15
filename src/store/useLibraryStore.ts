@@ -553,11 +553,12 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData } = get()
+        const { cards, fsrsData, srsData, decks } = get()
         const { algorithm, newCardsPerDay } = useSettingsStore.getState()
         const todayStr = new Date().toISOString().slice(0, 10)
+        const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
-          .filter((c) => !c.isArchived)
+          .filter((c) => !c.isArchived && deckSet.has(c.deckId))
 
         // Count new cards already studied today (repetitions went from 0→1 today)
         const studiedNewToday = pool.filter((c) => {
@@ -589,8 +590,9 @@ export const useLibraryStore = create<LibraryState>()(
       getReviewsDue: (deckId) => {
         const { cards, fsrsData, srsData, decks, folders } = get()
         const { algorithm } = useSettingsStore.getState()
+        const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
-          .filter((c) => !c.isArchived)
+          .filter((c) => !c.isArchived && deckSet.has(c.deckId))
         const now = new Date()
 
         // Collect IDs of cards pulled forward by exam deadlines

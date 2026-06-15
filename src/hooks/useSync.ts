@@ -141,19 +141,52 @@ async function pullFromSupabase(): Promise<void> {
   }
 
   useLibraryStore.setState((current) => {
-    const mergedCards = mergeKeepLocal(cards, current.cards)
+    const mergedDecks = mergeKeepLocal(decks, current.decks)
+    const mergedDeckSet = new Set(mergedDecks.map((d) => d.id))
+
+    // Remove cards whose deck no longer exists — these are orphans left behind
+    // when a deck was deleted but its cards survived in Supabase or local state.
+    const rawMergedCards = mergeKeepLocal(cards, current.cards)
+    const orphanCardIds = rawMergedCards
+      .filter((c) => !mergedDeckSet.has(c.deckId))
+      .map((c) => c.id)
+    const mergedCards = orphanCardIds.length > 0
+      ? rawMergedCards.filter((c) => mergedDeckSet.has(c.deckId))
+      : rawMergedCards
+    if (orphanCardIds.length > 0) {
+      console.log(
+        '[SYNC] pullFromSupabase: removing', orphanCardIds.length,
+        'orphan card(s) with no matching deck, queuing for remote delete',
+      )
+    }
+
     const mergedCardSet = new Set(mergedCards.map((c) => c.id))
+    const newOrphanIds = orphanCardIds.filter(
+      (id) => !current.pendingDeletes.cards.includes(id),
+    )
+
     return {
       folders:    mergeKeepLocal(folders, current.folders),
-      decks:      mergeKeepLocal(decks,   current.decks),
+      decks:      mergedDecks,
       cards:      mergedCards,
       // Strip srsData entries for cards that aren't in the final merged set.
       // This cleans up orphans from deleted decks that survived in Supabase.
       srsData: Object.fromEntries(
         Object.entries({ ...current.srsData, ...srsData }).filter(([id]) => mergedCardSet.has(id))
       ),
+      // Strip fsrsData entries for removed/orphan cards (fsrsData is local-only,
+      // so deleteDeck cleans it on delete, but orphans re-introduced via pull need this).
+      fsrsData: Object.fromEntries(
+        Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id))
+      ),
       sessions,
       reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs),
+      ...(newOrphanIds.length > 0 ? {
+        pendingDeletes: {
+          ...current.pendingDeletes,
+          cards: [...current.pendingDeletes.cards, ...newOrphanIds],
+        },
+      } : {}),
     }
   })
   useNotesStore.setState((current) => ({
