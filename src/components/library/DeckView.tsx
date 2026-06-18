@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download } from 'lucide-react'
+import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download, Eye } from 'lucide-react'
 import {
   DndContext,
   closestCenter,
@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
+import { ReviewCard } from '@/components/study/ReviewCard'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, truncate } from '@/lib/utils'
@@ -48,6 +49,7 @@ interface SortableCardRowProps {
   onEdit: (card: Card) => void
   onDelete: (id: string) => void
   onResetSRS: (id: string) => void
+  onPreview: (card: Card) => void
   onClick?: () => void
 }
 
@@ -65,7 +67,18 @@ function fmtRelative(iso: string | null) {
   return `${days}d ago`
 }
 
-function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onClick }: SortableCardRowProps) {
+// SM2's early learning steps use sub-day intervals (minutes) — show those in
+// minutes instead of rounding down to "0 DAYS".
+function fmtInterval(days: number): string {
+  if (days < 1) {
+    const minutes = Math.max(1, Math.round(days * 1440))
+    return `${minutes} MIN${minutes === 1 ? '' : 'S'}`
+  }
+  const rounded = Math.round(days)
+  return `${rounded} DAY${rounded === 1 ? '' : 'S'}`
+}
+
+function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onPreview, onClick }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
   const { cardFields } = useSettingsStore()
   const {
@@ -119,7 +132,7 @@ function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onR
             {cardFields.progress && (
               <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
                 <span className="w-2.5 h-2.5 rounded-full border border-[var(--text-muted)] inline-block shrink-0" />
-                {srs ? `${srs.interval} DAY${srs.interval === 1 ? '' : 'S'}` : 'NEW'}
+                {srs ? fmtInterval(srs.interval) : 'NEW'}
               </span>
             )}
             {cardFields.retention && srs && (
@@ -147,6 +160,15 @@ function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onR
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={(e) => { e.stopPropagation(); onPreview(card) }}
+          className="w-6 px-0"
+          title="Preview card"
+        >
+          <Eye size={11} />
+        </Button>
         <Button
           variant="ghost"
           size="xs"
@@ -219,6 +241,8 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const [editingCard, setEditingCard] = useState<Card | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [selectedIdx, setSelectedIdx] = useState<number>(-1)
+  const [previewCard, setPreviewCard] = useState<Card | null>(null)
+  const [previewShowAnswer, setPreviewShowAnswer] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -239,7 +263,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
     })
   }
 
-  const anyDialogOpen = addingCard || !!editingCard || !!confirmDeleteId
+  const anyDialogOpen = addingCard || !!editingCard || !!confirmDeleteId || !!previewCard
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -366,6 +390,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
                       onEdit={setEditingCard}
                       onDelete={setConfirmDeleteId}
                       onResetSRS={(id) => resetCardSRS(id)}
+                      onPreview={(c) => { setPreviewShowAnswer(false); setPreviewCard(c) }}
                       onClick={() => setSelectedIdx(idx === selectedIdx ? -1 : idx)}
                     />
                   )
@@ -405,6 +430,34 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
               card={editingCard}
               onDone={() => setEditingCard(null)}
             />
+          )}
+        </div>
+      </Dialog>
+
+      {/* Preview card dialog — a quick peek, not a study session */}
+      <Dialog
+        open={!!previewCard}
+        onClose={() => setPreviewCard(null)}
+        title="Preview Card"
+        size="lg"
+      >
+        <div className="p-4">
+          {previewCard && (
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
+            >
+              <ReviewCard card={previewCard} showAnswer={previewShowAnswer} onTypedCheck={() => setPreviewShowAnswer(true)} />
+              {!previewShowAnswer && previewCard.type !== 'typed' && previewCard.type !== 'cloze' && (
+                <button
+                  onClick={() => setPreviewShowAnswer(true)}
+                  className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-t hover:brightness-110 select-none"
+                  style={{ background: 'var(--bg-hover)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Show Answer
+                </button>
+              )}
+            </div>
           )}
         </div>
       </Dialog>

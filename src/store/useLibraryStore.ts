@@ -506,14 +506,38 @@ export const useLibraryStore = create<LibraryState>()(
             ease: updated.difficulty,
             wasNew,
           }
+          // Mirror the FSRS result into srsData too — it's the only table that
+          // gets pushed to Supabase (srs_data has no FSRS columns), so without
+          // this every FSRS review would be invisible to sync/stats/the DB.
+          const existingSrs = get().srsData[cardId] ?? createInitialSRSData(cardId, USER_ID, {
+            easyBonus, hardInterval, lapseInterval, startingEase, graduatingInterval,
+          })
+          // FSRS has a 'learning' state with no SM2 equivalent — it's still a
+          // reviewed (non-new) card, so it maps to 'review' here.
+          const mirroredState: SRSData['state'] =
+            updated.state === 'relearning' ? 'relearning' : updated.state === 'new' ? 'new' : 'review'
+          const mirroredSrs: SRSData = {
+            ...existingSrs,
+            interval: logInterval,
+            repetitions: updated.repetitions,
+            lapses: updated.lapses,
+            dueDate: updated.dueDate,
+            lastReviewedAt: updated.lastReviewedAt,
+            masteryPercent: Math.round(fsrsRetrievability(updated) * 100),
+            state: mirroredState,
+          }
           set((s) => ({
             fsrsData: { ...s.fsrsData, [cardId]: updated },
+            srsData: { ...s.srsData, [cardId]: mirroredSrs },
             reviewLogs: [...s.reviewLogs, log],
             cards: suspendIfLeech(s.cards, updated.lapses),
           }))
         } else {
-          const existing = get().srsData[cardId]
-          if (!existing) return
+          // Self-heal a missing entry instead of silently dropping the review
+          // (mirrors the fsrs branch's `?? fsrsInitCard(...)` fallback above).
+          const existing = get().srsData[cardId] ?? createInitialSRSData(cardId, USER_ID, {
+            easyBonus, hardInterval, lapseInterval, startingEase, graduatingInterval,
+          })
           const wasNew = existing.repetitions === 0
           const updated = scheduleCard(existing, rating, {
             easyBonus,

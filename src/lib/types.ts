@@ -86,6 +86,7 @@ export interface SRSData {
   lastReviewedAt: string | null
   lapses: number
   masteryPercent: number
+  state: 'new' | 'review' | 'relearning'
 }
 
 export interface ReviewSession {

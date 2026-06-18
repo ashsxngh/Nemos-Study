@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
+import { Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle, Sparkles, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAppStore } from '@/store/useAppStore'
@@ -10,12 +10,14 @@ import { useSettingsStore } from '@/store/useSettingsStore'
 import { exportAsJSON, exportDecksAsCSV } from '@/lib/export'
 import { importFromCSV, importFromJSON } from '@/lib/import'
 import { optimizeFsrsWeights, MIN_REVIEWS_FOR_OPTIMIZATION } from '@/lib/srs'
+import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
 import { cn } from '@/lib/utils'
 import type { Theme } from '@/lib/types'
 
 const sections = [
   { id: 'appearance', label: 'Appearance', icon: Sun },
   { id: 'srs', label: 'SRS Algorithm', icon: Brain },
+  { id: 'fsrs-sim', label: 'FSRS Simulator', icon: Activity },
   { id: 'burnout', label: 'Burnout & Workload', icon: AlertTriangle },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: Keyboard },
@@ -570,6 +572,14 @@ export function SettingsPage() {
                   </div>
                 </>
               )}
+            </section>
+          )}
+
+          {/* ── FSRS Simulator ── */}
+          {activeSection === 'fsrs-sim' && (
+            <section>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">FSRS Simulator</h2>
+              <FSRSSimulator />
             </section>
           )}
 

@@ -47,7 +47,7 @@ const STUDY_ITEMS = [
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncing, syncError, manualSync } = useAppStore()
+  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync } = useAppStore()
   const { decks, folders, cards, createDeck, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -58,6 +58,10 @@ export function Sidebar() {
   const newCards = getNewCards()
   const reviewsDue = getReviewsDue()
   const dueCards = getDueCards()
+
+  // Don't surface sync errors during an active study session — they're a
+  // distraction mid-review and the icon will still show as soon as the user leaves.
+  const showSyncError = syncError && !pathname.startsWith('/study/session')
   const inboxCount = dueCards.length
 
   const counts = { inbox: inboxCount, new: newCards.length, reviews: reviewsDue.length }
@@ -133,7 +137,7 @@ export function Sidebar() {
         </nav>
 
         <div className="mt-auto flex flex-col items-center pb-2 pt-1 border-t border-[var(--border)] gap-0.5">
-          {syncError && (
+          {showSyncError && (
             <Tooltip content="Sync failed — click to retry" side="right">
               <button onClick={() => manualSync?.()} className="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[var(--danger-subtle)] transition-colors">
                 <WifiOff size={13} className="text-[var(--danger)]" />
@@ -320,8 +324,8 @@ export function Sidebar() {
 
       {/* Bottom actions */}
       <div className="px-3 pb-3 pt-2 border-t border-[var(--border)] shrink-0 space-y-0.5">
-        {/* Sync status — only visible on error */}
-        {syncError && (
+        {/* Sync status — only visible on error, hidden during active study sessions */}
+        {showSyncError && (
           <button
             onClick={() => manualSync?.()}
             className="flex items-center gap-2.5 h-8 px-2.5 w-full rounded-lg text-xs transition-colors text-[var(--danger)] hover:bg-[var(--danger-subtle)]"

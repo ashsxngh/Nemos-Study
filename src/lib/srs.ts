@@ -3,6 +3,7 @@ import type { SRSData, Difficulty } from './types'
 const DEFAULT_EASE = 2.5
 const MIN_EASE = 1.3
 const HARD_PENALTY = 0.15
+const MINUTE = 1 / 1440 // one minute expressed as a fraction of a day
 
 // ── FSRS-5 ────────────────────────────────────────────────────────────────────
 
@@ -258,6 +259,7 @@ export function createInitialSRSData(cardId: string, userId: string, settings?: 
     lastReviewedAt: null,
     lapses: 0,
     masteryPercent: 0,
+    state: 'new',
   }
 }
 
@@ -266,7 +268,6 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
   let { interval, easeFactor, repetitions, lapses } = srs
 
   const hardMultiplier = settings?.hardInterval ?? 1.2
-  const graduatingInterval = settings?.graduatingInterval ?? 4
   const easyBonusAddition = settings?.easyBonus ?? 0.15
   const lapseIntervalPct = settings?.lapseInterval ?? 10
 
@@ -282,9 +283,12 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
     easeFactor = Math.max(MIN_EASE, easeFactor - HARD_PENALTY)
     repetitions++
   } else if (rating === 3) {
-    // Good — standard SM2
-    if (repetitions === 0) interval = 1
-    else if (repetitions === 1) interval = graduatingInterval
+    // Good — early learning ramp (1 min → 5 min → 1 day → 3 days), then
+    // standard SM2 ease-based growth once past the fourth review.
+    if (repetitions === 0) interval = MINUTE * 1
+    else if (repetitions === 1) interval = MINUTE * 5
+    else if (repetitions === 2) interval = 1
+    else if (repetitions === 3) interval = 3
     else interval = Math.round(interval * easeFactor)
     repetitions++
   } else {
@@ -296,10 +300,15 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
     repetitions++
   }
 
-  const dueDate = new Date(now)
-  dueDate.setDate(dueDate.getDate() + interval)
+  // Add via milliseconds rather than setDate() so fractional-day intervals
+  // (the minute-scale early learning steps) land at the correct time.
+  const dueDate = new Date(now.getTime() + interval * 86400000)
 
   const masteryPercent = computeMastery({ ...srs, interval, easeFactor, repetitions, lapses })
+
+  // A review has happened, so the card is never 'new' again after this point.
+  // Again (1) is a lapse → relearning; any other rating → review.
+  const state: SRSData['state'] = rating === 1 ? 'relearning' : 'review'
 
   return {
     ...srs,
@@ -310,6 +319,7 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
     dueDate: dueDate.toISOString(),
     lastReviewedAt: now.toISOString(),
     masteryPercent,
+    state,
   }
 }
 

@@ -70,8 +70,12 @@ create table if not exists srs_data (
   due_date         timestamptz not null default now(),
   last_reviewed_at timestamptz,
   lapses           int  not null default 0,
-  mastery_percent  int  not null default 0
+  mastery_percent  int  not null default 0,
+  state            text not null default 'new'
 );
+
+-- Adds the state column for databases created before it existed.
+alter table srs_data add column if not exists state text not null default 'new';
 
 -- review_logs
 create table if not exists review_logs (
@@ -83,8 +87,12 @@ create table if not exists review_logs (
   response_ms        int  not null default 0,
   reviewed_at        timestamptz not null default now(),
   scheduled_interval int  not null default 0,
-  ease               float not null default 2.5
+  ease               float not null default 2.5,
+  was_new            boolean not null default false
 );
+
+-- Adds the was_new column for databases created before it existed.
+alter table review_logs add column if not exists was_new boolean not null default false;
 
 -- review_sessions
 create table if not exists review_sessions (

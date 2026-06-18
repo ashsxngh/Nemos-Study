@@ -29,6 +29,7 @@ interface StudyState {
 
   startSession: (queue: Card[], mode?: StudyState['mode']) => void
   endSession: () => void
+  reorderQueue: (queue: Card[], currentIndex: number) => void
   flipCard: () => void
   nextCard: () => void
   addLog: (log: Omit<ReviewLog, 'id' | 'sessionId'>) => void
@@ -67,6 +68,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }),
 
   endSession: () => set({ sessionId: null, queue: [], currentIndex: 0 }),
+
+  // Reorders/truncates the queue (back navigation, shuffle) without touching
+  // logs, undoStack, redoStack, or sessionId — those must survive across re-orders.
+  reorderQueue: (queue, currentIndex) => set({ queue, currentIndex, showAnswer: false }),
 
   flipCard: () => set((s) => ({ showAnswer: !s.showAnswer })),
 

@@ -36,15 +36,6 @@ function parseClozeAnswers(text: string): string[] {
   return answers
 }
 
-// Replace cloze markers with [blank N] placeholder text
-function renderClozeQuestion(text: string): string {
-  let n = 0
-  return text.replace(/\{\{c\d+::([^}]+)\}\}/g, () => {
-    n++
-    return `[blank ${n}]`
-  })
-}
-
 function parseCloze(text: string, reveal: boolean): React.ReactNode {
   const parts: React.ReactNode[] = []
   let last = 0

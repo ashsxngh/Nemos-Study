@@ -6,7 +6,6 @@ import type { Difficulty } from '@/lib/types'
 interface RatingOption {
   rating: Difficulty
   label: string
-  key: string
   interval: string
   colorClass: string
   bgClass: string
@@ -18,7 +17,6 @@ const RATINGS: RatingOption[] = [
   {
     rating: 1,
     label: 'Again',
-    key: '1',
     interval: '10 min',
     colorClass: 'text-[var(--danger)]',
     bgClass: 'bg-[var(--danger-subtle)]',
@@ -28,7 +26,6 @@ const RATINGS: RatingOption[] = [
   {
     rating: 2,
     label: 'Hard',
-    key: '2',
     interval: '3 days',
     colorClass: 'text-orange-400',
     bgClass: 'bg-orange-950/30',
@@ -38,7 +35,6 @@ const RATINGS: RatingOption[] = [
   {
     rating: 3,
     label: 'Good',
-    key: '3',
     interval: '7 days',
     colorClass: 'text-[var(--accent)]',
     bgClass: 'bg-[var(--accent-subtle)]',
@@ -48,7 +44,6 @@ const RATINGS: RatingOption[] = [
   {
     rating: 4,
     label: 'Easy',
-    key: '4',
     interval: '21 days',
     colorClass: 'text-[var(--success)]',
     bgClass: 'bg-[var(--success-subtle)]',
@@ -70,7 +65,7 @@ interface ConfidenceRatingProps {
 export function ConfidenceRating({ onRate, className }: ConfidenceRatingProps) {
   return (
     <div className={cn('flex items-center justify-center gap-2 flex-wrap', className)}>
-      {RATINGS.map(({ rating, label, key, interval, colorClass, bgClass, borderClass, hoverClass }) => (
+      {RATINGS.map(({ rating, label, interval, colorClass, bgClass, borderClass, hoverClass }) => (
         <button
           key={rating}
           onClick={() => onRate(rating)}
@@ -85,9 +80,6 @@ export function ConfidenceRating({ onRate, className }: ConfidenceRatingProps) {
         >
           <span className="text-sm font-semibold">{label}</span>
           <span className="text-[10px] opacity-70">{interval}</span>
-          <kbd className="text-[9px] font-mono px-1 py-0.5 rounded border opacity-60 bg-black/10 border-current">
-            {key}
-          </kbd>
         </button>
       ))}
     </div>

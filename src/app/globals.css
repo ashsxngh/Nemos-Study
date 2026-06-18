@@ -139,13 +139,6 @@ button { cursor: pointer; }
   border-radius: var(--radius-sm);
 }
 
-/* ── Card surface (no glow) ──────────────────────────────── */
-.card-glow {
-  box-shadow:
-    0 0 0 1px var(--border),
-    0 4px 16px -4px rgba(0,0,0,0.4);
-}
-
 /* ── Sidebar nav item active ─────────────────────────────── */
 .nav-active {
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-hover));

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useTrashStore } from '@/store/useTrashStore'
 import { useExamStore } from '@/store/useExamStore'
 import { useAppStore } from '@/store/useAppStore'
 import { getWeakestCards } from '@/lib/examScheduler'
@@ -29,7 +30,7 @@ import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
 import { cn, formatDuration } from '@/lib/utils'
-import type { Difficulty } from '@/lib/types'
+import type { Card, Difficulty } from '@/lib/types'
 
 function formatKey(key: string): string {
   if (key === ' ') return 'Space'
@@ -70,6 +71,7 @@ function SessionContent() {
     decrementIndex,
     requeueCurrentCard,
     removeCurrentCard,
+    reorderQueue,
   } = useStudyStore()
 
   const {
@@ -92,6 +94,28 @@ function SessionContent() {
   const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget } = useSettingsStore()
 
   const cardShownAtRef = useRef<number>(Date.now())
+  // Tracks the persisted ReviewSession record (useLibraryStore.sessions) for
+  // this study session — separate from useStudyStore's local sessionId.
+  const librarySessionIdRef = useRef<string | null>(null)
+
+  const startLibrarySession = useCallback(() => {
+    const session = useLibraryStore.getState().startSession(deckId)
+    librarySessionIdRef.current = session.id
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckId])
+
+  const endLibrarySession = useCallback(() => {
+    const sessionId = librarySessionIdRef.current
+    if (!sessionId) return
+    const sessionLogs = useStudyStore.getState().logs
+    const cardsReviewed = sessionLogs.length
+    const cardsCorrect = sessionLogs.filter((l) => l.rating >= 3).length
+    useLibraryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
+    librarySessionIdRef.current = null
+  }, [])
+
+  // Tracks the most recent "D" quick-delete so Ctrl+D can restore it from trash
+  const lastQuickDeletedRef = useRef<{ card: Card; index: number } | null>(null)
 
   // History for ← back navigation
   const [history, setHistory] = useState<number[]>([])
@@ -173,6 +197,7 @@ function SessionContent() {
   useEffect(() => {
     const sessionCards = buildQueue()
     startSession(sessionCards, resolvedMode)
+    startLibrarySession()
     setHistory([])
     setLoaded(true)
     // Progress bar denominator = review cards only; new cards tracked separately
@@ -187,6 +212,9 @@ function SessionContent() {
     setForgottenReviewCount(0)
     setNewCardReviewedCount(0)
     setNewCardCorrectCount(0)
+    // End the persisted session record if the user navigates away/closes the tab
+    // mid-session, rather than via the Exit/Back-to-Study buttons.
+    return () => endLibrarySession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -218,6 +246,13 @@ function SessionContent() {
   const currentCard = queueEntry
     ? (allCards.find((c) => c.id === queueEntry.id) ?? queueEntry)
     : undefined
+
+  /* Name of the deck the current card actually belongs to — matters when the
+     queue mixes decks (All cards, exam mode), where it can differ from the
+     session-level deckName shown in the top bar. */
+  const currentCardDeckName = currentCard
+    ? (decks.find((d) => d.id === currentCard.deckId)?.name ?? deckName)
+    : deckName
 
   /* Helper: is the current card "new" (never reviewed)? */
   const isCurrentCardNew = (() => {
@@ -315,7 +350,7 @@ function SessionContent() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           import('canvas-confetti').then((mod: any) => {
             const confetti = mod.default ?? mod
-            confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, colors: ['#22d3ee', '#4ade80', '#f59e0b'] })
+            confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, colors: ['#818cf8', '#4ade80', '#f59e0b'] })
           }).catch(() => {})
         }
       }
@@ -354,7 +389,7 @@ function SessionContent() {
     const prev = history[history.length - 1]
     const newQueue = queue.slice(prev)
     setHistory((h) => h.slice(0, -1))
-    startSession(newQueue, mode)
+    reorderQueue(newQueue, 0)
   }
 
   /* ── Skip forward without rating ── */
@@ -369,7 +404,7 @@ function SessionContent() {
   function handleShuffle() {
     const remaining = queue.slice(currentIndex)
     const shuffled = [...remaining].sort(() => Math.random() - 0.5)
-    startSession(shuffled, mode)
+    reorderQueue(shuffled, 0)
     setHistory([])
   }
 
@@ -382,6 +417,41 @@ function SessionContent() {
     deleteCard(card.id)
     removeCurrentCard()
     useAppStore.getState().addToast({ type: 'info', message: 'Card deleted', duration: 2000 })
+  }
+
+  /* ── D shortcut: instantly trash the current card, no confirm ── */
+  function handleQuickDelete() {
+    const card = queue[currentIndex]
+    if (!card) return
+    lastQuickDeletedRef.current = { card, index: currentIndex }
+    deleteCard(card.id)
+    removeCurrentCard()
+    useAppStore.getState().addToast({ type: 'info', message: 'Card sent to trash — Ctrl+D to undo', duration: 2500 })
+  }
+
+  /* ── Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
+  function handleUndoQuickDelete() {
+    const pending = lastQuickDeletedRef.current
+    if (!pending) return
+    const entry = useTrashStore.getState().items.find((i) => i.id === pending.card.id && i.type === 'card')
+    useLibraryStore.setState((s) => ({
+      cards: [...s.cards, entry?.card ?? pending.card],
+      srsData: entry?.cardSRS ? { ...s.srsData, [pending.card.id]: entry.cardSRS } : s.srsData,
+      fsrsData: entry?.cardFSRS ? { ...s.fsrsData, [pending.card.id]: entry.cardFSRS } : s.fsrsData,
+      pendingDeletes: {
+        ...s.pendingDeletes,
+        cards: s.pendingDeletes.cards.filter((id) => id !== pending.card.id),
+      },
+    }))
+    if (entry) useTrashStore.getState().remove(entry.id)
+
+    const newQueue = [...queue]
+    const insertAt = Math.min(pending.index, newQueue.length)
+    newQueue.splice(insertAt, 0, pending.card)
+    reorderQueue(newQueue, insertAt)
+
+    lastQuickDeletedRef.current = null
+    useAppStore.getState().addToast({ type: 'info', message: 'Card restored', duration: 2000 })
   }
 
   /* ── Reset current card SRS ── */
@@ -397,11 +467,22 @@ function SessionContent() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      // Block all session shortcuts while any dialog is open — otherwise keys
+      // typed inside the dialog (on non-input elements) fall through and
+      // rate/flip/undo the card sitting behind it.
+      if (showEditDialog || showHistoryDialog || showDeleteConfirm) return
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
         handleUndo()
+        return
+      }
+
+      // Ctrl/Cmd+D — restore the card that was just sent to trash via "D"
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault()
+        handleUndoQuickDelete()
         return
       }
 
@@ -418,6 +499,12 @@ function SessionContent() {
       // E = edit current card (works before and after flip)
       if (e.key === 'e' || e.key === 'E') {
         setShowEditDialog(true)
+        return
+      }
+
+      // D = instantly send current card to trash (works before and after flip)
+      if (e.key === 'd' || e.key === 'D') {
+        handleQuickDelete()
         return
       }
 
@@ -453,16 +540,23 @@ function SessionContent() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts])
+  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm])
 
   const isComplete = loaded && queue.length > 0 && currentIndex >= queue.length
   const isLoading = !loaded
   const hasNoCards = loaded && queue.length === 0
 
+  // Close out the persisted ReviewSession record as soon as the session finishes
+  useEffect(() => {
+    if (isComplete) endLibrarySession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isComplete])
+
   // Progress bar: green = remembered, red = forgotten reviews
   const total = Math.max(initialQueueLength, 1)
-  const greenPct = (rememberedCount / total) * 100
-  const redPct = (forgottenReviewCount / total) * 100
+  const rawGreenPct = (rememberedCount / total) * 100
+  const greenPct = Math.min(100, rawGreenPct)
+  const redPct = Math.min(100 - greenPct, (forgottenReviewCount / total) * 100)
 
   /* ════════════════════════════════════════════════════════════
      SESSION COMPLETE
@@ -474,28 +568,28 @@ function SessionContent() {
     const elapsed = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : 0
 
     return (
-      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: '#1a1a1c' }}>
+      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
         <div className="w-full max-w-sm animate-fade-in space-y-5">
-          <div className="rounded-xl overflow-hidden" style={{ background: '#222225', border: '1px solid #2a2a30' }}>
+          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="p-6 text-center space-y-1">
               <div className="text-3xl mb-3">🎉</div>
               <h1 className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Session Complete</h1>
               <p className="text-sm" style={{ color: '#6b6b72' }}>Great work!</p>
             </div>
-            <div className="border-t grid grid-cols-2" style={{ borderColor: '#2a2a30' }}>
+            <div className="border-t grid grid-cols-2" style={{ borderColor: 'var(--border)' }}>
               {[
                 { label: 'Reviewed', value: totalLogged },
                 { label: 'Correct', value: correct },
                 { label: 'Accuracy', value: `${accuracy}%` },
                 { label: 'Time', value: formatDuration(elapsed) },
               ].map(({ label, value }, i) => (
-                <div key={label} className={cn('p-4', i % 2 === 0 ? 'border-r' : '', i < 2 ? 'border-b' : '')} style={{ borderColor: '#2a2a30' }}>
+                <div key={label} className={cn('p-4', i % 2 === 0 ? 'border-r' : '', i < 2 ? 'border-b' : '')} style={{ borderColor: 'var(--border)' }}>
                   <p className="text-xl font-bold" style={{ color: '#e8e8ea' }}>{value}</p>
                   <p className="text-xs mt-0.5" style={{ color: '#6b6b72' }}>{label}</p>
                 </div>
               ))}
             </div>
-            <div className="p-4 border-t" style={{ borderColor: '#2a2a30' }}>
+            <div className="p-4 border-t" style={{ borderColor: 'var(--border)' }}>
               <div className="flex justify-between mb-1.5">
                 <span className="text-xs" style={{ color: '#6b6b72' }}>Accuracy</span>
                 <span className="text-xs font-semibold" style={{ color: '#e8e8ea' }}>{accuracy}%</span>
@@ -508,6 +602,7 @@ function SessionContent() {
               onClick={() => {
                 const cards = buildQueue()
                 startSession(cards, resolvedMode)
+                startLibrarySession()
                 setHistory([])
                 setLoaded(true)
                 const lib = useLibraryStore.getState()
@@ -529,9 +624,9 @@ function SessionContent() {
               Review Again
             </button>
             <button
-              onClick={() => { reset(); router.push('/study') }}
+              onClick={() => { endLibrarySession(); reset(); router.push('/study') }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-              style={{ background: '#222225', border: '1px solid #2a2a30', color: '#6b6b72' }}
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
             >
               <ArrowLeft size={14} />
               Back to Study
@@ -547,14 +642,14 @@ function SessionContent() {
   ════════════════════════════════════════════════════════════ */
   if (isLoading || hasNoCards || !currentCard) {
     return (
-      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: '#1a1a1c' }}>
+      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
         {isLoading ? (
           <div className="space-y-3 animate-pulse">
             <div className="skeleton w-48 h-4 mx-auto rounded" />
             <div className="skeleton w-32 h-4 mx-auto rounded" />
           </div>
         ) : (
-          <div className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in" style={{ background: '#222225', border: '1px solid #2a2a30' }}>
+          <div className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="p-8 text-center space-y-3">
               <p className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>All caught up!</p>
               <p className="text-sm" style={{ color: '#6b6b72' }}>No cards due. Come back later.</p>
@@ -589,11 +684,11 @@ function SessionContent() {
   return (
     <div
       className={cn('flex flex-col', zenMode ? 'fixed inset-0 z-50' : 'h-full')}
-      style={{ background: '#1a1a1c' }}
+      style={{ background: 'var(--bg-base)' }}
     >
       {/* ── Progress bar ── */}
       {showSessionProgress && !zenMode && (
-        <div className="h-[3px] w-full shrink-0 flex" style={{ background: '#2a2a30' }}>
+        <div className="h-[3px] w-full shrink-0 flex" style={{ background: 'var(--border)' }}>
           <div
             className="h-full transition-all duration-300"
             style={{ width: `${greenPct}%`, background: '#4ade80' }}
@@ -609,11 +704,11 @@ function SessionContent() {
       {!zenMode && (
       <div
         className="flex items-center h-11 px-4 gap-3 shrink-0"
-        style={{ background: '#1a1a1c', borderBottom: '1px solid #2a2a30' }}
+        style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}
       >
         <button
-          onClick={() => { reset(); router.push('/study') }}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
+          onClick={() => { endLibrarySession(); reset(); router.push('/study') }}
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
           style={{ color: '#6b6b72' }}
           title="Exit session"
         >
@@ -642,7 +737,7 @@ function SessionContent() {
           <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: '#6b6b72' }}>
             Today
           </span>
-          <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: '#2a2a30' }}>
+          <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
             <div
               className="h-full rounded-full transition-all duration-300"
               style={{ width: `${dailyPct}%`, background: '#818cf8' }}
@@ -655,7 +750,7 @@ function SessionContent() {
 
         <button
           onClick={() => setZenMode(true)}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
           style={{ color: '#6b6b72' }}
           title="Zen mode (Z)"
         >
@@ -664,16 +759,18 @@ function SessionContent() {
 
         <button
           onClick={handleShuffle}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[#222225]"
+          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
           style={{ color: '#6b6b72' }}
           title="Shuffle remaining"
         >
           <Shuffle size={14} />
         </button>
 
-        <span className="text-xs tabular-nums font-medium" style={{ color: '#6b6b72' }}>
-          {currentIndex + 1} / {queue.length}
-        </span>
+        {deckId && (
+          <span className="text-xs tabular-nums font-medium" style={{ color: '#6b6b72' }}>
+            {currentIndex + 1} / {queue.length}
+          </span>
+        )}
       </div>
       )}
 
@@ -682,7 +779,7 @@ function SessionContent() {
         <button
           onClick={() => setZenMode(false)}
           className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-          style={{ background: '#222225', border: '1px solid #2a2a30', color: '#6b6b72' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
           title="Exit Zen mode (Esc)"
         >
           <X size={12} />
@@ -703,9 +800,11 @@ function SessionContent() {
               >
                 {deckName}
               </span>
-              <span className="text-xs tabular-nums" style={{ color: '#6b6b72' }}>
-                Card {currentIndex + 1} of {queue.length}
-              </span>
+              {deckId && (
+                <span className="text-xs tabular-nums" style={{ color: '#6b6b72' }}>
+                  Card {currentIndex + 1} of {queue.length}
+                </span>
+              )}
             </div>
           )}
 
@@ -717,20 +816,28 @@ function SessionContent() {
             )}
           >
             <div
-              className="rounded-xl overflow-hidden w-full"
+              className="relative rounded-xl overflow-hidden w-full"
               style={{
-                background: '#222225',
-                border: '1px solid #2a2a30',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
                 boxShadow: '0 4px 20px -4px rgba(0,0,0,0.4)',
               }}
             >
+              {/* Subtle deck name — corner of the card, not the page chrome */}
+              <span
+                className="absolute top-2.5 right-3.5 text-[10px] font-medium truncate max-w-[40%] pointer-events-none select-none"
+                style={{ color: '#6b6b72', opacity: 0.7 }}
+              >
+                {currentCardDeckName}
+              </span>
+
               <ReviewCard card={currentCard} showAnswer={showAnswer} onTypedCheck={flipCard} />
 
               {/* Card meta — last seen + difficulty */}
               {cardMeta && (
                 <div
                   className="flex items-center justify-between px-4 py-2 border-t"
-                  style={{ borderColor: '#2a2a30' }}
+                  style={{ borderColor: 'var(--border)' }}
                 >
                   <span className="text-[11px]" style={{ color: '#6b6b72' }}>
                     Last seen {cardMeta.lastSeen}
@@ -758,11 +865,11 @@ function SessionContent() {
                 <button
                   onClick={flipCard}
                   className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-t hover:brightness-110 select-none"
-                  style={{ background: '#1e1e20', borderColor: '#2a2a30', color: '#6b6b72' }}
+                  style={{ background: '#1e1e20', borderColor: 'var(--border)', color: '#6b6b72' }}
                 >
                   <span style={{ fontSize: '1rem', lineHeight: 1 }}>↓</span>
                   Show Answer
-                  <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#0f0f11', border: '1px solid #2a2a30', color: '#6b6b72' }}>
+                  <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#0f0f11', border: '1px solid var(--border)', color: '#6b6b72' }}>
                     SPACE
                   </kbd>
                 </button>
@@ -775,7 +882,7 @@ function SessionContent() {
             <div className="mt-3 animate-fade-in">
               <button
                 onClick={() => setShowMoreRatings((v) => !v)}
-                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors hover:bg-[#222225] mx-auto"
+                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors hover:bg-[var(--bg-surface)] mx-auto"
                 style={{ color: '#6b6b72' }}
               >
                 <MoreHorizontal size={12} />
@@ -794,7 +901,7 @@ function SessionContent() {
       {/* ── Bottom bar ── */}
       <div
         className="flex items-center px-6 py-3 gap-3 shrink-0"
-        style={{ background: '#1a1a1c', borderTop: '1px solid #2a2a30' }}
+        style={{ background: 'var(--bg-base)', borderTop: '1px solid var(--border)' }}
       >
         {/* ← Back */}
         {!zenMode && (
@@ -803,8 +910,8 @@ function SessionContent() {
           disabled={!canGoBack}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors"
           style={{
-            background: '#222225',
-            border: '1px solid #2a2a30',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
             color: canGoBack ? '#e8e8ea' : '#3a3a42',
             cursor: canGoBack ? 'pointer' : 'not-allowed',
           }}
@@ -819,7 +926,7 @@ function SessionContent() {
           <button
             onClick={handleUndo}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-            style={{ background: '#222225', border: '1px solid #2a2a30', color: '#a0a0b0' }}
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#a0a0b0' }}
             title="Undo last review (Ctrl+Z)"
           >
             <Undo2 size={12} />
@@ -832,7 +939,7 @@ function SessionContent() {
         <button
           onClick={handleSkip}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:brightness-110"
-          style={{ background: '#222225', border: '1px solid #2a2a30', color: '#6b6b72' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
           title="Skip card"
         >
           <ArrowRight size={15} />
@@ -847,8 +954,8 @@ function SessionContent() {
           disabled={!answerReady || isAnimating}
           className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
           style={{
-            background: answerReady ? '#2a1515' : '#222225',
-            border: `1px solid ${answerReady ? '#5a2020' : '#2a2a30'}`,
+            background: answerReady ? '#2a1515' : 'var(--bg-surface)',
+            border: `1px solid ${answerReady ? '#5a2020' : 'var(--border)'}`,
             color: answerReady ? '#f87171' : '#3a3a42',
             cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
           }}
@@ -869,8 +976,8 @@ function SessionContent() {
           disabled={!answerReady || isAnimating}
           className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
           style={{
-            background: answerReady ? '#0a2a15' : '#222225',
-            border: `1px solid ${answerReady ? '#1a5a30' : '#2a2a30'}`,
+            background: answerReady ? '#0a2a15' : 'var(--bg-surface)',
+            border: `1px solid ${answerReady ? '#1a5a30' : 'var(--border)'}`,
             color: answerReady ? '#4ade80' : '#3a3a42',
             cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
           }}
@@ -892,7 +999,7 @@ function SessionContent() {
           <button
             ref={optionsButtonRef}
             onClick={() => setShowOptionsMenu((v) => !v)}
-            className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[#222225]"
+            className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[var(--bg-surface)]"
             style={{ color: showOptionsMenu ? '#818cf8' : '#6b6b72' }}
             title="Options"
           >
@@ -904,7 +1011,7 @@ function SessionContent() {
               ref={optionsMenuRef}
               className="absolute bottom-12 right-0 w-52 rounded-xl overflow-hidden animate-scale-in"
               style={{
-                background: '#222225',
+                background: 'var(--bg-surface)',
                 border: '1px solid #333338',
                 boxShadow: '0 8px 24px -4px rgba(0,0,0,0.5)',
                 zIndex: 10,
@@ -971,7 +1078,7 @@ function SessionContent() {
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b" style={{ borderColor: '#333338', background: '#222225' }}>
+                <tr className="border-b" style={{ borderColor: '#333338', background: 'var(--bg-surface)' }}>
                   <th className="text-left px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Date</th>
                   <th className="text-left px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Rating</th>
                   <th className="text-right px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Response</th>
@@ -1038,7 +1145,7 @@ export default function StudySessionPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-full items-center justify-center" style={{ background: '#1a1a1c' }}>
+        <div className="flex min-h-full items-center justify-center" style={{ background: 'var(--bg-base)' }}>
           <div className="space-y-3 text-center">
             <div className="skeleton w-48 h-4 mx-auto rounded" />
             <div className="skeleton w-32 h-4 mx-auto rounded" />

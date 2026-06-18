@@ -395,7 +395,9 @@ function ImportContent() {
       setFileName(name)
       setFileText('')
       const baseName = name.replace(/\.[^.]+$/, '')
-      if (!targetDeckId) setDeckName(baseName)
+      // Don't clobber a deck name the user already typed (or kept from a
+      // previous file) — only default it from the filename when still empty.
+      if (!targetDeckId) setDeckName((prev) => (prev.trim() ? prev : baseName))
 
       if (name.toLowerCase().endsWith('.apkg')) {
         try {

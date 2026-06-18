@@ -15,6 +15,8 @@ import type {
   Note,
 } from '@/lib/types'
 
+const DEBUG_SYNC = false
+
 // ─── Case converters ──────────────────────────────────────────────────────────
 
 type PlainObject = Record<string, unknown>
@@ -107,7 +109,7 @@ function mergeKeepLocal<T extends { id: string }>(
     if (preExistingSet?.has(r.id)) return false
     return true
   })
-  if (localOnly.length > 0) {
+  if (localOnly.length > 0 && DEBUG_SYNC) {
     console.log(`[SYNC] mergeKeepLocal: preserving ${localOnly.length} session-created local-only item(s)`, localOnly.map((r) => r.id))
   }
   return [...serverRows, ...localOnly]
@@ -202,7 +204,7 @@ async function pullFromSupabase(): Promise<void> {
     const mergedCards = orphanCardIds.length > 0
       ? rawMergedCards.filter((c) => mergedDeckSet.has(c.deckId))
       : rawMergedCards
-    if (orphanCardIds.length > 0) {
+    if (orphanCardIds.length > 0 && DEBUG_SYNC) {
       console.log(
         '[SYNC] pullFromSupabase: removing', orphanCardIds.length,
         'orphan card(s) with no matching deck, queuing for remote delete',
@@ -286,14 +288,16 @@ async function pushToSupabase(
   // server URL-length limits (~8KB). Batch deletes to stay well under that.
   const BATCH = 100
 
-  console.log('[SYNC] pushToSupabase: upserting to Supabase as user', user.id, {
-    folders: folders.length,
-    decks: decks.length,
-    cards: cards.length,
-    srsData: Object.keys(srsData).length,
-    sessions: sessions.length,
-    reviewLogs: reviewLogs.length,
-  })
+  if (DEBUG_SYNC) {
+    console.log('[SYNC] pushToSupabase: upserting to Supabase as user', user.id, {
+      folders: folders.length,
+      decks: decks.length,
+      cards: cards.length,
+      srsData: Object.keys(srsData).length,
+      sessions: sessions.length,
+      reviewLogs: reviewLogs.length,
+    })
+  }
 
   // Only upsert srs_data for cards that exist in the active card set.
   // This prevents orphaned entries (e.g. from a deleted deck whose cards were
@@ -347,7 +351,7 @@ async function pushToSupabase(
       : null,
   ])
 
-  console.log('[SYNC] pushToSupabase: all upserts succeeded')
+  if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: all upserts succeeded')
 
   // Execute pending deletes — cards/srs first, then decks, then folders
   // so child rows are gone before their parents (avoids any implicit ordering issues).
@@ -390,7 +394,7 @@ async function pushToSupabase(
       }
     }
     if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length) {
-      console.log('[SYNC] pushToSupabase: deletes complete')
+      if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: deletes complete')
     }
   }
 }
@@ -432,6 +436,7 @@ export interface SyncStatus {
   syncing: boolean
   lastSynced: Date | null
   error: string | null
+  offline: boolean
   manualPush: () => Promise<void>
 }
 
@@ -439,6 +444,7 @@ export function useSync(): SyncStatus {
   const [syncing, setSyncing] = useState(false)
   const [lastSynced, setLastSynced] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [offline, setOffline] = useState(false)
 
   const libraryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notesDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -448,8 +454,16 @@ export function useSync(): SyncStatus {
   const syncChannel = useRef<BroadcastChannel | null>(null)
 
   const handlePush = useCallback(async () => {
+    // Offline: skip the push attempt entirely rather than letting it fail and
+    // surface as a sync error. The 'online' listener below retries automatically.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (DEBUG_SYNC) console.log('[SYNC] handlePush: offline, skipping push')
+      setOffline(true)
+      setError(null)
+      return
+    }
     if (pushInFlightRef.current) {
-      console.log('[SYNC] handlePush: push already in-flight, skipping')
+      if (DEBUG_SYNC) console.log('[SYNC] handlePush: push already in-flight, skipping')
       return
     }
     pushInFlightRef.current = true
@@ -461,7 +475,7 @@ export function useSync(): SyncStatus {
         // push to finish, realtime events + BroadcastChannel messages will have
         // already corrected our local state by the time we get here.
         const s = useLibraryStore.getState()
-        console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
+        if (DEBUG_SYNC) console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
         await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.sessions, s.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
@@ -485,7 +499,8 @@ export function useSync(): SyncStatus {
       } else {
         await doPush()
       }
-      console.log('[SYNC] handlePush: push COMPLETE')
+      if (DEBUG_SYNC) console.log('[SYNC] handlePush: push COMPLETE')
+      setOffline(false)
       setLastSynced(new Date())
     } catch (err) {
       console.error('[SYNC] handlePush: push ERROR', err)
@@ -526,7 +541,7 @@ export function useSync(): SyncStatus {
       const deletedDecks: string[]   = e.data.deletedDecks   ?? []
       const deletedCards: string[]   = e.data.deletedCards   ?? []
       if (!deletedFolders.length && !deletedDecks.length && !deletedCards.length) return
-      console.log('[SYNC] BroadcastChannel: another tab deleted items, applying locally', { deletedFolders, deletedDecks, deletedCards })
+      if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab deleted items, applying locally', { deletedFolders, deletedDecks, deletedCards })
       const fSet = new Set(deletedFolders)
       const dSet = new Set(deletedDecks)
       const cSet = new Set(deletedCards)
@@ -566,7 +581,7 @@ export function useSync(): SyncStatus {
       // distinguish "deleted on another device" (pre-existing + absent from
       // server → drop) from "created this session" (not in snapshot → keep).
       snapshotPreExistingIds()
-      console.log('[SYNC] useSync mount: starting initial pull')
+      if (DEBUG_SYNC) console.log('[SYNC] useSync mount: starting initial pull')
       await pullFromSupabase()
     }
 
@@ -574,7 +589,7 @@ export function useSync(): SyncStatus {
     init()
       .then(() => {
         if (!cancelled) {
-          console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')
+          if (DEBUG_SYNC) console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')
           setLastSynced(new Date())
           mountedRef.current = true
           // Push any local changes that existed before pull completed (e.g. cards created during load)
@@ -582,7 +597,7 @@ export function useSync(): SyncStatus {
           if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length) {
             handlePush()
           }
-        } else {
+        } else if (DEBUG_SYNC) {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
         }
       })
@@ -596,16 +611,34 @@ export function useSync(): SyncStatus {
         if (!cancelled) setSyncing(false)
       })
     return () => {
-      console.log('[SYNC] useSync UNMOUNT — cancelled = true')
+      if (DEBUG_SYNC) console.log('[SYNC] useSync UNMOUNT — cancelled = true')
       cancelled = true
     }
   }, [])
 
-  // Subscribe to library store changes with 1.5s debounce
+  // Retry automatically when connectivity is restored; track offline transitions.
+  useEffect(() => {
+    function handleOnline() {
+      setOffline(false)
+      if (DEBUG_SYNC) console.log('[SYNC] network online — retrying push')
+      handlePush()
+    }
+    function handleOffline() {
+      setOffline(true)
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [handlePush])
+
+  // Subscribe to library store changes with a 400ms debounce
   useEffect(() => {
     const unsub = useLibraryStore.subscribe(() => {
       if (!mountedRef.current) {
-        console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
+        if (DEBUG_SYNC) console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
         return
       }
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
@@ -619,7 +652,7 @@ export function useSync(): SyncStatus {
     }
   }, [handlePush])
 
-  // Subscribe to notes store changes with 1.5s debounce
+  // Subscribe to notes store changes with a 400ms debounce
   useEffect(() => {
     const unsub = useNotesStore.subscribe((state) => {
       if (!mountedRef.current) return
@@ -746,13 +779,13 @@ export function useSync(): SyncStatus {
     )
 
     const channelName = channel.topic
-    console.log('[SYNC] realtime channel subscribing:', channelName)
+    if (DEBUG_SYNC) console.log('[SYNC] realtime channel subscribing:', channelName)
     channel.subscribe((status) => {
-      console.log('[SYNC] realtime channel status:', channelName, status)
+      if (DEBUG_SYNC) console.log('[SYNC] realtime channel status:', channelName, status)
     })
 
     return () => {
-      console.log('[SYNC] realtime channel unsubscribing:', channelName)
+      if (DEBUG_SYNC) console.log('[SYNC] realtime channel unsubscribing:', channelName)
       supabase.removeChannel(channel)
     }
   }, [])
@@ -761,5 +794,5 @@ export function useSync(): SyncStatus {
     await handlePush()
   }, [handlePush])
 
-  return { syncing, lastSynced, error, manualPush }
+  return { syncing, lastSynced, error, offline, manualPush }
 }

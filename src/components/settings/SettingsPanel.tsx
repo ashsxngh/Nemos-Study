@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle } from 'lucide-react'
+import { X, Sun, Moon, Monitor, Brain, Bell, Keyboard, Database, Download, Upload, Trash2, AlertTriangle, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useAppStore } from '@/store/useAppStore'
@@ -9,6 +9,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { exportAsJSON, exportDecksAsCSV } from '@/lib/export'
 import { importFromCSV, importFromJSON } from '@/lib/import'
+import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
 import { cn } from '@/lib/utils'
 import type { Theme } from '@/lib/types'
 
@@ -527,6 +528,12 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   </div>
                 </>
               )}
+            </section>
+
+            {/* ── FSRS Simulator ── */}
+            <section className="space-y-4">
+              <SectionHeading icon={Activity} label="FSRS Simulator" />
+              <FSRSSimulator />
             </section>
 
             {/* ── Burnout & Workload ── */}

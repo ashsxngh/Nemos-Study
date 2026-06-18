@@ -14,6 +14,7 @@ interface AppState {
   lastOpenNoteId: string | null
   syncing: boolean
   syncError: string | null
+  syncOffline: boolean
   manualSync: (() => Promise<void>) | null
 
   setTheme: (theme: Theme) => void
@@ -29,6 +30,7 @@ interface AppState {
   setLastOpenNote: (id: string | null) => void
   setSyncing: (v: boolean) => void
   setSyncError: (e: string | null) => void
+  setSyncOffline: (v: boolean) => void
   setManualSync: (fn: (() => Promise<void>) | null) => void
 }
 
@@ -44,6 +46,7 @@ export const useAppStore = create<AppState>()(
       lastOpenNoteId: null,
       syncing: false,
       syncError: null,
+      syncOffline: false,
       manualSync: null,
 
       setTheme: (theme) => set({ theme }),
@@ -66,6 +69,7 @@ export const useAppStore = create<AppState>()(
       setLastOpenNote: (id) => set({ lastOpenNoteId: id }),
       setSyncing: (v) => set({ syncing: v }),
       setSyncError: (e) => set({ syncError: e }),
+      setSyncOffline: (v) => set({ syncOffline: v }),
       setManualSync: (fn) => set({ manualSync: fn }),
     }),
     {
