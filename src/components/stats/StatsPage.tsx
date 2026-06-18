@@ -165,14 +165,16 @@ export function StatsPage() {
 
   const todayStr = new Date().toISOString().slice(0, 10)
   const todayDueCount = useMemo(
-    () => Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) <= todayStr).length,
-    [srsData, todayStr]
+    () => algorithm === 'fsrs'
+      ? Object.values(fsrsData).filter((s) => s.state !== 'new' && s.dueDate.slice(0, 10) <= todayStr).length
+      : Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) <= todayStr).length,
+    [algorithm, fsrsData, srsData, todayStr]
   )
 
   const retentionData = useMemo(() => {
     return Array.from({ length: 30 }, (_, i) => {
       const ds = dateStr(29 - i)
-      const dayLogs = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === ds)
+      const dayLogs = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === ds && !l.wasNew)
       if (dayLogs.length === 0) return { date: shortDate(ds), retention: null }
       const correct = dayLogs.filter((l) => l.rating >= 3).length
       return { date: shortDate(ds), retention: Math.round((correct / dayLogs.length) * 100) }
@@ -806,7 +808,9 @@ export function StatsPage() {
             <div className="flex items-end gap-1.5 h-24">
               {Array.from({ length: 14 }, (_, i) => {
                 const ds = dateStr(-i)
-                const count = Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) === ds).length
+                const count = algorithm === 'fsrs'
+                  ? Object.values(fsrsData).filter((s) => s.state !== 'new' && s.dueDate.slice(0, 10) === ds).length
+                  : Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) === ds).length
                 return { i, count, isToday: i === 0 }
               }).map(({ i, count, isToday }) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">

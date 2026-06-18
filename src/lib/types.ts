@@ -112,6 +112,7 @@ export interface ReviewLog {
   reviewedAt: string
   scheduledInterval: number
   ease: number
+  wasNew?: boolean
 }
 
 export interface Note {

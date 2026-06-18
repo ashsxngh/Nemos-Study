@@ -27,13 +27,14 @@ export function StatsOverview({ period }: StatsOverviewProps) {
   const { start, end } = getPeriodRange(period)
 
   const periodLogs = logsInRange(reviewLogs, start, end)
+  const reviewOnlyLogs = periodLogs.filter((l) => !l.wasNew)
 
   // Cards reviewed in period
   const cardsReviewed = periodLogs.length
 
-  // Retention rate for period
-  const retention = periodLogs.length > 0
-    ? Math.round((periodLogs.filter((l) => l.rating >= 3).length / periodLogs.length) * 100)
+  // Retention rate — new card graduation events excluded (wasNew logs skew accuracy down)
+  const retention = reviewOnlyLogs.length > 0
+    ? Math.round((reviewOnlyLogs.filter((l) => l.rating >= 3).length / reviewOnlyLogs.length) * 100)
     : 0
 
   // Total reviews (cumulative if "all time", else period)
@@ -65,7 +66,7 @@ export function StatsOverview({ period }: StatsOverviewProps) {
 
   const stats = [
     { label: 'Cards Reviewed',  value: String(animatedCards) },
-    { label: 'Retention Rate',  value: periodLogs.length > 0 ? `${animatedRetention}%` : '—' },
+    { label: 'Retention Rate',  value: reviewOnlyLogs.length > 0 ? `${animatedRetention}%` : '—' },
     { label: 'Total Reviews',   value: String(animatedTotal) },
     { label: 'Study Time',      value: reviewTimeMin > 0 ? reviewTimeStr : '0m' },
   ]

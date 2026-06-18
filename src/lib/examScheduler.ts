@@ -89,7 +89,7 @@ export function computeExamRetentionStats(
 
   for (const card of cards) {
     const state = fsrsData[card.id]
-    if (!state || state.repetitions === 0) {
+    if (!state || state.state === 'new') {
       newCards++
       continue
     }
@@ -141,7 +141,7 @@ export function getPulledForwardCardIds(
   return cards
     .filter((c) => {
       const state = fsrsData[c.id]
-      if (!state || state.repetitions === 0) return false
+      if (!state || state.state === 'new') return false
       const dueDate = new Date(state.dueDate)
       if (dueDate <= now) return false       // already due — regular queue handles it
       if (dueDate <= examDate) return false  // scheduled before exam — fine
@@ -178,7 +178,7 @@ export function computeCardUrgencies(
     for (const card of cards) {
       if (!examDeckIds.has(card.deckId)) continue
       const state = fsrsData[card.id]
-      if (!state || state.repetitions === 0) continue
+      if (!state || state.state === 'new') continue
 
       const retention = fsrsRetentionAtDate(state, examDate)
       const gap = Math.max(0, target - retention)
@@ -241,7 +241,7 @@ export function computePerTopicBreakdown(
       decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id),
     )
     const folderCards = cards.filter((c) => deckIds.has(c.deckId))
-    const reviewed = folderCards.filter((c) => (fsrsData[c.id]?.repetitions ?? 0) > 0)
+    const reviewed = folderCards.filter((c) => fsrsData[c.id]?.state !== 'new')
     const avg =
       reviewed.length > 0
         ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
@@ -261,7 +261,7 @@ export function computePerTopicBreakdown(
     const deck = decks.find((d) => d.id === deckId)
     if (!deck) continue
     const deckCards = cards.filter((c) => c.deckId === deckId)
-    const reviewed = deckCards.filter((c) => (fsrsData[c.id]?.repetitions ?? 0) > 0)
+    const reviewed = deckCards.filter((c) => fsrsData[c.id]?.state !== 'new')
     const avg =
       reviewed.length > 0
         ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
@@ -301,7 +301,7 @@ export function getWeakestCards(
     .map((c) => {
       const state = fsrsData[c.id]
       const retention =
-        state && state.repetitions > 0 ? fsrsRetentionAtDate(state, examDate) : 0
+        state && state.state !== 'new' ? fsrsRetentionAtDate(state, examDate) : 0
       return { card: c, retention }
     })
     .sort((a, b) => a.retention - b.retention)

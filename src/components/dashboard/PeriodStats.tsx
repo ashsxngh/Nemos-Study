@@ -18,10 +18,12 @@ export function PeriodStats({ period }: PeriodStatsProps) {
     ? 0
     : reviewLogs.filter((l) => new Date(l.reviewedAt) <= prevEnd).length
 
-  const retentionOf = (logs: typeof reviewLogs) =>
-    logs.length > 0
-      ? Math.round((logs.filter((l) => l.rating >= 3).length / logs.length) * 100)
+  const retentionOf = (logs: typeof reviewLogs) => {
+    const reviewed = logs.filter((l) => !l.wasNew)
+    return reviewed.length > 0
+      ? Math.round((reviewed.filter((l) => l.rating >= 3).length / reviewed.length) * 100)
       : null
+  }
 
   const curRet  = retentionOf(curLogs)
   const prevRet = retentionOf(prevLogs)

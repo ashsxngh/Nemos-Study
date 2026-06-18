@@ -34,8 +34,9 @@ export function StudyHub() {
       return sum + (new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000
     }, 0)
   )
-  const todayAccuracy = todayLogs.length > 0
-    ? Math.round((todayLogs.filter((l) => l.rating >= 3).length / todayLogs.length) * 100)
+  const todayReviewLogs = todayLogs.filter((l) => !l.wasNew)
+  const todayAccuracy = todayReviewLogs.length > 0
+    ? Math.round((todayReviewLogs.filter((l) => l.rating >= 3).length / todayReviewLogs.length) * 100)
     : 0
 
   const allNewCards = getNewCards()

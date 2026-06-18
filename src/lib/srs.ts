@@ -100,7 +100,6 @@ export function fsrsSchedule(
         Math.exp(w[14] * (1 - R))
       newStability = Math.max(0.1, newStability)
       newLapses++
-      newRepetitions = 0
       newState = 'relearning'
     } else {
       // Successful review — stability after recall
@@ -273,10 +272,9 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
 
   // rating: 1=Again, 2=Hard, 3=Good, 4=Easy
   if (rating === 1) {
-    // Again — reset
+    // Again — reset interval but keep repetitions so lapsed cards never re-enter new queue
     lapses++
     interval = Math.max(1, Math.round(srs.interval * lapseIntervalPct / 100))
-    repetitions = 0
     easeFactor = Math.max(MIN_EASE, easeFactor - 0.2)
   } else if (rating === 2) {
     // Hard — small advance

@@ -9,6 +9,7 @@ import {
   isDue,
   fsrsInitCard,
   fsrsSchedule,
+  fsrsRetrievability,
   DEFAULT_FSRS_PARAMS,
 } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
@@ -474,7 +475,7 @@ export const useLibraryStore = create<LibraryState>()(
 
         if (algorithm === 'fsrs') {
           const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
-          const wasNew = existing.repetitions === 0
+          const wasNew = existing.state === 'new'
           const fsrsParams = {
             ...DEFAULT_FSRS_PARAMS,
             weights: fsrsWeights,
@@ -503,6 +504,7 @@ export const useLibraryStore = create<LibraryState>()(
             reviewedAt: new Date().toISOString(),
             scheduledInterval: logInterval,
             ease: updated.difficulty,
+            wasNew,
           }
           set((s) => ({
             fsrsData: { ...s.fsrsData, [cardId]: updated },
@@ -534,6 +536,7 @@ export const useLibraryStore = create<LibraryState>()(
             reviewedAt: new Date().toISOString(),
             scheduledInterval: updated.interval,
             ease: updated.easeFactor,
+            wasNew,
           }
           set((s) => ({
             srsData: { ...s.srsData, [cardId]: updated },
@@ -558,22 +561,18 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData, decks } = get()
+        const { cards, fsrsData, srsData, decks, reviewLogs } = get()
         const { algorithm, newCardsPerDay } = useSettingsStore.getState()
         const todayStr = new Date().toISOString().slice(0, 10)
         const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
 
-        // Count new cards already studied today (repetitions went from 0→1 today)
-        const studiedNewToday = pool.filter((c) => {
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            return fs && fs.repetitions === 1 && fs.lastReviewedAt?.slice(0, 10) === todayStr
-          }
-          const srs = srsData[c.id]
-          return srs && srs.repetitions === 1 && srs.lastReviewedAt?.slice(0, 10) === todayStr
-        }).length
+        // Count new cards introduced today using wasNew-flagged logs (Issue 7).
+        // This correctly excludes lapsed graduated cards regardless of algorithm.
+        const studiedNewToday = pool.filter((c) =>
+          reviewLogs.some((l) => l.cardId === c.id && l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr)
+        ).length
 
         const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
         if (remaining === 0) return []
@@ -582,7 +581,7 @@ export const useLibraryStore = create<LibraryState>()(
           .filter((c) => {
             if (algorithm === 'fsrs') {
               const fs = fsrsData[c.id]
-              return !fs || fs.repetitions === 0
+              return !fs || fs.state === 'new'
             }
             const srs = srsData[c.id]
             return !srs || srs.repetitions === 0
@@ -617,7 +616,7 @@ export const useLibraryStore = create<LibraryState>()(
           if (pulledForwardIds.has(c.id)) return true
           if (algorithm === 'fsrs') {
             const fs = fsrsData[c.id]
-            if (!fs || fs.repetitions === 0) return false
+            if (!fs || fs.state === 'new') return false
             return new Date(fs.dueDate) <= now
           }
           const srs = srsData[c.id]
@@ -652,9 +651,22 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       getDeckMastery: (deckId) => {
-        const { cards, srsData } = get()
+        const { cards, srsData, fsrsData } = get()
+        const { algorithm } = useSettingsStore.getState()
         const deckCards = cards.filter((c) => c.deckId === deckId)
         if (deckCards.length === 0) return 0
+
+        if (algorithm === 'fsrs') {
+          const graduated = deckCards.filter((c) => fsrsData[c.id]?.state !== 'new')
+          if (graduated.length === 0) return 0
+          const total = graduated.reduce((sum, c) => {
+            const state = fsrsData[c.id]
+            return sum + (state ? fsrsRetrievability(state) * 100 : 0)
+          }, 0)
+          return Math.round(total / graduated.length)
+        }
+
+        // SM2 path — masteryPercent is computed by computeMastery() inside scheduleCard
         const total = deckCards.reduce((sum, c) => {
           const srs = srsData[c.id]
           return sum + (srs ? srs.masteryPercent : 0)

@@ -175,7 +175,14 @@ function SessionContent() {
     startSession(sessionCards, resolvedMode)
     setHistory([])
     setLoaded(true)
-    setInitialQueueLength(sessionCards.length)
+    // Progress bar denominator = review cards only; new cards tracked separately
+    const lib = useLibraryStore.getState()
+    const reviewCount = sessionCards.filter((c) =>
+      algorithm === 'fsrs'
+        ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
+        : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+    ).length
+    setInitialQueueLength(reviewCount)
     setRememberedCount(0)
     setForgottenReviewCount(0)
     setNewCardReviewedCount(0)
@@ -215,7 +222,7 @@ function SessionContent() {
   /* Helper: is the current card "new" (never reviewed)? */
   const isCurrentCardNew = (() => {
     if (!currentCard) return false
-    if (algorithm === 'fsrs') return (fsrsData[currentCard.id]?.repetitions ?? 0) === 0
+    if (algorithm === 'fsrs') return (fsrsData[currentCard.id]?.state ?? 'new') === 'new'
     return (srsData[currentCard.id]?.repetitions ?? 0) === 0
   })()
 
@@ -255,11 +262,11 @@ function SessionContent() {
       ratingInFlightRef.current = true
 
       const isNew = algorithm === 'fsrs'
-        ? (useLibraryStore.getState().fsrsData[card.id]?.repetitions ?? 0) === 0
+        ? (useLibraryStore.getState().fsrsData[card.id]?.state ?? 'new') === 'new'
         : (useLibraryStore.getState().srsData[card.id]?.repetitions ?? 0) === 0
 
-      // New card forgotten → re-queue without entering SRS
-      if (isNew && rating === 1) {
+      // New card: only Good (3) or Easy (4) graduates; Again (1) or Hard (2) re-queues
+      if (isNew && rating <= 2) {
         setAnimatingOut('left')
         setTimeout(() => {
           setAnimatingOut(null)
@@ -503,7 +510,13 @@ function SessionContent() {
                 startSession(cards, resolvedMode)
                 setHistory([])
                 setLoaded(true)
-                setInitialQueueLength(cards.length)
+                const lib = useLibraryStore.getState()
+                const reviewCount = cards.filter((c) =>
+                  algorithm === 'fsrs'
+                    ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
+                    : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+                ).length
+                setInitialQueueLength(reviewCount)
                 setRememberedCount(0)
                 setForgottenReviewCount(0)
                 setNewCardReviewedCount(0)
