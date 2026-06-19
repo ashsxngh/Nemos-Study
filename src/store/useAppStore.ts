@@ -16,6 +16,7 @@ interface AppState {
   syncError: string | null
   syncOffline: boolean
   manualSync: (() => Promise<void>) | null
+  lastBurnoutNudgeAt: string | null
 
   setTheme: (theme: Theme) => void
   toggleSidebar: () => void
@@ -32,6 +33,7 @@ interface AppState {
   setSyncError: (e: string | null) => void
   setSyncOffline: (v: boolean) => void
   setManualSync: (fn: (() => Promise<void>) | null) => void
+  setLastBurnoutNudgeAt: (iso: string) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -48,6 +50,7 @@ export const useAppStore = create<AppState>()(
       syncError: null,
       syncOffline: false,
       manualSync: null,
+      lastBurnoutNudgeAt: null,
 
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -71,6 +74,7 @@ export const useAppStore = create<AppState>()(
       setSyncError: (e) => set({ syncError: e }),
       setSyncOffline: (v) => set({ syncOffline: v }),
       setManualSync: (fn) => set({ manualSync: fn }),
+      setLastBurnoutNudgeAt: (iso) => set({ lastBurnoutNudgeAt: iso }),
     }),
     {
       name: 'nemos-app',
@@ -79,6 +83,7 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: s.sidebarCollapsed,
         lastOpenDeckId: s.lastOpenDeckId,
         lastOpenNoteId: s.lastOpenNoteId,
+        lastBurnoutNudgeAt: s.lastBurnoutNudgeAt,
       }),
     }
   )

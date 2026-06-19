@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Calendar, AlertTriangle, ArrowRight } from 'lucide-react'
 import { Progress } from '@/components/ui/Progress'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { computeExamRetentionStats, getExamCards } from '@/lib/examScheduler'
@@ -55,7 +55,7 @@ function ExamRow({ exam }: { exam: Exam }) {
           )}
         </div>
         <p className="text-[10px] text-[var(--text-muted)]">
-          {exam.subject} · {new Date(exam.date + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          {exam.subject} · {formatDate(exam.date + 'T00:00')}
         </p>
 
         {stats.reviewedCards > 0 && (

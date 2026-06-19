@@ -9,6 +9,7 @@ interface SettingsData {
   algorithm: 'sm2' | 'fsrs'
   newCardsPerDay: number
   maxReviewsPerDay: number
+  sessionLength: number
   easyBonus: number
   hardInterval: number
   graduatingInterval: number
@@ -68,9 +69,10 @@ interface SettingsState extends SettingsData {
 }
 
 const defaults: SettingsData = {
-  algorithm: 'sm2',
+  algorithm: 'fsrs',
   newCardsPerDay: 20,
   maxReviewsPerDay: 200,
+  sessionLength: 20,
   easyBonus: 1.3,
   hardInterval: 1.2,
   graduatingInterval: 4,

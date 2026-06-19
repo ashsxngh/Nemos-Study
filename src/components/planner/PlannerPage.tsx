@@ -7,7 +7,7 @@ import {
   Plus, X, BookOpen, Folder, AlertTriangle, Target, Settings, Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import {
@@ -330,7 +330,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
 
   const [pendingRating, setPendingRating] = useState(0)
 
-  const dateLabel = new Date(exam.date + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const dateLabel = formatDate(exam.date + 'T00:00')
 
   // ── Past: unrated → rating UI ──────────────────────────────────────────────
   if (isPast && !exam.rating) {

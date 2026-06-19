@@ -5,6 +5,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { cn } from '@/lib/utils'
 import type { FolderColor } from '@/lib/types'
 
@@ -29,11 +30,11 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
   const { folders, createFolder } = useLibraryStore()
   const [name, setName] = useState('')
   const [color, setColor] = useState<FolderColor>('default')
-  const [parentId, setParentId] = useState<string>(defaultParentId ?? '')
+  const [parentId, setParentId] = useState<string | null>(defaultParentId ?? null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (open) setParentId(defaultParentId ?? '')
+    if (open) setParentId(defaultParentId ?? null)
   }, [open, defaultParentId])
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -43,10 +44,10 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
       setError('Folder name is required')
       return
     }
-    createFolder(trimmed, parentId || null, color)
+    createFolder(trimmed, parentId, color)
     setName('')
     setColor('default')
-    setParentId(defaultParentId ?? '')
+    setParentId(defaultParentId ?? null)
     setError('')
     onClose()
   }
@@ -54,7 +55,7 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
   const handleClose = () => {
     setName('')
     setColor('default')
-    setParentId(defaultParentId ?? '')
+    setParentId(defaultParentId ?? null)
     setError('')
     onClose()
   }
@@ -111,23 +112,14 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
         {folders.length > 0 && (
           <div>
             <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
-              Parent folder <span className="text-[var(--text-muted)]">(optional)</span>
+              Parent folder
             </label>
-            <select
+            <FolderTreePicker
+              folders={folders}
               value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
-              className={cn(
-                'w-full h-8 bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)]',
-                'text-[var(--text-primary)] text-sm px-3',
-                'hover:border-[var(--border-strong)]',
-                'focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]'
-              )}
-            >
-              <option value="">None (top level)</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
+              onChange={setParentId}
+              noFolderLabel="None (top level)"
+            />
           </div>
         )}
 

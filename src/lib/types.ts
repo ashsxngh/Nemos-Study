@@ -204,6 +204,7 @@ export interface ToastData {
   type: 'success' | 'error' | 'info' | 'warning'
   message: string
   duration?: number
+  action?: { label: string; onClick: () => void }
 }
 
 export interface StudySettings {

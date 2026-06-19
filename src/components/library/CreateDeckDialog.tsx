@@ -5,6 +5,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { cn } from '@/lib/utils'
 
 interface CreateDeckDialogProps {
@@ -17,7 +18,7 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
   const { folders, createDeck } = useLibraryStore()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [folderId, setFolderId] = useState<string>(defaultFolderId ?? '')
+  const [folderId, setFolderId] = useState<string | null>(defaultFolderId ?? null)
   const [nameError, setNameError] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -27,10 +28,10 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
       setNameError('Deck name is required')
       return
     }
-    createDeck(trimmed, folderId || null, description.trim())
+    createDeck(trimmed, folderId, description.trim())
     setName('')
     setDescription('')
-    setFolderId(defaultFolderId ?? '')
+    setFolderId(defaultFolderId ?? null)
     setNameError('')
     onClose()
   }
@@ -38,7 +39,7 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
   const handleClose = () => {
     setName('')
     setDescription('')
-    setFolderId(defaultFolderId ?? '')
+    setFolderId(defaultFolderId ?? null)
     setNameError('')
     onClose()
   }
@@ -100,21 +101,12 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
           <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
             Location
           </label>
-          <select
+          <FolderTreePicker
+            folders={folders}
             value={folderId}
-            onChange={(e) => setFolderId(e.target.value)}
-            className={cn(
-              'w-full h-8 bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)]',
-              'text-[var(--text-primary)] text-sm px-3',
-              'hover:border-[var(--border-strong)]',
-              'focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]'
-            )}
-          >
-            <option value="">No folder (top level)</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>{f.name}</option>
-            ))}
-          </select>
+            onChange={setFolderId}
+            noFolderLabel="No folder (top level)"
+          />
         </div>
 
         {/* Actions */}

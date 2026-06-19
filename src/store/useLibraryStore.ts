@@ -115,7 +115,7 @@ interface LibraryState {
   // Card actions
   createCard: (deckId: string, front: string, back: string, type?: CardType, tags?: string[]) => Card
   importCards: (deckId: string, cards: Array<{ front: string; back: string; type?: CardType; tags?: string[] }>) => void
-  updateCard: (id: string, updates: Partial<Pick<Card, 'front' | 'back' | 'type' | 'hint' | 'tags' | 'isPinned' | 'isArchived' | 'order'>>) => void
+  updateCard: (id: string, updates: Partial<Pick<Card, 'front' | 'back' | 'type' | 'hint' | 'tags' | 'isPinned' | 'isArchived' | 'order' | 'deckId'>>) => void
   deleteCard: (id: string) => void
 
   // SRS actions
@@ -143,6 +143,67 @@ interface LibraryState {
 function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] {
   const direct = folders.filter((f) => f.parentId === rootId).map((f) => f.id)
   return direct.flatMap((id) => [id, ...getAllDescendantFolderIds(folders, id)])
+}
+
+// ── Queue ordering helpers ──────────────────────────────────────────────────
+// Primary sort: due date ascending (most overdue first). Secondary: a
+// weighted round-robin across decks so one huge overdue deck doesn't
+// monopolize the front of the queue — decks with more overdue severity get
+// pulled from more often, but every deck with due cards gets interleaved in.
+
+function daysOverdue(dueDateIso: string): number {
+  return Math.max(0, (Date.now() - new Date(dueDateIso).getTime()) / 86400000)
+}
+
+function interleaveByDeck<T>(
+  items: T[],
+  getDeckId: (item: T) => string,
+  getWeight: (item: T) => number,
+): T[] {
+  if (items.length <= 1) return items
+  const buckets = new Map<string, { queue: T[]; weight: number; credit: number }>()
+  for (const item of items) {
+    const deckId = getDeckId(item)
+    let bucket = buckets.get(deckId)
+    if (!bucket) {
+      bucket = { queue: [], weight: 0, credit: 0 }
+      buckets.set(deckId, bucket)
+    }
+    bucket.queue.push(item)
+    bucket.weight += 1 + getWeight(item)
+  }
+  const totalWeight = Array.from(buckets.values()).reduce((sum, b) => sum + b.weight, 0)
+  const result: T[] = []
+  let remaining = items.length
+  while (remaining > 0) {
+    let pick: { queue: T[]; weight: number; credit: number } | null = null
+    for (const bucket of buckets.values()) {
+      if (bucket.queue.length === 0) continue
+      bucket.credit += bucket.weight
+      if (!pick || bucket.credit > pick.credit) pick = bucket
+    }
+    if (!pick) break
+    result.push(pick.queue.shift()!)
+    pick.credit -= totalWeight
+    remaining--
+  }
+  return result
+}
+
+// Pulls the 2-3 highest-retrievability cards (already-graduated cards the
+// learner is most confident on) to the front as a warmup before the harder,
+// more-overdue cards that follow.
+function withWarmup<T>(queue: T[], getRetrievability: (item: T) => number | null): T[] {
+  if (queue.length <= 3) return queue
+  const scored = queue
+    .map((item, index) => ({ item, index, r: getRetrievability(item) }))
+    .filter((s) => s.r !== null) as { item: T; index: number; r: number }[]
+  if (scored.length === 0) return queue
+  const warmupCount = Math.min(3, Math.max(2, Math.floor(queue.length * 0.1)), scored.length)
+  const warmup = [...scored].sort((a, b) => b.r - a.r).slice(0, warmupCount)
+  const warmupIndices = new Set(warmup.map((w) => w.index))
+  const rest = queue.filter((_, i) => !warmupIndices.has(i))
+  return [...warmup.map((w) => w.item), ...rest]
 }
 
 export const useLibraryStore = create<LibraryState>()(
@@ -601,18 +662,25 @@ export const useLibraryStore = create<LibraryState>()(
         const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
         if (remaining === 0) return []
 
-        const newCards = pool
-          .filter((c) => {
-            if (algorithm === 'fsrs') {
-              const fs = fsrsData[c.id]
-              return !fs || fs.state === 'new'
-            }
-            const srs = srsData[c.id]
-            return !srs || srs.repetitions === 0
-          })
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        const eligible = pool.filter((c) => {
+          if (algorithm === 'fsrs') {
+            const fs = fsrsData[c.id]
+            return !fs || fs.state === 'new'
+          }
+          const srs = srsData[c.id]
+          return !srs || srs.repetitions === 0
+        })
 
-        return newCards.slice(0, remaining)
+        // Primary sort: due date ascending (a new card's due date is set at
+        // creation time, so this is equivalent to oldest-created-first).
+        const dueDateOf = (c: Card) =>
+          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const sorted = [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
+
+        // Secondary sort: round-robin across decks, weighted by overdue severity.
+        const interleaved = interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
+
+        return interleaved.slice(0, remaining)
       },
 
       getReviewsDue: (deckId) => {
@@ -636,7 +704,7 @@ export const useLibraryStore = create<LibraryState>()(
           )
         }
 
-        return pool.filter((c) => {
+        const due = pool.filter((c) => {
           if (pulledForwardIds.has(c.id)) return true
           if (algorithm === 'fsrs') {
             const fs = fsrsData[c.id]
@@ -647,6 +715,13 @@ export const useLibraryStore = create<LibraryState>()(
           if (!srs || srs.repetitions === 0) return false
           return isDue(srs)
         })
+
+        // Primary sort: due date ascending (most overdue first), then
+        // weighted round-robin across decks by overdue severity.
+        const dueDateOf = (c: Card) =>
+          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const sorted = [...due].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
+        return interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
       },
 
       getDueCards: (deckId) => {
@@ -654,7 +729,8 @@ export const useLibraryStore = create<LibraryState>()(
         const reviews = get().getReviewsDue(deckId)
 
         // Sort reviews by exam urgency — highest urgency first in inbox
-        const { fsrsData, decks, folders } = get()
+        const { fsrsData, srsData, decks, folders } = get()
+        const { algorithm } = useSettingsStore.getState()
         const futureExams = useExamStore.getState().exams.filter(
           (e) => new Date(e.date + 'T00:00') > new Date()
         )
@@ -663,7 +739,18 @@ export const useLibraryStore = create<LibraryState>()(
           reviews.sort((a, b) => (urgencies.get(b.id) ?? 0) - (urgencies.get(a.id) ?? 0))
         }
 
-        return [...reviews, ...newCards]
+        const combined = [...reviews, ...newCards]
+
+        // Session-start warmup: surface the 2-3 cards the learner is most
+        // confident on right now, ahead of the harder overdue cards.
+        return withWarmup(combined, (c) => {
+          if (algorithm === 'fsrs') {
+            const fs = fsrsData[c.id]
+            return fs && fs.state !== 'new' ? fsrsRetrievability(fs) : null
+          }
+          const srs = srsData[c.id]
+          return srs && srs.repetitions > 0 ? srs.masteryPercent / 100 : null
+        })
       },
 
       getDeckCards: (deckId) => {

@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react'
 import { Trash2, RotateCcw, X, BookOpen, FileText, CreditCard, AlertTriangle } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
+import { Dialog } from '@/components/ui/Dialog'
 import { useTrashStore, type TrashEntry } from '@/store/useTrashStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useAppStore } from '@/store/useAppStore'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 
 const TRASH_TTL_DAYS = 14
 
@@ -20,8 +21,7 @@ function daysRemaining(deletedAt: string): number {
 }
 
 function formatDeletedDate(deletedAt: string): string {
-  const d = new Date(deletedAt)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  return formatDate(deletedAt)
 }
 
 function TypeIcon({ type }: { type: TrashEntry['type'] }) {
@@ -112,6 +112,7 @@ function TrashItemRow({ entry, onRestore, onDelete }: TrashItemRowProps) {
 export default function TrashPage() {
   const { items, remove, purgeExpired, clear } = useTrashStore()
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmEntry, setConfirmEntry] = useState<TrashEntry | null>(null)
 
   // Purge expired items on mount
   useEffect(() => {
@@ -156,8 +157,22 @@ export default function TrashPage() {
   }
 
   function handleForeverDelete(entry: TrashEntry) {
+    // Decks/notes with cards attached get a confirmation showing the exact
+    // count being permanently removed — cards alone are a single, already-
+    // obvious deletion and don't need the extra step.
+    if (entry.type === 'deck' && (entry.cardCount ?? 0) > 0) {
+      setConfirmEntry(entry)
+      return
+    }
     remove(entry.id)
     void deleteFromSupabase(entry)
+  }
+
+  function confirmForeverDelete() {
+    if (!confirmEntry) return
+    remove(confirmEntry.id)
+    void deleteFromSupabase(confirmEntry)
+    setConfirmEntry(null)
   }
 
   function handleRestore(entry: TrashEntry) {
@@ -212,7 +227,9 @@ export default function TrashPage() {
           items.length > 0 ? (
             confirmClear ? (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-muted)]">Delete all {items.length} items?</span>
+                <span className="text-xs text-[var(--text-muted)]">
+                  Delete all {items.length} items ({items.reduce((sum, i) => sum + (i.cardCount ?? (i.type === 'card' ? 1 : 0)), 0)} cards total)?
+                </span>
                 <Button
                   variant="danger"
                   size="sm"
@@ -290,6 +307,30 @@ export default function TrashPage() {
           </div>
         )}
       </main>
+
+      <Dialog
+        open={!!confirmEntry}
+        onClose={() => setConfirmEntry(null)}
+        title="Delete forever?"
+        size="sm"
+      >
+        {confirmEntry && (
+          <div className="p-4 space-y-3">
+            <p className="text-sm text-[var(--text-primary)]">
+              This will permanently delete <strong>{confirmEntry.cardCount}</strong>{' '}
+              {confirmEntry.cardCount === 1 ? 'card' : 'cards'} in &quot;{confirmEntry.name}&quot;. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirmEntry(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" size="sm" onClick={confirmForeverDelete}>
+                Delete forever
+              </Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   )
 }

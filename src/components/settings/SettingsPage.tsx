@@ -243,14 +243,21 @@ export function SettingsPage() {
   // ── Number input helper ────────────────────────────────────────────────────
   function numInput(
     key: Parameters<typeof updateSettings>[0] extends Partial<infer T> ? keyof T : never,
-    value: number
+    value: number,
+    bounds?: { min: number; max: number }
   ) {
     return (
       <Input
         type="number"
+        min={bounds?.min}
+        max={bounds?.max}
         className="w-24 text-right"
         value={value}
-        onChange={(e) => updateSettings({ [key]: parseFloat(e.target.value) || 0 })}
+        onChange={(e) => {
+          let v = parseFloat(e.target.value) || 0
+          if (bounds) v = Math.min(bounds.max, Math.max(bounds.min, v))
+          updateSettings({ [key]: v })
+        }}
       />
     )
   }
@@ -443,6 +450,9 @@ export function SettingsPage() {
                     <SettingRow label="Max reviews per day" description="Cap on review cards (previously seen cards due for repetition) per day">
                       {numInput('maxReviewsPerDay', settings.maxReviewsPerDay)}
                     </SettingRow>
+                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
+                      {numInput('sessionLength', settings.sessionLength, { min: 5, max: 100 })}
+                    </SettingRow>
                     <SettingRow label="Starting ease factor" description="Initial ease multiplier assigned to new cards (SM-2 default: 2.5)">
                       {numInput('startingEase', settings.startingEase)}
                     </SettingRow>
@@ -480,6 +490,9 @@ export function SettingsPage() {
                     </SettingRow>
                     <SettingRow label="Max reviews per day" description="Cap on review cards (previously seen cards due for repetition) per day">
                       {numInput('maxReviewsPerDay', settings.maxReviewsPerDay)}
+                    </SettingRow>
+                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
+                      {numInput('sessionLength', settings.sessionLength, { min: 5, max: 100 })}
                     </SettingRow>
                     <SettingRow
                       label="Target retention"

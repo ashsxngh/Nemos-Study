@@ -283,14 +283,21 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   // Number input helper
   function numInput(
     key: Parameters<typeof updateSettings>[0] extends Partial<infer T> ? keyof T : never,
-    value: number
+    value: number,
+    bounds?: { min: number; max: number }
   ) {
     return (
       <Input
         type="number"
+        min={bounds?.min}
+        max={bounds?.max}
         className="w-24 text-right"
         value={value}
-        onChange={(e) => updateSettings({ [key]: parseFloat(e.target.value) || 0 })}
+        onChange={(e) => {
+          let v = parseFloat(e.target.value) || 0
+          if (bounds) v = Math.min(bounds.max, Math.max(bounds.min, v))
+          updateSettings({ [key]: v })
+        }}
       />
     )
   }
@@ -423,6 +430,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     <SettingRow label="Max reviews per day" description="Cap on review cards per day">
                       {numInput('maxReviewsPerDay', settings.maxReviewsPerDay)}
                     </SettingRow>
+                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
+                      {numInput('sessionLength', settings.sessionLength, { min: 5, max: 100 })}
+                    </SettingRow>
                     <SettingRow label="Starting ease factor" description="Initial ease multiplier for new cards (default: 2.5)">
                       {numInput('startingEase', settings.startingEase)}
                     </SettingRow>
@@ -457,6 +467,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     </SettingRow>
                     <SettingRow label="Max reviews per day" description="Cap on review cards per day">
                       {numInput('maxReviewsPerDay', settings.maxReviewsPerDay)}
+                    </SettingRow>
+                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
+                      {numInput('sessionLength', settings.sessionLength, { min: 5, max: 100 })}
                     </SettingRow>
                     <SettingRow
                       label="Target retention"
@@ -641,7 +654,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 <p className="text-xs font-medium text-[var(--text-secondary)] mb-2">Study session</p>
                 <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
                   {([
-                    { key: 'forgot',     label: 'Forgot',    description: 'Rate card as forgotten' },
+                    { key: 'forgot',     label: 'Missed', description: 'Rate card to review again soon' },
                     { key: 'remembered', label: 'Remembered', description: 'Rate card as remembered (also flips card)' },
                     { key: 'skip',       label: 'Skip card',  description: 'Skip without rating' },
                     { key: 'back',       label: 'Go back',    description: 'Return to previous card' },

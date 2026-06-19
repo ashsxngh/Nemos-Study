@@ -33,6 +33,14 @@ function ToastItem({ toast }: { toast: ToastData }) {
     <div className="flex items-start gap-2.5 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] shadow-lg p-3 animate-fade-in min-w-64 max-w-xs">
       <Icon size={15} className={cn('mt-0.5 shrink-0', styles[toast.type])} />
       <p className="text-sm text-[var(--text-primary)] flex-1">{toast.message}</p>
+      {toast.action && (
+        <button
+          onClick={() => { toast.action!.onClick(); removeToast(toast.id) }}
+          className="text-xs font-medium text-[var(--accent)] hover:underline shrink-0"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         onClick={() => removeToast(toast.id)}
         className="text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0"

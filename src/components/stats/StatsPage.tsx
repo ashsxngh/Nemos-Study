@@ -13,7 +13,7 @@ import { Progress } from '@/components/ui/Progress'
 import { Badge } from '@/components/ui/Badge'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 
 // ── useCountUp hook ───────────────────────────────────────────────────────────
 
@@ -56,8 +56,7 @@ function dateStr(daysAgo: number): string {
 }
 
 function shortDate(iso: string): string {
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  return formatDate(iso)
 }
 
 function groupLogsByCard<T extends { cardId: string }>(logs: T[]): Map<string, T[]> {
@@ -135,7 +134,7 @@ export function StatsPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const router = useRouter()
 
-  const { cards, decks, sessions, reviewLogs, getDeckMastery } = useLibraryStore()
+  const { cards, decks, sessions, reviewLogs, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore()
   const srsData = useLibraryStore((s) => s.srsData)
   const fsrsData = useLibraryStore((s) => s.fsrsData)
   const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold, algorithm } = useSettingsStore()
@@ -164,11 +163,12 @@ export function StatsPage() {
   const streak = useMemo(() => computeStreak(reviewLogs), [reviewLogs])
 
   const todayStr = new Date().toISOString().slice(0, 10)
+  // "Due today" = the inbox — reviews due plus new cards still within today's
+  // cap. Cards in the inbox are there because they're due today, so this
+  // count must match what the inbox/sidebar shows, not just scheduled reviews.
   const todayDueCount = useMemo(
-    () => algorithm === 'fsrs'
-      ? Object.values(fsrsData).filter((s) => s.state !== 'new' && s.dueDate.slice(0, 10) <= todayStr).length
-      : Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) <= todayStr).length,
-    [algorithm, fsrsData, srsData, todayStr]
+    () => getReviewsDue().length + getNewCards().length,
+    [cards, decks, reviewLogs, srsData, fsrsData, algorithm, getReviewsDue, getNewCards]
   )
 
   const retentionData = useMemo(() => {
@@ -906,9 +906,13 @@ export function StatsPage() {
             <div className="flex items-center gap-2 mb-4">
               <Brain size={14} className="text-[var(--text-muted)]" />
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Rating Distribution</h2>
-              <span className="text-xs text-[var(--text-muted)] ml-auto">{totalRatings.toLocaleString()} total reviews</span>
+              {algorithm === 'sm2' && (
+                <span className="text-xs text-[var(--text-muted)] ml-auto">{totalRatings.toLocaleString()} total reviews</span>
+              )}
             </div>
-            {totalRatings === 0 ? <EmptyState message="No reviews yet" /> : (
+            {algorithm !== 'sm2' ? (
+              <EmptyState message="Rating distributions are available in SM2 mode." />
+            ) : totalRatings === 0 ? <EmptyState message="No reviews yet" /> : (
               <div className="space-y-2.5">
                 {ratingLabels.map((label, i) => {
                   const pct = totalRatings > 0 ? Math.round((ratingCounts[i] / totalRatings) * 100) : 0

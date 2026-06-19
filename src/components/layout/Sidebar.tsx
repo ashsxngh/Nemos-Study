@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Library,
@@ -25,6 +25,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
+import { CreateDeckDialog } from '@/components/library/CreateDeckDialog'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -46,14 +47,11 @@ const STUDY_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
   const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync } = useAppStore()
-  const { decks, folders, cards, createDeck, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
+  const { decks, folders, cards, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showNewDeckForm, setShowNewDeckForm] = useState(false)
-  const [newDeckName, setNewDeckName] = useState('')
-  const [newDeckFolder, setNewDeckFolder] = useState<string | null>(null)
 
   const newCards = getNewCards()
   const reviewsDue = getReviewsDue()
@@ -80,14 +78,6 @@ export function Sidebar() {
   const rootDecks   = decks.filter((d) => !d.folderId && !d.isArchived)
 
   const deckCardCount = (deckId: string) => cards.filter((c) => c.deckId === deckId).length
-
-  const handleNewDeckSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    createDeck(newDeckName.trim() || 'New Deck', newDeckFolder)
-    setShowNewDeckForm(false)
-    setNewDeckName('')
-    router.push('/library')
-  }
 
   if (sidebarCollapsed) {
     return (
@@ -296,29 +286,13 @@ export function Sidebar() {
             </Link>
           ))}
 
-          {!showNewDeckForm ? (
-            <button
-              onClick={() => setShowNewDeckForm(true)}
-              className="flex items-center gap-1.5 h-7 px-1.5 w-full rounded-lg text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              <Plus size={12} className="shrink-0" />
-              New Deck
-            </button>
-          ) : (
-            <form onSubmit={handleNewDeckSubmit} className="px-1.5 py-2 space-y-1.5 animate-fade-in">
-              <input
-                autoFocus
-                value={newDeckName}
-                onChange={(e) => setNewDeckName(e.target.value)}
-                placeholder="Deck name..."
-                className="w-full text-xs bg-[var(--bg-hover)] border border-[var(--accent)] rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
-              />
-              <div className="flex gap-1">
-                <button type="submit" className="flex-1 text-[10px] font-medium py-1 rounded-[var(--radius-sm)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity">Create</button>
-                <button type="button" onClick={() => setShowNewDeckForm(false)} className="text-[10px] px-2 py-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">Cancel</button>
-              </div>
-            </form>
-          )}
+          <button
+            onClick={() => setShowNewDeckForm(true)}
+            className="flex items-center gap-1.5 h-7 px-1.5 w-full rounded-lg text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors"
+          >
+            <Plus size={12} className="shrink-0" />
+            New Deck
+          </button>
         </div>
       </div>
 
@@ -361,6 +335,7 @@ export function Sidebar() {
       </div>
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CreateDeckDialog open={showNewDeckForm} onClose={() => setShowNewDeckForm(false)} />
     </aside>
   )
 }

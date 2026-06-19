@@ -3,11 +3,12 @@
 import { Suspense, useCallback, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Upload, X, FileText, Folder as FolderIcon, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Upload, X, FileText, Folder as FolderIcon } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
+import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { cn, truncate } from '@/lib/utils'
 import type { CardType, Folder, Deck } from '@/lib/types'
 import {
@@ -142,131 +143,6 @@ function flattenFolderTree(nodes: FolderNode[]): FolderNode[] {
   }
   walk(nodes)
   return out
-}
-
-// ── FolderTreePicker ──────────────────────────────────────────────────────────
-
-function FolderTreeRow({
-  node,
-  value,
-  expanded,
-  onSelect,
-  onToggle,
-}: {
-  node: FolderNode
-  value: string | null
-  expanded: Set<string>
-  onSelect: (id: string | null) => void
-  onToggle: (id: string) => void
-}) {
-  const hasChildren = node.children.length > 0
-  const isOpen = expanded.has(node.folder.id)
-  const isSelected = value === node.folder.id
-
-  return (
-    <>
-      <div
-        style={{ paddingLeft: `${10 + node.depth * 14}px` }}
-        className={cn(
-          'flex items-center pr-1.5 transition-colors',
-          isSelected
-            ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
-            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-        )}
-      >
-        {/* Expand/collapse toggle — only shown when folder has children */}
-        <button
-          type="button"
-          onClick={() => hasChildren && onToggle(node.folder.id)}
-          className={cn(
-            'flex items-center justify-center w-4 h-6 shrink-0 transition-colors',
-            hasChildren ? 'hover:text-[var(--text-primary)] cursor-pointer' : 'cursor-default opacity-0 pointer-events-none'
-          )}
-          tabIndex={hasChildren ? 0 : -1}
-        >
-          <ChevronRight
-            size={11}
-            className={cn('transition-transform duration-150', isOpen && 'rotate-90')}
-          />
-        </button>
-
-        {/* Folder name — selectable */}
-        <button
-          type="button"
-          onClick={() => onSelect(node.folder.id)}
-          className={cn(
-            'flex items-center gap-1.5 flex-1 min-w-0 py-1.5 text-left',
-            isSelected ? 'font-medium' : ''
-          )}
-        >
-          <FolderIcon size={11} className="shrink-0 opacity-60" />
-          <span className="truncate">{node.folder.name}</span>
-        </button>
-      </div>
-
-      {/* Children — only rendered when expanded */}
-      {isOpen && node.children.map((child) => (
-        <FolderTreeRow
-          key={child.folder.id}
-          node={child}
-          value={value}
-          expanded={expanded}
-          onSelect={onSelect}
-          onToggle={onToggle}
-        />
-      ))}
-    </>
-  )
-}
-
-function FolderTreePicker({
-  folders,
-  value,
-  onChange,
-}: {
-  folders: Folder[]
-  value: string | null
-  onChange: (id: string | null) => void
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const roots = buildFolderTree(folders.filter((f) => !f.isArchived))
-
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-
-  return (
-    <div className="max-h-[176px] overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--border)] text-xs">
-      {/* No folder option */}
-      <button
-        type="button"
-        onClick={() => onChange(null)}
-        className={cn(
-          'w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 transition-colors',
-          value === null
-            ? 'bg-[var(--accent)]/10 text-[var(--accent)] font-medium'
-            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-        )}
-      >
-        <span className="w-4 shrink-0" />
-        No folder
-      </button>
-
-      {roots.map((node) => (
-        <FolderTreeRow
-          key={node.folder.id}
-          node={node}
-          value={value}
-          expanded={expanded}
-          onSelect={onChange}
-          onToggle={toggle}
-        />
-      ))}
-    </div>
-  )
 }
 
 // ── DeckTreePicker ────────────────────────────────────────────────────────────

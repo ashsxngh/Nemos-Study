@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download, Eye } from 'lucide-react'
 import {
@@ -28,7 +28,9 @@ import { CardEditor } from '@/components/library/CardEditor'
 import { ReviewCard } from '@/components/study/ReviewCard'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
-import { cn, truncate } from '@/lib/utils'
+import { useAppStore } from '@/store/useAppStore'
+import { useTrashStore } from '@/store/useTrashStore'
+import { cn, truncate, formatDate } from '@/lib/utils'
 import { isDue } from '@/lib/srs'
 import type { Card, SRSData } from '@/lib/types'
 
@@ -51,11 +53,12 @@ interface SortableCardRowProps {
   onResetSRS: (id: string) => void
   onPreview: (card: Card) => void
   onClick?: () => void
+  checked?: boolean
+  onToggleCheck?: (id: string) => void
 }
 
 function fmtDate(iso: string) {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return formatDate(iso)
 }
 
 function fmtRelative(iso: string | null) {
@@ -78,7 +81,7 @@ function fmtInterval(days: number): string {
   return `${rounded} DAY${rounded === 1 ? '' : 'S'}`
 }
 
-function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onPreview, onClick }: SortableCardRowProps) {
+function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onPreview, onClick, checked, onToggleCheck }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
   const { cardFields } = useSettingsStore()
   const {
@@ -119,6 +122,17 @@ function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onR
       >
         <GripVertical size={14} />
       </button>
+
+      {onToggleCheck && (
+        <input
+          type="checkbox"
+          checked={!!checked}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleCheck(card.id)}
+          className="shrink-0 w-3.5 h-3.5 accent-[var(--accent)]"
+          aria-label="Select card"
+        />
+      )}
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
@@ -244,6 +258,112 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const [previewCard, setPreviewCard] = useState<Card | null>(null)
   const [previewShowAnswer, setPreviewShowAnswer] = useState(false)
 
+  // Bulk selection — Cmd/Ctrl+A selects all, checkboxes toggle individual cards
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBulkMove, setShowBulkMove] = useState(false)
+  const [showBulkTag, setShowBulkTag] = useState(false)
+  const [showBulkDelete, setShowBulkDelete] = useState(false)
+  const [bulkMoveTarget, setBulkMoveTarget] = useState('')
+  const [bulkTagInput, setBulkTagInput] = useState('')
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Tracks the most recent trash-via-delete (single or bulk) so Ctrl+Z can
+  // restore the card(s) to their original deck within the 5s undo window.
+  const lastDeletedRef = useRef<{ ids: string[] } | null>(null)
+  const undoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function restoreDeletedCards(ids: string[]) {
+    const trash = useTrashStore.getState()
+    useLibraryStore.setState((s) => {
+      const newCards = [...s.cards]
+      const newSrsData = { ...s.srsData }
+      const newFsrsData = { ...s.fsrsData }
+      const restoredIds = new Set<string>()
+      for (const id of ids) {
+        const entry = trash.items.find((i) => i.id === id && i.type === 'card')
+        if (!entry?.card) continue
+        newCards.push(entry.card)
+        if (entry.cardSRS) newSrsData[id] = entry.cardSRS
+        if (entry.cardFSRS) newFsrsData[id] = entry.cardFSRS
+        restoredIds.add(id)
+      }
+      return {
+        cards: newCards,
+        srsData: newSrsData,
+        fsrsData: newFsrsData,
+        pendingDeletes: {
+          ...s.pendingDeletes,
+          cards: s.pendingDeletes.cards.filter((id) => !restoredIds.has(id)),
+        },
+      }
+    })
+    ids.forEach((id) => {
+      const entry = trash.items.find((i) => i.id === id && i.type === 'card')
+      if (entry) trash.remove(entry.id)
+    })
+  }
+
+  function trackDeleteForUndo(ids: string[]) {
+    lastDeletedRef.current = { ids }
+    if (undoClearTimerRef.current) clearTimeout(undoClearTimerRef.current)
+    undoClearTimerRef.current = setTimeout(() => { lastDeletedRef.current = null }, 5000)
+    useAppStore.getState().addToast({
+      type: 'info',
+      message: ids.length === 1 ? 'Card deleted — Undo?' : `${ids.length} cards deleted — Undo?`,
+      duration: 5000,
+      action: { label: 'Undo', onClick: () => handleUndoDelete() },
+    })
+  }
+
+  function handleUndoDelete() {
+    const pending = lastDeletedRef.current
+    if (!pending) return
+    restoreDeletedCards(pending.ids)
+    lastDeletedRef.current = null
+    if (undoClearTimerRef.current) clearTimeout(undoClearTimerRef.current)
+    useAppStore.getState().addToast({
+      type: 'info',
+      message: pending.ids.length === 1 ? 'Card restored' : 'Cards restored',
+      duration: 2000,
+    })
+  }
+
+  function handleBulkMove() {
+    if (!bulkMoveTarget) return
+    selectedIds.forEach((id) => updateCard(id, { deckId: bulkMoveTarget }))
+    setSelectedIds(new Set())
+    setShowBulkMove(false)
+    setBulkMoveTarget('')
+  }
+
+  function handleBulkTag() {
+    const tag = bulkTagInput.trim().toLowerCase()
+    if (!tag) return
+    selectedIds.forEach((id) => {
+      const card = cards.find((c) => c.id === id)
+      if (card && !card.tags.includes(tag)) updateCard(id, { tags: [...card.tags, tag] })
+    })
+    setSelectedIds(new Set())
+    setShowBulkTag(false)
+    setBulkTagInput('')
+  }
+
+  function handleBulkDelete() {
+    const ids = Array.from(selectedIds)
+    ids.forEach((id) => deleteCard(id))
+    trackDeleteForUndo(ids)
+    setSelectedIds(new Set())
+    setShowBulkDelete(false)
+  }
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -264,6 +384,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   }
 
   const anyDialogOpen = addingCard || !!editingCard || !!confirmDeleteId || !!previewCard
+    || showBulkMove || showBulkTag || showBulkDelete
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -271,7 +392,19 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
 
-      if (e.key === 'Escape') { setSelectedIdx(-1); return }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault()
+        setSelectedIds(new Set(cards.map((c) => c.id)))
+        return
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        handleUndoDelete()
+        return
+      }
+
+      if (e.key === 'Escape') { setSelectedIdx(-1); setSelectedIds(new Set()); return }
 
       if (e.key === 'n' || e.key === 'N') { setAddingCard(true); return }
 
@@ -354,6 +487,29 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
         </div>
       </div>
 
+      {/* Bulk selection toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-5 py-2 border-b border-[var(--border)] bg-[var(--accent-subtle)]">
+          <span className="text-xs font-medium text-[var(--accent)]">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" onClick={() => setShowBulkMove(true)}>
+            Move to deck
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowBulkTag(true)}>
+            Add tag
+          </Button>
+          <Button variant="ghost" size="sm" className="text-[var(--danger)]" onClick={() => setShowBulkDelete(true)}>
+            <Trash2 size={12} />
+            Trash
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
+
       {/* Card list */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {cards.length === 0 ? (
@@ -392,6 +548,8 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
                       onResetSRS={(id) => resetCardSRS(id)}
                       onPreview={(c) => { setPreviewShowAnswer(false); setPreviewCard(c) }}
                       onClick={() => setSelectedIdx(idx === selectedIdx ? -1 : idx)}
+                      checked={selectedIds.has(card.id)}
+                      onToggleCheck={toggleSelect}
                     />
                   )
                 })}
@@ -478,12 +636,82 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
             variant="danger"
             size="sm"
             onClick={() => {
-              if (confirmDeleteId) deleteCard(confirmDeleteId)
+              if (confirmDeleteId) {
+                deleteCard(confirmDeleteId)
+                trackDeleteForUndo([confirmDeleteId])
+              }
               setConfirmDeleteId(null)
             }}
           >
             Delete
           </Button>
+        </div>
+      </Dialog>
+
+      {/* Bulk: move selected cards to another deck */}
+      <Dialog
+        open={showBulkMove}
+        onClose={() => setShowBulkMove(false)}
+        title={`Move ${selectedIds.size} ${selectedIds.size === 1 ? 'card' : 'cards'}`}
+        size="sm"
+      >
+        <div className="p-4 space-y-3">
+          <select
+            value={bulkMoveTarget}
+            onChange={(e) => setBulkMoveTarget(e.target.value)}
+            className="w-full text-sm bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--text-primary)] outline-none"
+          >
+            <option value="">Choose a deck…</option>
+            {decks.filter((d) => d.id !== deckId).map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowBulkMove(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" disabled={!bulkMoveTarget} onClick={handleBulkMove}>Move</Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Bulk: add a tag to selected cards */}
+      <Dialog
+        open={showBulkTag}
+        onClose={() => setShowBulkTag(false)}
+        title={`Tag ${selectedIds.size} ${selectedIds.size === 1 ? 'card' : 'cards'}`}
+        size="sm"
+      >
+        <div className="p-4 space-y-3">
+          <input
+            autoFocus
+            value={bulkTagInput}
+            onChange={(e) => setBulkTagInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleBulkTag() }}
+            placeholder="Tag name…"
+            className="w-full text-sm bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowBulkTag(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" disabled={!bulkTagInput.trim()} onClick={handleBulkTag}>Add tag</Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Bulk: send selected cards to trash */}
+      <Dialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        title="Delete cards?"
+        size="sm"
+      >
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-[var(--text-primary)]">
+            This will delete <strong>{selectedIds.size}</strong>{' '}
+            {selectedIds.size === 1 ? 'card' : 'cards'}. You can undo with Ctrl+Z for a few seconds after.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowBulkDelete(false)}>Cancel</Button>
+            <Button variant="danger" size="sm" onClick={handleBulkDelete}>Delete</Button>
+          </div>
         </div>
       </Dialog>
     </div>

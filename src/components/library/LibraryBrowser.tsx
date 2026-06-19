@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
+import { Dialog } from '@/components/ui/Dialog'
 import { DeckView } from '@/components/library/DeckView'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
@@ -57,6 +58,51 @@ function getRecursiveCardCount(
   const directCount = directDecks.reduce((sum, d) => sum + getDeckCards(d.id).length, 0)
   const childFolders = folders.filter((f) => f.parentId === folderId)
   return directCount + childFolders.reduce((sum, f) => sum + getRecursiveCardCount(f.id, folders, decks, getDeckCards), 0)
+}
+
+// ── Confirm hard-delete dialog ────────────────────────────────────────────────
+
+interface ConfirmDeleteState {
+  type: 'folder' | 'deck'
+  id: string
+  name: string
+  cardCount: number
+}
+
+function ConfirmDeleteDialog({
+  target,
+  onClose,
+  onConfirm,
+}: {
+  target: ConfirmDeleteState | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog
+      open={!!target}
+      onClose={onClose}
+      title={target ? `Delete ${target.type}?` : ''}
+      size="sm"
+    >
+      {target && (
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-[var(--text-primary)]">
+            This will permanently delete <strong>{target.cardCount}</strong>{' '}
+            {target.cardCount === 1 ? 'card' : 'cards'} in &quot;{target.name}&quot;. This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={onConfirm}>
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
+  )
 }
 
 // ── Dropdown menu ─────────────────────────────────────────────────────────────
@@ -162,6 +208,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const [draggingDeckId, setDraggingDeckId] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>('alpha')
   const [activeTags, setActiveTags] = useState<string[]>([])
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -500,9 +547,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     icon: <Trash2 size={12} />,
                     danger: true,
                     onClick: () => {
-                      if (window.confirm(`Delete folder "${folder.name}" and all its contents?`)) {
-                        deleteFolder(folder.id)
-                      }
+                      setConfirmDelete({
+                        type: 'folder',
+                        id: folder.id,
+                        name: folder.name,
+                        cardCount: getRecursiveCardCount(folder.id, folders, decks, getDeckCards),
+                      })
                     },
                   },
                 ]
@@ -564,9 +614,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     icon: <Trash2 size={12} />,
                     danger: true,
                     onClick: () => {
-                      if (window.confirm(`Delete deck "${deck.name}"?`)) {
-                        deleteDeck(deck.id)
-                      }
+                      setConfirmDelete({
+                        type: 'deck',
+                        id: deck.id,
+                        name: deck.name,
+                        cardCount,
+                      })
                     },
                   },
                 ]
@@ -617,6 +670,16 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
           </div>
         ) : null}
       </DragOverlay>
+
+      <ConfirmDeleteDialog
+        target={confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          if (confirmDelete?.type === 'folder') deleteFolder(confirmDelete.id)
+          else if (confirmDelete?.type === 'deck') deleteDeck(confirmDelete.id)
+          setConfirmDelete(null)
+        }}
+      />
     </DndContext>
   )
 }
@@ -644,6 +707,7 @@ function LibraryTreeTable({
   } = useLibraryStore()
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
   const q = search.toLowerCase()
 
   const toggleFolder = (id: string) =>
@@ -701,9 +765,12 @@ function LibraryTreeTable({
       icon: <Trash2 size={12} />,
       danger: true,
       onClick: () => {
-        if (window.confirm(`Delete folder "${folder.name}" and all its contents?`)) {
-          deleteFolder(folder.id)
-        }
+        setConfirmDelete({
+          type: 'folder',
+          id: folder.id,
+          name: folder.name,
+          cardCount: folderCounts(folder.id).total,
+        })
       },
     },
   ]
@@ -724,9 +791,12 @@ function LibraryTreeTable({
       icon: <Trash2 size={12} />,
       danger: true,
       onClick: () => {
-        if (window.confirm(`Delete deck "${deck.name}"?`)) {
-          deleteDeck(deck.id)
-        }
+        setConfirmDelete({
+          type: 'deck',
+          id: deck.id,
+          name: deck.name,
+          cardCount: deckCounts(deck.id).total,
+        })
       },
     },
   ]
@@ -842,6 +912,16 @@ function LibraryTreeTable({
           {search ? `No results for "${search}"` : 'Nothing here yet.'}
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        target={confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          if (confirmDelete?.type === 'folder') deleteFolder(confirmDelete.id)
+          else if (confirmDelete?.type === 'deck') deleteDeck(confirmDelete.id)
+          setConfirmDelete(null)
+        }}
+      />
     </div>
   )
 }

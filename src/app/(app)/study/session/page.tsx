@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Focus,
   X,
+  ChevronDown,
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -29,8 +30,43 @@ import { ConfidenceRating } from '@/components/study/ConfidenceRating'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
-import { cn, formatDuration } from '@/lib/utils'
+import { fsrsRetrievability, daysUntilDue } from '@/lib/srs'
+import { cn, formatDuration, formatDate } from '@/lib/utils'
 import type { Card, Difficulty } from '@/lib/types'
+
+// ── Session abandonment recovery ──────────────────────────────────────────────
+// Snapshotted to sessionStorage on every queue/log change so a closed tab or
+// mid-session navigation can be resumed on next load of this page.
+
+const RECOVERY_KEY = 'nemos-session-recovery'
+
+interface RecoverySnapshot {
+  sessionId: string
+  queue: Card[]
+  currentIndex: number
+  logs: ReturnType<typeof useStudyStore.getState>['logs']
+  undoStack: ReturnType<typeof useStudyStore.getState>['undoStack']
+  mode: ReturnType<typeof useStudyStore.getState>['mode']
+  deckId?: string
+  examId?: string
+}
+
+function saveRecovery(snapshot: RecoverySnapshot): void {
+  try { sessionStorage.setItem(RECOVERY_KEY, JSON.stringify(snapshot)) } catch { /* storage unavailable */ }
+}
+
+function loadRecovery(): RecoverySnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(RECOVERY_KEY)
+    return raw ? (JSON.parse(raw) as RecoverySnapshot) : null
+  } catch {
+    return null
+  }
+}
+
+function clearRecovery(): void {
+  try { sessionStorage.removeItem(RECOVERY_KEY) } catch { /* storage unavailable */ }
+}
 
 function formatKey(key: string): string {
   if (key === ' ') return 'Space'
@@ -40,9 +76,23 @@ function formatKey(key: string): string {
   return key
 }
 
-const RATING_LABELS: Record<number, string> = { 1: 'Forgot', 2: 'Hard', 3: 'Good', 4: 'Easy' }
+const RATING_LABELS: Record<number, string> = { 1: 'Missed', 2: 'Hard', 3: 'Good', 4: 'Easy' }
 const RATING_COLORS: Record<number, string> = {
-  1: '#f87171', 2: '#fbbf24', 3: '#818cf8', 4: '#4ade80',
+  1: '#9b9ba4', 2: '#fbbf24', 3: '#818cf8', 4: '#4ade80',
+}
+
+const INTENTION_OPTIONS: { value: 'quick' | 'exam' | 'deep' | 'explore'; label: string }[] = [
+  { value: 'quick', label: 'Quick review' },
+  { value: 'exam', label: 'Exam prep' },
+  { value: 'deep', label: 'Deep focus' },
+  { value: 'explore', label: 'Just exploring' },
+]
+
+const INTENTION_COMPLETE_COPY: Record<'quick' | 'exam' | 'deep' | 'explore', string> = {
+  quick: 'Quick session done!',
+  exam: 'Solid exam prep!',
+  deep: 'Great focus session!',
+  explore: 'Hope that was useful!',
 }
 
 function SessionContent() {
@@ -54,6 +104,7 @@ function SessionContent() {
   const modeParam = searchParams.get('mode')
 
   const {
+    sessionId,
     queue,
     currentIndex,
     showAnswer,
@@ -91,7 +142,7 @@ function SessionContent() {
 
   const { exams } = useExamStore()
 
-  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget } = useSettingsStore()
+  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore()
 
   const cardShownAtRef = useRef<number>(Date.now())
   // Tracks the persisted ReviewSession record (useLibraryStore.sessions) for
@@ -114,13 +165,31 @@ function SessionContent() {
     librarySessionIdRef.current = null
   }, [])
 
-  // Tracks the most recent "D" quick-delete so Ctrl+D can restore it from trash
+  // Tracks the most recent "D" quick-delete so Ctrl+Z/Ctrl+D can restore it from trash
   const lastQuickDeletedRef = useRef<{ card: Card; index: number } | null>(null)
+  const quickDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // History for ← back navigation
   const [history, setHistory] = useState<number[]>([])
   const [showMoreRatings, setShowMoreRatings] = useState(false)
+  const [showRetentionInfo, setShowRetentionInfo] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  // Cards the user has dismissed the "struggle" prompt for, this session only.
+  const [dismissedStruggleIds, setDismissedStruggleIds] = useState<Set<string>>(new Set())
+
+  // Session intention — ephemeral, messaging-only (never affects SRS scheduling).
+  type SessionIntention = 'quick' | 'exam' | 'deep' | 'explore' | null
+  const [intention, setIntention] = useState<SessionIntention>(null)
+  const [showIntentionPrompt, setShowIntentionPrompt] = useState(false)
+  const intentionAskedRef = useRef(false)
+
+  // Burnout detection — gentle one-time nudge when rolling 3-day retention
+  // drops well below the user's own historical baseline. Shown at session
+  // start only, never mid-session.
+  const [showBurnoutNudge, setShowBurnoutNudge] = useState(false)
+
+  // Session abandonment recovery
+  const [pendingRecovery, setPendingRecovery] = useState<RecoverySnapshot | null>(null)
 
   // Progress tracking (reviews only — new cards excluded)
   const [initialQueueLength, setInitialQueueLength] = useState(0)
@@ -189,12 +258,40 @@ function SessionContent() {
     }
     if (resolvedMode === 'new-only') return getNewCards(deckId)
     if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
-    return getDueCards(deckId)
+    // Standard/inbox session — cap to the user's session length. The queue is
+    // already ordered (due date + deck interleave + warmup), so truncating
+    // here just drops the lowest-priority tail.
+    return getDueCards(deckId).slice(0, sessionLength)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, examId, resolvedMode])
+  }, [deckId, examId, resolvedMode, sessionLength])
 
-  /* ── Load cards on mount ── */
-  useEffect(() => {
+  // Returns true if a nudge was triggered (caller should defer the intention
+  // prompt until the nudge dialog is dismissed).
+  const checkBurnoutAndMaybeNudge = useCallback((): boolean => {
+    const { lastBurnoutNudgeAt, setLastBurnoutNudgeAt } = useAppStore.getState()
+    if (lastBurnoutNudgeAt && Date.now() - new Date(lastBurnoutNudgeAt).getTime() < 7 * 86400000) {
+      return false
+    }
+    const { reviewLogs: logs } = useLibraryStore.getState()
+    const now = Date.now()
+    const real = logs.filter((l) => !l.wasNew)
+    const recent = real.filter((l) => now - new Date(l.reviewedAt).getTime() <= 3 * 86400000)
+    const baseline = real.filter((l) => now - new Date(l.reviewedAt).getTime() > 3 * 86400000)
+    // Require enough data in both windows — otherwise the comparison is noise.
+    if (recent.length < 5 || baseline.length < 10) return false
+    const recentRetention = (recent.filter((l) => l.rating >= 3).length / recent.length) * 100
+    const baselineRetention = (baseline.filter((l) => l.rating >= 3).length / baseline.length) * 100
+    if (baselineRetention - recentRetention > 15) {
+      setShowBurnoutNudge(true)
+      setLastBurnoutNudgeAt(new Date().toISOString())
+      return true
+    }
+    return false
+  }, [])
+
+  /* Starts a brand-new session — used on first load (no recovery offered/
+     accepted) and when the user declines a resume prompt. */
+  const beginFreshSession = useCallback(() => {
     const sessionCards = buildQueue()
     startSession(sessionCards, resolvedMode)
     startLibrarySession()
@@ -212,16 +309,88 @@ function SessionContent() {
     setForgottenReviewCount(0)
     setNewCardReviewedCount(0)
     setNewCardCorrectCount(0)
+    if (!intentionAskedRef.current && sessionCards.length > 0) {
+      intentionAskedRef.current = true
+      const nudged = checkBurnoutAndMaybeNudge()
+      if (!nudged) setShowIntentionPrompt(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildQueue, resolvedMode, algorithm])
+
+  const handleResumeSession = useCallback(() => {
+    if (!pendingRecovery) return
+    useStudyStore.setState({
+      sessionId: pendingRecovery.sessionId,
+      queue: pendingRecovery.queue,
+      currentIndex: pendingRecovery.currentIndex,
+      logs: pendingRecovery.logs,
+      undoStack: pendingRecovery.undoStack,
+      redoStack: [],
+      showAnswer: false,
+      startedAt: new Date(),
+      mode: pendingRecovery.mode,
+    })
+    startLibrarySession()
+    setHistory([])
+    setLoaded(true)
+    const lib = useLibraryStore.getState()
+    const reviewCount = pendingRecovery.queue.filter((c) =>
+      algorithm === 'fsrs'
+        ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
+        : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+    ).length
+    setInitialQueueLength(reviewCount)
+    setRememberedCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating >= 3).length)
+    setForgottenReviewCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating < 3).length)
+    setNewCardReviewedCount(pendingRecovery.logs.filter((l) => l.wasNew).length)
+    setNewCardCorrectCount(pendingRecovery.logs.filter((l) => l.wasNew && l.rating >= 3).length)
+    setPendingRecovery(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRecovery, algorithm])
+
+  const handleDiscardRecovery = useCallback(() => {
+    clearRecovery()
+    setPendingRecovery(null)
+    beginFreshSession()
+  }, [beginFreshSession])
+
+  /* ── Load cards on mount — check for an abandoned session first ── */
+  useEffect(() => {
+    const saved = loadRecovery()
+    const matches = saved
+      && saved.queue.length > 0
+      && saved.currentIndex < saved.queue.length
+      && saved.deckId === deckId
+      && saved.examId === examId
+      && saved.mode === resolvedMode
+    if (matches) {
+      setPendingRecovery(saved)
+    } else {
+      if (saved) clearRecovery() // stale/mismatched snapshot — drop it
+      beginFreshSession()
+    }
     // End the persisted session record if the user navigates away/closes the tab
     // mid-session, rather than via the Exit/Back-to-Study buttons.
     return () => endLibrarySession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /* Persist an in-progress session snapshot on every change so it can be
+     recovered if the tab closes or the user navigates away mid-session. */
+  useEffect(() => {
+    if (!loaded || !sessionId || pendingRecovery) return
+    if (currentIndex >= queue.length) {
+      clearRecovery()
+      return
+    }
+    saveRecovery({ sessionId, queue, currentIndex, logs, undoStack, mode, deckId, examId })
+  }, [loaded, sessionId, queue, currentIndex, logs, undoStack, mode, deckId, examId, pendingRecovery])
+
   /* Reset timer & UI when card changes */
   useEffect(() => {
     cardShownAtRef.current = Date.now()
     setShowMoreRatings(false)
+    setShowRetentionInfo(false)
   }, [currentIndex])
 
   /* Close options menu on outside click */
@@ -282,6 +451,42 @@ function SessionContent() {
     }
     return { lastSeen, difficulty }
   })()
+
+  /* Retention transparency — raw scheduling numbers behind the rating, shown
+     collapsed by default. FSRS mode reads fsrsData directly per spec; SM-2
+     mode shows the closest equivalent fields from srsData. */
+  const retentionInfo = (() => {
+    if (!currentCard) return null
+    if (algorithm === 'fsrs') {
+      const fs = fsrsData[currentCard.id]
+      if (!fs) return null
+      const due = new Date(fs.dueDate)
+      const daysDiff = Math.round((due.getTime() - Date.now()) / 86400000)
+      return {
+        stability: fs.stability,
+        retrievability: Math.round(fsrsRetrievability(fs) * 100),
+        daysDiff,
+        state: fs.state,
+      }
+    }
+    const srs = srsData[currentCard.id]
+    if (!srs) return null
+    return {
+      stability: srs.interval,
+      retrievability: srs.masteryPercent,
+      daysDiff: daysUntilDue(srs),
+      state: srs.state,
+    }
+  })()
+
+  /* Struggle acknowledgment — card failed (rating 1) 3+ times across its
+     full history. Surfaced as a dismissible, non-blocking prompt; never
+     interrupts rating/flipping. */
+  const struggleCount = currentCard
+    ? reviewLogs.filter((l) => l.cardId === currentCard.id && l.rating === 1).length
+    : 0
+  const showStrugglePrompt =
+    !!currentCard && struggleCount >= 3 && !dismissedStruggleIds.has(currentCard.id)
 
   /* Daily progress — today's reviews vs daily card target */
   const todayStr = new Date().toISOString().slice(0, 10)
@@ -424,15 +629,23 @@ function SessionContent() {
     const card = queue[currentIndex]
     if (!card) return
     lastQuickDeletedRef.current = { card, index: currentIndex }
+    if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
+    quickDeleteTimerRef.current = setTimeout(() => { lastQuickDeletedRef.current = null }, 5000)
     deleteCard(card.id)
     removeCurrentCard()
-    useAppStore.getState().addToast({ type: 'info', message: 'Card sent to trash — Ctrl+D to undo', duration: 2500 })
+    useAppStore.getState().addToast({
+      type: 'info',
+      message: 'Card deleted — Undo?',
+      duration: 5000,
+      action: { label: 'Undo', onClick: () => handleUndoQuickDelete() },
+    })
   }
 
-  /* ── Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
+  /* ── Ctrl+Z/Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
   function handleUndoQuickDelete() {
     const pending = lastQuickDeletedRef.current
     if (!pending) return
+    if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
     const entry = useTrashStore.getState().items.find((i) => i.id === pending.card.id && i.type === 'card')
     useLibraryStore.setState((s) => ({
       cards: [...s.cards, entry?.card ?? pending.card],
@@ -471,11 +684,15 @@ function SessionContent() {
       // Block all session shortcuts while any dialog is open — otherwise keys
       // typed inside the dialog (on non-input elements) fall through and
       // rate/flip/undo the card sitting behind it.
-      if (showEditDialog || showHistoryDialog || showDeleteConfirm) return
+      if (showEditDialog || showHistoryDialog || showDeleteConfirm || showIntentionPrompt || showBurnoutNudge) return
 
+      // Ctrl/Cmd+Z — if a "D" quick-delete toast is still active (within its
+      // 5s undo window), undo that delete first; otherwise undo the last
+      // rating. Mirrors clicking the toast's own Undo button.
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
-        handleUndo()
+        if (lastQuickDeletedRef.current) handleUndoQuickDelete()
+        else handleUndo()
         return
       }
 
@@ -540,7 +757,7 @@ function SessionContent() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm])
+  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm, showIntentionPrompt, showBurnoutNudge])
 
   const isComplete = loaded && queue.length > 0 && currentIndex >= queue.length
   const isLoading = !loaded
@@ -551,6 +768,41 @@ function SessionContent() {
     if (isComplete) endLibrarySession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComplete])
+
+  /* ════════════════════════════════════════════════════════════
+     SESSION RECOVERY PROMPT — shown before anything else loads
+  ════════════════════════════════════════════════════════════ */
+  if (pendingRecovery) {
+    const remaining = pendingRecovery.queue.length - pendingRecovery.currentIndex
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
+        <div className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="p-6 text-center space-y-2">
+            <p className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Resume your session?</p>
+            <p className="text-sm" style={{ color: '#6b6b72' }}>
+              You left off with {remaining} {remaining === 1 ? 'card' : 'cards'} still to go.
+            </p>
+          </div>
+          <div className="flex border-t" style={{ borderColor: 'var(--border)' }}>
+            <button
+              onClick={handleDiscardRecovery}
+              className="flex-1 py-3 text-sm font-medium border-r transition-colors hover:bg-[var(--bg-hover)]"
+              style={{ borderColor: 'var(--border)', color: '#6b6b72' }}
+            >
+              Start fresh
+            </button>
+            <button
+              onClick={handleResumeSession}
+              className="flex-1 py-3 text-sm font-medium transition-colors hover:brightness-110"
+              style={{ color: 'var(--accent)' }}
+            >
+              Resume
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Progress bar: green = remembered, red = forgotten reviews
   const total = Math.max(initialQueueLength, 1)
@@ -574,7 +826,9 @@ function SessionContent() {
             <div className="p-6 text-center space-y-1">
               <div className="text-3xl mb-3">🎉</div>
               <h1 className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Session Complete</h1>
-              <p className="text-sm" style={{ color: '#6b6b72' }}>Great work!</p>
+              <p className="text-sm" style={{ color: '#6b6b72' }}>
+                {intention ? INTENTION_COMPLETE_COPY[intention] : 'Great work!'}
+              </p>
             </div>
             <div className="border-t grid grid-cols-2" style={{ borderColor: 'var(--border)' }}>
               {[
@@ -624,7 +878,7 @@ function SessionContent() {
               Review Again
             </button>
             <button
-              onClick={() => { endLibrarySession(); reset(); router.push('/study') }}
+              onClick={() => { clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
             >
@@ -695,7 +949,7 @@ function SessionContent() {
           />
           <div
             className="h-full transition-all duration-300"
-            style={{ width: `${redPct}%`, background: '#f87171' }}
+            style={{ width: `${redPct}%`, background: '#6b6b8a' }}
           />
         </div>
       )}
@@ -707,7 +961,7 @@ function SessionContent() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}
       >
         <button
-          onClick={() => { endLibrarySession(); reset(); router.push('/study') }}
+          onClick={() => { clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
           style={{ color: '#6b6b72' }}
           title="Exit session"
@@ -808,6 +1062,33 @@ function SessionContent() {
             </div>
           )}
 
+          {/* Struggle acknowledgment — subtle, dismissible, never blocks the flow */}
+          {showStrugglePrompt && (
+            <div
+              className="flex items-center gap-2.5 mb-3 px-3.5 py-2.5 rounded-lg animate-fade-in"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+            >
+              <span className="text-xs flex-1" style={{ color: '#a0a0b0' }}>
+                This one keeps coming back — want to edit the card or add a hint?
+              </span>
+              <button
+                onClick={() => setShowEditDialog(true)}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-md font-medium transition-colors hover:brightness-110"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+              >
+                <Pencil size={11} />
+                Edit
+              </button>
+              <button
+                onClick={() => setDismissedStruggleIds((s) => new Set(s).add(currentCard!.id))}
+                className="text-xs px-2 py-1 rounded-md transition-colors hover:bg-[var(--bg-hover)]"
+                style={{ color: '#6b6b72' }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Card with swipe animation */}
           <div
             className={cn(
@@ -842,22 +1123,68 @@ function SessionContent() {
                   <span className="text-[11px]" style={{ color: '#6b6b72' }}>
                     Last seen {cardMeta.lastSeen}
                   </span>
-                  <span className="text-[11px]" style={{ color: '#6b6b72' }}>
-                    Difficulty:{' '}
-                    <span
-                      className="font-medium"
-                      style={{
-                        color:
-                          cardMeta.difficulty === 'Hard'
-                            ? '#f87171'
-                            : cardMeta.difficulty === 'Medium'
-                              ? '#fbbf24'
-                              : '#4ade80',
-                      }}
-                    >
-                      {cardMeta.difficulty}
+                  {/* Ease/difficulty badge is an SM-2 concept — FSRS exposes
+                      retrievability instead, shown in the collapsible card-details panel below. */}
+                  {algorithm === 'sm2' && (
+                    <span className="text-[11px]" style={{ color: '#6b6b72' }}>
+                      Difficulty:{' '}
+                      <span
+                        className="font-medium"
+                        style={{
+                          color:
+                            cardMeta.difficulty === 'Hard'
+                              ? '#f87171'
+                              : cardMeta.difficulty === 'Medium'
+                                ? '#fbbf24'
+                                : '#4ade80',
+                        }}
+                      >
+                        {cardMeta.difficulty}
+                      </span>
                     </span>
-                  </span>
+                  )}
+                </div>
+              )}
+
+              {/* Retention transparency — collapsed by default */}
+              {retentionInfo && (
+                <div className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <button
+                    onClick={() => setShowRetentionInfo((v) => !v)}
+                    className="w-full flex items-center justify-between px-4 py-1.5 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{ color: '#6b6b72' }}
+                  >
+                    <span>Card details</span>
+                    <ChevronDown
+                      size={11}
+                      className="transition-transform"
+                      style={{ transform: showRetentionInfo ? 'rotate(180deg)' : 'none' }}
+                    />
+                  </button>
+                  {showRetentionInfo && (
+                    <div className="grid grid-cols-4 gap-2 px-4 pb-2.5 animate-fade-in">
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Stability</p>
+                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Retrievability</p>
+                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>
+                          {retentionInfo.daysDiff <= 0 ? 'Overdue' : 'Due in'}
+                        </p>
+                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>
+                          {retentionInfo.daysDiff === 0 ? 'Today' : `${Math.abs(retentionInfo.daysDiff)}d`}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>State</p>
+                        <p className="text-xs font-medium capitalize" style={{ color: '#a0a0b0' }}>{retentionInfo.state}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -948,21 +1275,21 @@ function SessionContent() {
 
         <div className="flex-1" />
 
-        {/* × Forgot */}
+        {/* ↻ Missed (rating 1 — neutral, informational framing) */}
         <button
           onClick={() => answerReady && !isAnimating && handleRate(1)}
           disabled={!answerReady || isAnimating}
           className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
           style={{
-            background: answerReady ? '#2a1515' : 'var(--bg-surface)',
-            border: `1px solid ${answerReady ? '#5a2020' : 'var(--border)'}`,
-            color: answerReady ? '#f87171' : '#3a3a42',
+            background: 'var(--bg-surface)',
+            border: `1px solid ${answerReady ? '#3a3a42' : 'var(--border)'}`,
+            color: answerReady ? '#a0a0b0' : '#3a3a42',
             cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
           }}
-          title={`Forgot (${formatKey(studyShortcuts.forgot)})`}
+          title={`Missed (${formatKey(studyShortcuts.forgot)})`}
         >
-          <span>×</span>
-          Forgot
+          <span>↻</span>
+          Missed
           {answerReady && (
             <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
               {formatKey(studyShortcuts.forgot)}
@@ -1093,7 +1420,7 @@ function SessionContent() {
                     style={{ borderColor: '#2a2a2e' }}
                   >
                     <td className="px-4 py-2.5" style={{ color: '#8e8ea0' }}>
-                      {new Date(log.reviewedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {formatDate(log.reviewedAt)}
                     </td>
                     <td className="px-4 py-2.5 font-medium" style={{ color: RATING_COLORS[log.rating] }}>
                       {RATING_LABELS[log.rating] ?? log.rating}
@@ -1109,6 +1436,57 @@ function SessionContent() {
               </tbody>
             </table>
           )}
+        </div>
+      </Dialog>
+
+      {/* ── Burnout nudge — gentle, one-time, shown only at session start ── */}
+      <Dialog
+        open={showBurnoutNudge}
+        onClose={() => { setShowBurnoutNudge(false); setShowIntentionPrompt(true) }}
+        title="Just so you know"
+        size="sm"
+      >
+        <div className="p-4 space-y-3">
+          <p className="text-sm" style={{ color: '#a0a0b0' }}>
+            Your retention is lower than usual — a shorter session today is totally fine.
+          </p>
+          <div className="flex justify-end">
+            <button
+              onClick={() => { setShowBurnoutNudge(false); setShowIntentionPrompt(true) }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* ── Session intention prompt — optional, ephemeral, messaging-only ── */}
+      <Dialog
+        open={showIntentionPrompt}
+        onClose={() => setShowIntentionPrompt(false)}
+        title="What are you studying for?"
+        size="sm"
+      >
+        <div className="p-4 space-y-2">
+          {INTENTION_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { setIntention(opt.value); setShowIntentionPrompt(false) }}
+              className="w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors hover:brightness-110"
+              style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', color: '#e8e8ea' }}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowIntentionPrompt(false)}
+            className="w-full text-center px-3 py-2 text-xs mt-1"
+            style={{ color: '#6b6b72' }}
+          >
+            Skip
+          </button>
         </div>
       </Dialog>
 
