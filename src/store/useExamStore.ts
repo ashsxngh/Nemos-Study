@@ -9,9 +9,11 @@ const USER_ID = 'local-user'
 
 interface ExamState {
   exams: Exam[]
+  pendingDeletedExams: string[]
   addExam: (name: string, subject: string, date: string, priority?: Exam['priority'], deckIds?: string[], folderIds?: string[]) => void
   updateExam: (id: string, updates: Partial<Omit<Exam, 'id' | 'userId' | 'createdAt'>>) => void
   deleteExam: (id: string) => void
+  clearPendingDeletedExams: (ids: string[]) => void
   addDeckToExam: (examId: string, deckId: string) => void
   removeDeckFromExam: (examId: string, deckId: string) => void
   addFolderToExam: (examId: string, folderId: string) => void
@@ -24,6 +26,7 @@ export const useExamStore = create<ExamState>()(
   persist(
     (set) => ({
       exams: [],
+      pendingDeletedExams: [],
 
       addExam: (name, subject, date, priority = 'medium', deckIds = [], folderIds = []) => {
         const exam: Exam = {
@@ -48,7 +51,17 @@ export const useExamStore = create<ExamState>()(
       },
 
       deleteExam: (id) => {
-        set((s) => ({ exams: s.exams.filter((e) => e.id !== id) }))
+        set((s) => ({
+          exams: s.exams.filter((e) => e.id !== id),
+          pendingDeletedExams: [...s.pendingDeletedExams, id],
+        }))
+      },
+
+      clearPendingDeletedExams: (ids) => {
+        const idSet = new Set(ids)
+        set((s) => ({
+          pendingDeletedExams: s.pendingDeletedExams.filter((id) => !idSet.has(id)),
+        }))
       },
 
       addDeckToExam: (examId, deckId) => {
@@ -107,6 +120,13 @@ export const useExamStore = create<ExamState>()(
         }))
       },
     }),
-    { name: 'nemos-exams' }
+    {
+      name: 'nemos-exams',
+      // useSync explicitly rehydrates this store before the first pull/merge,
+      // so it can distinguish "pre-existing local exam" from "pulled from
+      // server" — auto-hydration here would race with that and can clobber
+      // a freshly-pulled exam list with stale localStorage data.
+      skipHydration: true,
+    }
   )
 )

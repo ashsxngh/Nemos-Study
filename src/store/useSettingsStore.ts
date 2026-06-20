@@ -128,6 +128,10 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'nemos-settings',
+      // useSync explicitly rehydrates this store before the first pull, so
+      // server-wins hydration from Supabase isn't clobbered by a late
+      // localStorage auto-hydration racing in afterward.
+      skipHydration: true,
     }
   )
 )

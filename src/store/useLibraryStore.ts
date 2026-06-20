@@ -29,15 +29,27 @@ function createIDBStorage() {
   const DB_NAME = 'nemos-idb'
   const STORE = 'kv'
   let _db: IDBDatabase | null = null
+  // Caches the in-flight open request, not just the resolved db — without
+  // this, two near-simultaneous callers (e.g. React Strict Mode's mount /
+  // unmount / remount cycle firing rehydrate() twice in quick succession)
+  // each see _db as null and issue their own indexedDB.open() call. On a
+  // fresh profile where the database doesn't exist yet, both requests race
+  // to create the same object store; the second can get stuck behind the
+  // first's still-open upgrade transaction with no onsuccess/onerror ever
+  // firing — a silent, permanent hang.
+  let _openPromise: Promise<IDBDatabase> | null = null
 
   function open(): Promise<IDBDatabase> {
     if (_db) return Promise.resolve(_db)
-    return new Promise((res, rej) => {
+    if (_openPromise) return _openPromise
+    _openPromise = new Promise((res, rej) => {
       const req = indexedDB.open(DB_NAME, 1)
       req.onupgradeneeded = () => req.result.createObjectStore(STORE)
-      req.onsuccess = () => { _db = req.result; res(_db) }
-      req.onerror = () => rej(req.error)
+      req.onsuccess = () => { _db = req.result; _openPromise = null; res(_db) }
+      req.onerror = () => { _openPromise = null; rej(req.error) }
+      req.onblocked = () => { _openPromise = null; rej(new Error('indexedDB open blocked by another connection')) }
     })
+    return _openPromise
   }
 
   function idbGet(key: string): Promise<string | null> {

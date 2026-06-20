@@ -136,6 +136,26 @@ create table if not exists exams (
   created_at timestamptz not null default now()
 );
 
+-- Adds columns for databases created before exam targeting/rating existed.
+alter table exams add column if not exists deck_ids uuid[] not null default '{}';
+alter table exams add column if not exists folder_ids uuid[] not null default '{}';
+alter table exams add column if not exists target_retention float not null default 0.90;
+alter table exams add column if not exists rating int;
+alter table exams add column if not exists predicted_retention_at_exam float;
+
+-- user_settings (one row per user; currently holds the global daily new-card limit)
+create table if not exists user_settings (
+  user_id           uuid primary key references auth.users(id) on delete cascade,
+  new_cards_per_day int not null default 20,
+  updated_at        timestamptz not null default now()
+);
+
+-- Adds the column for a user_settings table created before this existed
+-- ("create table if not exists" is a no-op against an already-existing
+-- table, so an earlier partial run can leave this column missing).
+alter table user_settings add column if not exists new_cards_per_day int not null default 20;
+alter table user_settings add column if not exists updated_at timestamptz not null default now();
+
 -- ────────────────────────────────────────────────────────────
 -- ROW LEVEL SECURITY
 -- ────────────────────────────────────────────────────────────
@@ -147,6 +167,7 @@ alter table review_logs    enable row level security;
 alter table review_sessions enable row level security;
 alter table notes          enable row level security;
 alter table exams          enable row level security;
+alter table user_settings  enable row level security;
 
 -- folders
 create policy "Users can only access own data" on folders
@@ -180,6 +201,10 @@ create policy "Users can only access own data" on notes
 create policy "Users can only access own data" on exams
   for all using (auth.uid() = user_id);
 
+-- user_settings
+create policy "Users can only access own data" on user_settings
+  for all using (auth.uid() = user_id);
+
 -- ────────────────────────────────────────────────────────────
 -- INDEXES
 -- ────────────────────────────────────────────────────────────
@@ -192,3 +217,4 @@ create index if not exists idx_review_logs_user_id    on review_logs    (user_id
 create index if not exists idx_review_sessions_user_id on review_sessions (user_id);
 create index if not exists idx_notes_user_id          on notes          (user_id);
 create index if not exists idx_exams_user_id          on exams          (user_id);
+create index if not exists idx_user_settings_user_id  on user_settings  (user_id);

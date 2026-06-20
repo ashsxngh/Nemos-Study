@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
+import { useExamStore } from '@/store/useExamStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 import { migrateLegacyIds } from '@/lib/migrateLegacyIds'
 import type {
   Folder,
@@ -13,9 +15,20 @@ import type {
   ReviewSession,
   ReviewLog,
   Note,
+  Exam,
 } from '@/lib/types'
 
 const DEBUG_SYNC = false
+
+// PostgrestError instances often print as "{}" through console.error once they
+// cross a dev-server/HMR serialization boundary (their fields aren't plain
+// own-enumerable props in every bundler). Pull out the fields explicitly so
+// the actual message/code always shows up in the console.
+function formatPgError(error: { message?: string; code?: string; details?: string; hint?: string }): string {
+  return [error.message, error.code && `(code ${error.code})`, error.details, error.hint]
+    .filter(Boolean)
+    .join(' ') || JSON.stringify(error)
+}
 
 // ─── Case converters ──────────────────────────────────────────────────────────
 
@@ -75,6 +88,7 @@ const preExistingIds = {
   cards:      new Set<string>(),
   notes:      new Set<string>(),
   reviewLogs: new Set<string>(),
+  exams:      new Set<string>(),
 }
 let preExistingSnapshotTaken = false
 
@@ -82,11 +96,13 @@ function snapshotPreExistingIds(): void {
   if (preExistingSnapshotTaken) return
   const s  = useLibraryStore.getState()
   const ns = useNotesStore.getState()
+  const es = useExamStore.getState()
   s.folders.forEach((f) => preExistingIds.folders.add(f.id))
   s.decks.forEach((d)   => preExistingIds.decks.add(d.id))
   s.cards.forEach((c)   => preExistingIds.cards.add(c.id))
   s.reviewLogs.forEach((l) => preExistingIds.reviewLogs.add(l.id))
   ns.notes.forEach((n)  => preExistingIds.notes.add(n.id))
+  es.exams.forEach((e)  => preExistingIds.exams.add(e.id))
   preExistingSnapshotTaken = true
 }
 
@@ -131,6 +147,8 @@ async function pullFromSupabase(): Promise<void> {
     sessionsRes,
     logsRes,
     notesRes,
+    examsRes,
+    settingsRes,
   ] = await Promise.all([
     supabase.from('folders').select('*').eq('user_id', user.id),
     supabase.from('decks').select('*').eq('user_id', user.id),
@@ -139,25 +157,31 @@ async function pullFromSupabase(): Promise<void> {
     supabase.from('review_sessions').select('*').eq('user_id', user.id),
     supabase.from('review_logs').select('*').eq('user_id', user.id),
     supabase.from('notes').select('*').eq('user_id', user.id),
+    supabase.from('exams').select('*').eq('user_id', user.id),
+    supabase.from('user_settings').select('*').eq('user_id', user.id).maybeSingle(),
   ])
 
   // On error, log clearly and skip that table — local state is left untouched.
-  if (foldersRes.error)  console.error('[SYNC] pullFromSupabase: folders error', foldersRes.error)
-  if (decksRes.error)    console.error('[SYNC] pullFromSupabase: decks error', decksRes.error)
-  if (cardsRes.error)    console.error('[SYNC] pullFromSupabase: cards error', cardsRes.error)
-  if (srsRes.error)      console.error('[SYNC] pullFromSupabase: srs_data error', srsRes.error)
-  if (sessionsRes.error) console.error('[SYNC] pullFromSupabase: review_sessions error', sessionsRes.error)
-  if (logsRes.error)     console.error('[SYNC] pullFromSupabase: review_logs error', logsRes.error)
-  if (notesRes.error)    console.error('[SYNC] pullFromSupabase: notes error', notesRes.error)
+  if (foldersRes.error)  console.error('[SYNC] pullFromSupabase: folders error', formatPgError(foldersRes.error))
+  if (decksRes.error)    console.error('[SYNC] pullFromSupabase: decks error', formatPgError(decksRes.error))
+  if (cardsRes.error)    console.error('[SYNC] pullFromSupabase: cards error', formatPgError(cardsRes.error))
+  if (srsRes.error)      console.error('[SYNC] pullFromSupabase: srs_data error', formatPgError(srsRes.error))
+  if (sessionsRes.error) console.error('[SYNC] pullFromSupabase: review_sessions error', formatPgError(sessionsRes.error))
+  if (logsRes.error)     console.error('[SYNC] pullFromSupabase: review_logs error', formatPgError(logsRes.error))
+  if (notesRes.error)    console.error('[SYNC] pullFromSupabase: notes error', formatPgError(notesRes.error))
+  if (examsRes.error)    console.error('[SYNC] pullFromSupabase: exams error', formatPgError(examsRes.error))
+  if (settingsRes.error) console.error('[SYNC] pullFromSupabase: user_settings error', formatPgError(settingsRes.error))
 
   // Filter out anything locally queued for deletion so a pull never resurrects
   // an item the user deleted before the push debounce fired.
   const { pendingDeletes } = useLibraryStore.getState()
   const { pendingDeletedNotes } = useNotesStore.getState()
+  const { pendingDeletedExams } = useExamStore.getState()
   const pendingFolderSet = new Set(pendingDeletes.folders)
   const pendingDeckSet   = new Set(pendingDeletes.decks)
   const pendingCardSet   = new Set(pendingDeletes.cards)
   const pendingNoteSet   = new Set(pendingDeletedNotes)
+  const pendingExamSet   = new Set(pendingDeletedExams)
 
   // null = fetch errored → skip that table in setState (preserve local state).
   const folders = foldersRes.error ? null :
@@ -172,6 +196,8 @@ async function pullFromSupabase(): Promise<void> {
     (logsRes.data ?? []).map((r) => toCamel(r) as ReviewLog)
   const notes = notesRes.error ? null :
     (notesRes.data ?? []).map((r) => toCamel(r) as Note).filter((n) => !pendingNoteSet.has(n.id))
+  const exams = examsRes.error ? null :
+    (examsRes.data ?? []).map((r) => toCamel(r) as Exam).filter((e) => !pendingExamSet.has(e.id))
 
   // Build srsData record from server rows. null on error — preserve local.
   // Pre-filter to fetched card IDs to avoid re-upserting orphaned rows; the
@@ -246,6 +272,19 @@ async function pullFromSupabase(): Promise<void> {
     useNotesStore.setState((current) => ({
       notes: mergeKeepLocal(notes, current.notes, preExistingIds.notes),
     }))
+  }
+
+  if (exams !== null) {
+    useExamStore.setState((current) => ({
+      exams: mergeKeepLocal(exams, current.exams, preExistingIds.exams),
+    }))
+  }
+
+  // user_settings is a single row, not a list — server always wins outright
+  // when a row exists. No row yet (new user) means nothing to hydrate.
+  if (!settingsRes.error && settingsRes.data) {
+    const s = toCamel(settingsRes.data) as { newCardsPerDay: number }
+    useSettingsStore.setState({ newCardsPerDay: s.newCardsPerDay })
   }
 
   realtimePending.folders.clear()
@@ -363,12 +402,12 @@ async function pushToSupabase(
         const chunk = pendingDeletes.cards.slice(i, i + BATCH)
         const delCards = await supabase.from('cards').delete().in('id', chunk)
         if (delCards.error) {
-          console.error('[SYNC] pushToSupabase: cards delete error', delCards.error)
+          console.error('[SYNC] pushToSupabase: cards delete error', formatPgError(delCards.error))
           throw new Error(`cards delete: ${delCards.error.message} (code ${delCards.error.code})`)
         }
         const delSrs = await supabase.from('srs_data').delete().in('card_id', chunk)
         if (delSrs.error) {
-          console.error('[SYNC] pushToSupabase: srs_data delete error', delSrs.error)
+          console.error('[SYNC] pushToSupabase: srs_data delete error', formatPgError(delSrs.error))
           throw new Error(`srs_data delete: ${delSrs.error.message} (code ${delSrs.error.code})`)
         }
       }
@@ -378,7 +417,7 @@ async function pushToSupabase(
         const chunk = pendingDeletes.decks.slice(i, i + BATCH)
         const delDecks = await supabase.from('decks').delete().in('id', chunk)
         if (delDecks.error) {
-          console.error('[SYNC] pushToSupabase: decks delete error', delDecks.error)
+          console.error('[SYNC] pushToSupabase: decks delete error', formatPgError(delDecks.error))
           throw new Error(`decks delete: ${delDecks.error.message} (code ${delDecks.error.code})`)
         }
       }
@@ -388,7 +427,7 @@ async function pushToSupabase(
         const chunk = pendingDeletes.folders.slice(i, i + BATCH)
         const delFolders = await supabase.from('folders').delete().in('id', chunk)
         if (delFolders.error) {
-          console.error('[SYNC] pushToSupabase: folders delete error', delFolders.error)
+          console.error('[SYNC] pushToSupabase: folders delete error', formatPgError(delFolders.error))
           throw new Error(`folders delete: ${delFolders.error.message} (code ${delFolders.error.code})`)
         }
       }
@@ -413,7 +452,7 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
       const chunk = pendingDeletedNotes.slice(i, i + BATCH)
       const res = await supabase.from('notes').delete().in('id', chunk)
       if (res.error) {
-        console.error('[SYNC] pushNotesToSupabase: delete error', res.error)
+        console.error('[SYNC] pushNotesToSupabase: delete error', formatPgError(res.error))
         throw new Error(`notes delete: ${res.error.message} (code ${res.error.code})`)
       }
     }
@@ -425,8 +464,56 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
     { onConflict: 'id' },
   )
   if (res.error) {
-    console.error('[SYNC] pushNotesToSupabase error:', res.error)
+    console.error('[SYNC] pushNotesToSupabase error:', formatPgError(res.error))
     throw new Error(`notes: ${res.error.message} (code ${res.error.code})`)
+  }
+}
+
+async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[]): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const supabase = createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError) throw new Error(`Auth error: ${authError.message}`)
+  if (!user) return
+
+  const BATCH = 100
+
+  if (pendingDeletedExams.length) {
+    for (let i = 0; i < pendingDeletedExams.length; i += BATCH) {
+      const chunk = pendingDeletedExams.slice(i, i + BATCH)
+      const res = await supabase.from('exams').delete().in('id', chunk)
+      if (res.error) {
+        console.error('[SYNC] pushExamsToSupabase: delete error', formatPgError(res.error))
+        throw new Error(`exams delete: ${res.error.message} (code ${res.error.code})`)
+      }
+    }
+  }
+
+  if (!exams.length) return
+  const res = await supabase.from('exams').upsert(
+    exams.map((e) => ({ ...(toSnake(e) as PlainObject), user_id: user.id })),
+    { onConflict: 'id' },
+  )
+  if (res.error) {
+    console.error('[SYNC] pushExamsToSupabase error:', formatPgError(res.error))
+    throw new Error(`exams: ${res.error.message} (code ${res.error.code})`)
+  }
+}
+
+async function pushSettingsToSupabase(newCardsPerDay: number): Promise<void> {
+  if (!isSupabaseConfigured()) return
+  const supabase = createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError) throw new Error(`Auth error: ${authError.message}`)
+  if (!user) return
+
+  const res = await supabase.from('user_settings').upsert(
+    { user_id: user.id, new_cards_per_day: newCardsPerDay, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id' },
+  )
+  if (res.error) {
+    console.error('[SYNC] pushSettingsToSupabase error:', formatPgError(res.error))
+    throw new Error(`user_settings: ${res.error.message} (code ${res.error.code})`)
   }
 }
 
@@ -446,12 +533,20 @@ export function useSync(): SyncStatus {
   const [error, setError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
 
-  const libraryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const notesDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const libraryDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notesDebounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const examsDebounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const settingsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(false)
   const pushInFlightRef = useRef(false)
   // Shared across tabs via BroadcastChannel — notifies peers of completed pushes.
   const syncChannel = useRef<BroadcastChannel | null>(null)
+  // Set synchronously around setState calls that apply a remote tab's change
+  // locally, so the store subscribers below can tell "remote-applied" apart
+  // from "local edit" and skip re-pushing — otherwise applying a broadcast
+  // triggers this tab's own push, which re-broadcasts, which the other tab
+  // re-applies and re-pushes, looping indefinitely between tabs.
+  const applyingRemoteRef = useRef(false)
 
   const handlePush = useCallback(async () => {
     // Offline: skip the push attempt entirely rather than letting it fail and
@@ -527,6 +622,46 @@ export function useSync(): SyncStatus {
     }
   }, [])
 
+  const handleExamsPush = useCallback(async (exams: Exam[], pendingDeletedExams: string[]) => {
+    setSyncing(true)
+    setError(null)
+    try {
+      await pushExamsToSupabase(exams, pendingDeletedExams)
+      if (pendingDeletedExams.length) {
+        useExamStore.getState().clearPendingDeletedExams(pendingDeletedExams)
+      }
+      // Tell other tabs about the new/updated/deleted exams immediately,
+      // rather than waiting for their next pull cycle.
+      syncChannel.current?.postMessage({
+        type: 'exams-push-complete',
+        exams,
+        deletedExams: pendingDeletedExams,
+      })
+      setLastSynced(new Date())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
+  const handleSettingsPush = useCallback(async (newCardsPerDay: number) => {
+    setSyncing(true)
+    setError(null)
+    try {
+      await pushSettingsToSupabase(newCardsPerDay)
+      syncChannel.current?.postMessage({
+        type: 'settings-push-complete',
+        newCardsPerDay,
+      })
+      setLastSynced(new Date())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
   // BroadcastChannel — receive deletion events from other tabs and strip those
   // items from local state immediately, before this tab's next push acquires
   // the Web Lock. This prevents a tab with stale state from re-upserting items
@@ -536,6 +671,31 @@ export function useSync(): SyncStatus {
     const bc = new BroadcastChannel('nemos-sync')
     syncChannel.current = bc
     bc.onmessage = (e: MessageEvent) => {
+      if (e.data?.type === 'exams-push-complete') {
+        const pushedExams: Exam[] = e.data.exams ?? []
+        const deletedExams: string[] = e.data.deletedExams ?? []
+        if (!pushedExams.length && !deletedExams.length) return
+        if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab pushed exam changes, applying locally', { pushedExams, deletedExams })
+        const dSet = new Set(deletedExams)
+        const examMap = new Map(pushedExams.map((ex) => [ex.id, ex]))
+        applyingRemoteRef.current = true
+        useExamStore.setState((s) => ({
+          exams: [
+            ...s.exams.filter((ex) => !dSet.has(ex.id) && !examMap.has(ex.id)),
+            ...pushedExams,
+          ],
+          pendingDeletedExams: s.pendingDeletedExams.filter((id) => !dSet.has(id)),
+        }))
+        applyingRemoteRef.current = false
+        return
+      }
+      if (e.data?.type === 'settings-push-complete') {
+        if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab pushed settings changes, applying locally', e.data.newCardsPerDay)
+        applyingRemoteRef.current = true
+        useSettingsStore.setState({ newCardsPerDay: e.data.newCardsPerDay })
+        applyingRemoteRef.current = false
+        return
+      }
       if (e.data?.type !== 'push-complete') return
       const deletedFolders: string[] = e.data.deletedFolders ?? []
       const deletedDecks: string[]   = e.data.deletedDecks   ?? []
@@ -574,6 +734,8 @@ export function useSync(): SyncStatus {
     const init = async () => {
       await useLibraryStore.persist.rehydrate()
       await useNotesStore.persist.rehydrate()
+      await useExamStore.persist.rehydrate()
+      await useSettingsStore.persist.rehydrate()
       // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
       // don't fail Supabase's uuid columns. No-op when nothing is legacy.
       migrateLegacyIds()
@@ -597,6 +759,16 @@ export function useSync(): SyncStatus {
           if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length) {
             handlePush()
           }
+          // Seed exams/settings to Supabase even if nothing changes after
+          // load — otherwise a row is only ever written on the *next* edit,
+          // so pre-existing local exams and the user's current new-cards
+          // limit would never reach the server (e.g. user_settings staying
+          // empty forever for a user who never revisits Settings).
+          const examState = useExamStore.getState()
+          if (examState.exams.length || examState.pendingDeletedExams.length) {
+            handleExamsPush(examState.exams, examState.pendingDeletedExams)
+          }
+          handleSettingsPush(useSettingsStore.getState().newCardsPerDay)
         } else if (DEBUG_SYNC) {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
         }
@@ -666,6 +838,37 @@ export function useSync(): SyncStatus {
       if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current)
     }
   }, [handleNotesPush])
+
+  // Subscribe to exam store changes with a 400ms debounce
+  useEffect(() => {
+    const unsub = useExamStore.subscribe((state) => {
+      if (!mountedRef.current || applyingRemoteRef.current) return
+      if (examsDebounceRef.current) clearTimeout(examsDebounceRef.current)
+      examsDebounceRef.current = setTimeout(() => {
+        handleExamsPush(state.exams, state.pendingDeletedExams)
+      }, 400)
+    })
+    return () => {
+      unsub()
+      if (examsDebounceRef.current) clearTimeout(examsDebounceRef.current)
+    }
+  }, [handleExamsPush])
+
+  // Subscribe to settings store changes with a 400ms debounce — only the
+  // daily new-card limit is synced; other settings fields stay local-only.
+  useEffect(() => {
+    const unsub = useSettingsStore.subscribe((state) => {
+      if (!mountedRef.current || applyingRemoteRef.current) return
+      if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current)
+      settingsDebounceRef.current = setTimeout(() => {
+        handleSettingsPush(state.newCardsPerDay)
+      }, 400)
+    })
+    return () => {
+      unsub()
+      if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current)
+    }
+  }, [handleSettingsPush])
 
   // Supabase Realtime subscriptions — merge individual rows instead of full pull
   useEffect(() => {
