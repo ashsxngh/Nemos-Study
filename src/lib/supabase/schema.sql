@@ -77,6 +77,22 @@ create table if not exists srs_data (
 -- Adds the state column for databases created before it existed.
 alter table srs_data add column if not exists state text not null default 'new';
 
+-- fsrs_data — FSRS scheduling state, parallel to srs_data (SM-2). Previously
+-- local-only (never synced), which left FSRS-mode queues stale on any device
+-- that didn't perform the review.
+create table if not exists fsrs_data (
+  card_id          uuid primary key,
+  user_id          uuid not null references auth.users(id) on delete cascade,
+  stability        float not null default 0,
+  difficulty       float not null default 0,
+  retrievability   float not null default 0,
+  due_date         timestamptz not null default now(),
+  last_reviewed_at timestamptz,
+  repetitions      int  not null default 0,
+  lapses           int  not null default 0,
+  state            text not null default 'new'
+);
+
 -- review_logs
 create table if not exists review_logs (
   id                 uuid primary key default gen_random_uuid(),
@@ -163,6 +179,7 @@ alter table folders        enable row level security;
 alter table decks          enable row level security;
 alter table cards          enable row level security;
 alter table srs_data       enable row level security;
+alter table fsrs_data      enable row level security;
 alter table review_logs    enable row level security;
 alter table review_sessions enable row level security;
 alter table notes          enable row level security;
@@ -183,6 +200,10 @@ create policy "Users can only access own data" on cards
 
 -- srs_data
 create policy "Users can only access own data" on srs_data
+  for all using (auth.uid() = user_id);
+
+-- fsrs_data
+create policy "Users can only access own data" on fsrs_data
   for all using (auth.uid() = user_id);
 
 -- review_logs
@@ -213,6 +234,8 @@ create index if not exists idx_decks_user_id          on decks          (user_id
 create index if not exists idx_cards_user_id          on cards          (user_id);
 create index if not exists idx_srs_data_user_id       on srs_data       (user_id);
 create index if not exists idx_srs_data_due_date      on srs_data       (due_date);
+create index if not exists idx_fsrs_data_user_id      on fsrs_data      (user_id);
+create index if not exists idx_fsrs_data_due_date     on fsrs_data      (due_date);
 create index if not exists idx_review_logs_user_id    on review_logs    (user_id);
 create index if not exists idx_review_sessions_user_id on review_sessions (user_id);
 create index if not exists idx_notes_user_id          on notes          (user_id);

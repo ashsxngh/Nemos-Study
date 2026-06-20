@@ -17,6 +17,7 @@ import type {
   Note,
   Exam,
 } from '@/lib/types'
+import type { FSRSState } from '@/lib/srs'
 
 const DEBUG_SYNC = false
 
@@ -144,6 +145,7 @@ async function pullFromSupabase(): Promise<void> {
     decksRes,
     cardsRes,
     srsRes,
+    fsrsRes,
     sessionsRes,
     logsRes,
     notesRes,
@@ -154,6 +156,7 @@ async function pullFromSupabase(): Promise<void> {
     supabase.from('decks').select('*').eq('user_id', user.id),
     supabase.from('cards').select('*').eq('user_id', user.id),
     supabase.from('srs_data').select('*').eq('user_id', user.id),
+    supabase.from('fsrs_data').select('*').eq('user_id', user.id),
     supabase.from('review_sessions').select('*').eq('user_id', user.id),
     supabase.from('review_logs').select('*').eq('user_id', user.id),
     supabase.from('notes').select('*').eq('user_id', user.id),
@@ -166,6 +169,7 @@ async function pullFromSupabase(): Promise<void> {
   if (decksRes.error)    console.error('[SYNC] pullFromSupabase: decks error', formatPgError(decksRes.error))
   if (cardsRes.error)    console.error('[SYNC] pullFromSupabase: cards error', formatPgError(cardsRes.error))
   if (srsRes.error)      console.error('[SYNC] pullFromSupabase: srs_data error', formatPgError(srsRes.error))
+  if (fsrsRes.error)     console.error('[SYNC] pullFromSupabase: fsrs_data error', formatPgError(fsrsRes.error))
   if (sessionsRes.error) console.error('[SYNC] pullFromSupabase: review_sessions error', formatPgError(sessionsRes.error))
   if (logsRes.error)     console.error('[SYNC] pullFromSupabase: review_logs error', formatPgError(logsRes.error))
   if (notesRes.error)    console.error('[SYNC] pullFromSupabase: notes error', formatPgError(notesRes.error))
@@ -214,6 +218,19 @@ async function pullFromSupabase(): Promise<void> {
     }
   }
 
+  // Same as fetchedSrsData but for FSRS scheduling state.
+  let fetchedFsrsData: Record<string, FSRSState> | null = null
+  if (!fsrsRes.error) {
+    fetchedFsrsData = {}
+    const fetchedCardSet = new Set((cards ?? []).map((c) => c.id))
+    for (const row of fsrsRes.data ?? []) {
+      const f = toCamel(row) as FSRSState
+      if (!pendingCardSet.has(f.cardId) && (cards === null || fetchedCardSet.has(f.cardId))) {
+        fetchedFsrsData[f.cardId] = f
+      }
+    }
+  }
+
   useLibraryStore.setState((current) => {
     const mergedDecks = decks !== null
       ? mergeKeepLocal(decks, current.decks, preExistingIds.decks)
@@ -249,14 +266,19 @@ async function pullFromSupabase(): Promise<void> {
         )
       : Object.fromEntries(Object.entries(current.srsData).filter(([id]) => mergedCardSet.has(id)))
 
+    // Merge fsrsData the same way — server wins for existing entries, prune orphans.
+    const mergedFsrsData = fetchedFsrsData !== null
+      ? Object.fromEntries(
+          Object.entries({ ...current.fsrsData, ...fetchedFsrsData }).filter(([id]) => mergedCardSet.has(id))
+        )
+      : Object.fromEntries(Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id)))
+
     return {
       ...(folders !== null ? { folders: mergeKeepLocal(folders, current.folders, preExistingIds.folders) } : {}),
       decks: mergedDecks,
       cards: mergedCards,
       srsData: mergedSrsData,
-      fsrsData: Object.fromEntries(
-        Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id))
-      ),
+      fsrsData: mergedFsrsData,
       ...(sessions !== null ? { sessions } : {}),
       ...(reviewLogs !== null ? { reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs) } : {}),
       ...(newOrphanIds.length > 0 ? {
@@ -301,6 +323,7 @@ async function pushToSupabase(
   decks: Deck[],
   cards: Card[],
   srsData: Record<string, SRSData>,
+  fsrsData: Record<string, FSRSState>,
   sessions: ReviewSession[],
   reviewLogs: ReviewLog[],
   pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
@@ -333,12 +356,13 @@ async function pushToSupabase(
       decks: decks.length,
       cards: cards.length,
       srsData: Object.keys(srsData).length,
+      fsrsData: Object.keys(fsrsData).length,
       sessions: sessions.length,
       reviewLogs: reviewLogs.length,
     })
   }
 
-  // Only upsert srs_data for cards that exist in the active card set.
+  // Only upsert srs_data/fsrs_data for cards that exist in the active card set.
   // This prevents orphaned entries (e.g. from a deleted deck whose cards were
   // briefly re-pulled from Supabase before the delete push ran) from being
   // written back. Also excludes cards about to be deleted to avoid a deadlock
@@ -348,10 +372,13 @@ async function pushToSupabase(
   const srsToUpsert = Object.values(srsData).filter(
     (s) => activeCardSet.has(s.cardId) && !cardDeleteSet.has(s.cardId)
   )
+  const fsrsToUpsert = Object.values(fsrsData).filter(
+    (f) => activeCardSet.has(f.cardId) && !cardDeleteSet.has(f.cardId)
+  )
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
-    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'review_sessions' | 'review_logs',
+    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'fsrs_data' | 'review_sessions' | 'review_logs',
     rows: T[],
     opts: { onConflict: string },
   ): Promise<void> {
@@ -381,6 +408,9 @@ async function pushToSupabase(
       : null,
     srsToUpsert.length
       ? upsertBatched('srs_data', srsToUpsert.map(withUserId), { onConflict: 'card_id' })
+      : null,
+    fsrsToUpsert.length
+      ? upsertBatched('fsrs_data', fsrsToUpsert.map(withUserId), { onConflict: 'card_id' })
       : null,
     sessions.length
       ? upsertBatched('review_sessions', sessions.map(withUserId), upsertOpts)
@@ -571,7 +601,7 @@ export function useSync(): SyncStatus {
         // already corrected our local state by the time we get here.
         const s = useLibraryStore.getState()
         if (DEBUG_SYNC) console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
-        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.sessions, s.reviewLogs, s.pendingDeletes)
+        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.fsrsData, s.sessions, s.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
         if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length) {
