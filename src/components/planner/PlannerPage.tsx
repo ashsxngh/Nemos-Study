@@ -542,7 +542,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
 
 export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProps) {
   const { exams, addExam } = useExamStore()
-  const { decks, folders } = useLibraryStore()
+  const { folders } = useLibraryStore()
 
   const [showExamForm, setShowExamForm] = useState(false)
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null)

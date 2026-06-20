@@ -9,6 +9,8 @@ interface UndoEntry {
   prevSRS: SRSData
   prevFSRS?: FSRSState
   logId: string
+  isNew: boolean
+  rating: number
 }
 
 interface RedoEntry {
@@ -34,7 +36,7 @@ interface StudyState {
   nextCard: () => void
   addLog: (log: Omit<ReviewLog, 'id' | 'sessionId'>) => void
   reset: () => void
-  pushUndo: (cardId: string, prevSRS: SRSData, logId: string, prevFSRS?: FSRSState) => void
+  pushUndo: (cardId: string, prevSRS: SRSData, logId: string, isNew: boolean, rating: number, prevFSRS?: FSRSState) => void
   popUndo: () => UndoEntry | undefined
   pushRedo: (cardId: string, newSRS: SRSData) => void
   popRedo: () => RedoEntry | undefined
@@ -95,9 +97,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       redoStack: [],
     }),
 
-  pushUndo: (cardId, prevSRS, logId, prevFSRS) =>
+  pushUndo: (cardId, prevSRS, logId, isNew, rating, prevFSRS) =>
     set((s) => ({
-      undoStack: [...s.undoStack, { cardId, prevSRS, prevFSRS, logId }],
+      undoStack: [...s.undoStack, { cardId, prevSRS, prevFSRS, logId, isNew, rating }],
       redoStack: [],
     })),
 

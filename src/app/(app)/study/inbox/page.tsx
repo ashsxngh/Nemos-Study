@@ -4,11 +4,10 @@ import Link from 'next/link'
 import { ArrowLeft, Inbox, Play, CheckCircle2, Sparkles, RotateCcw } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
-import { Progress } from '@/components/ui/Progress'
 import { useLibraryStore } from '@/store/useLibraryStore'
 
 export default function InboxPage() {
-  const { getDueCards, getNewCards, getReviewsDue, decks } = useLibraryStore()
+  const { getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
   const dueCards = getDueCards()
   const newCards = getNewCards()
   const reviews = getReviewsDue()

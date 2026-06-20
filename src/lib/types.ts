@@ -208,7 +208,7 @@ export interface ToastData {
 }
 
 export interface StudySettings {
-  algorithm: 'sm2' | 'fsrs' | 'custom'
+  algorithm: 'sm2' | 'fsrs'
   newCardsPerDay: number
   maxReviewsPerDay: number
   easeBonus: number

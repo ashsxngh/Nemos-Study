@@ -1,6 +1,6 @@
 'use client'
 
-import { cn } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
 import { useLibraryStore } from '@/store/useLibraryStore'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -133,7 +133,7 @@ export function StreakHeatmap() {
                   {week.map(({ date, count }, di) => (
                     <div
                       key={di}
-                      title={count >= 0 ? `${date.toDateString()}: ${count} reviews` : ''}
+                      title={count >= 0 ? `${formatDate(date)}: ${count} reviews` : ''}
                       className={cn(
                         'rounded-[2px] transition-opacity',
                         count < 0

@@ -20,8 +20,6 @@ import {
   Sparkles,
   RotateCcw,
   Inbox,
-  RefreshCw,
-  Cloud,
   WifiOff,
 } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'

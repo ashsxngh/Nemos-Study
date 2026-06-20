@@ -162,7 +162,6 @@ export function StatsPage() {
 
   const streak = useMemo(() => computeStreak(reviewLogs), [reviewLogs])
 
-  const todayStr = new Date().toISOString().slice(0, 10)
   // "Due today" = the inbox — reviews due plus new cards still within today's
   // cap. Cards in the inbox are there because they're due today, so this
   // count must match what the inbox/sidebar shows, not just scheduled reviews.
@@ -810,7 +809,7 @@ export function StatsPage() {
                 const ds = dateStr(-i)
                 const count = algorithm === 'fsrs'
                   ? Object.values(fsrsData).filter((s) => s.state !== 'new' && s.dueDate.slice(0, 10) === ds).length
-                  : Object.values(srsData).filter((s) => s.dueDate.slice(0, 10) === ds).length
+                  : Object.values(srsData).filter((s) => s.repetitions > 0 && s.dueDate.slice(0, 10) === ds).length
                 return { i, count, isToday: i === 0 }
               }).map(({ i, count, isToday }) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
@@ -1148,7 +1147,7 @@ export function StatsPage() {
             </p>
             {!reviewTiming || reviewTiming.windowBuckets.length < 2 ? <EmptyState message="Need reviews spread across different timing windows" /> : (
               <div className="space-y-2">
-                {reviewTiming.windowBuckets.map(({ label, rate, total }, i) => {
+                {reviewTiming.windowBuckets.map(({ label, rate, total }) => {
                   const isOptimal = label === reviewTiming.optimalWindow
                   return (
                     <div key={label} className="flex items-center gap-3">

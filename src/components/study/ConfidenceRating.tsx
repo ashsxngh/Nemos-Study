@@ -16,7 +16,7 @@ interface RatingOption {
 const RATINGS: RatingOption[] = [
   {
     rating: 1,
-    label: 'Again',
+    label: 'Missed',
     interval: '10 min',
     colorClass: 'text-[var(--text-secondary)]',
     bgClass: 'bg-[var(--bg-active)]',
@@ -58,7 +58,7 @@ interface ConfidenceRatingProps {
 }
 
 /**
- * Full 4-button confidence rating row (Again / Hard / Good / Easy).
+ * Full 4-button confidence rating row (Missed / Hard / Good / Easy).
  * Used inside an expandable "More ratings" section in the session page —
  * the primary session flow uses Forgot (1) / Remembered (4) pill buttons.
  */

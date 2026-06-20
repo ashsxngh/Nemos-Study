@@ -16,7 +16,7 @@ interface HeaderProps {
 }
 
 export function Header({ title, actions, breadcrumbs }: HeaderProps) {
-  const { theme, setTheme, toasts, syncError, manualSync } = useAppStore()
+  const { theme, setTheme, syncError, manualSync } = useAppStore()
   const isDark = theme === 'dark'
   const router = useRouter()
 

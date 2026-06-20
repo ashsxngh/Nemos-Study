@@ -131,7 +131,6 @@ function SessionContent() {
     getReviewsDue,
     reviewCard,
     decks,
-    folders,
     fsrsData,
     srsData,
     reviewLogs,
@@ -152,7 +151,6 @@ function SessionContent() {
   const startLibrarySession = useCallback(() => {
     const session = useLibraryStore.getState().startSession(deckId)
     librarySessionIdRef.current = session.id
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckId])
 
   const endLibrarySession = useCallback(() => {
@@ -552,15 +550,14 @@ function SessionContent() {
         const milestones = [50, 75, 90, 100]
         const crossed = milestones.some((m) => prevMastery < m && newMastery >= m)
         if (crossed) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          import('canvas-confetti').then((mod: any) => {
+          import('canvas-confetti').then((mod) => {
             const confetti = mod.default ?? mod
             confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, colors: ['#818cf8', '#4ade80', '#f59e0b'] })
           }).catch(() => {})
         }
       }
 
-      if (prevSRS) pushUndo(card.id, prevSRS, logId, prevFSRS)
+      if (prevSRS) pushUndo(card.id, prevSRS, logId, isNew, rating, prevFSRS)
       setHistory((h) => [...h, currentIndex])
 
       // Animate then advance
@@ -584,9 +581,16 @@ function SessionContent() {
     if (entry.prevFSRS) lib.setFSRSData(entry.cardId, entry.prevFSRS)
     lib.removeLastLog()
     decrementIndex()
-    if (rememberedCount > 0) setRememberedCount((c) => c - 1)
+    if (entry.isNew) {
+      setNewCardReviewedCount((c) => Math.max(0, c - 1))
+      if (entry.rating >= 3) setNewCardCorrectCount((c) => Math.max(0, c - 1))
+    } else if (entry.rating >= 3) {
+      setRememberedCount((c) => Math.max(0, c - 1))
+    } else {
+      setForgottenReviewCount((c) => Math.max(0, c - 1))
+    }
     useAppStore.getState().addToast({ type: 'info', message: 'Undid last review', duration: 2000 })
-  }, [popUndo, decrementIndex, rememberedCount])
+  }, [popUndo, decrementIndex])
 
   /* ── Go back one card in history ── */
   function handleBack() {
@@ -644,7 +648,10 @@ function SessionContent() {
   /* ── Ctrl+Z/Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
   function handleUndoQuickDelete() {
     const pending = lastQuickDeletedRef.current
-    if (!pending) return
+    if (!pending) {
+      useAppStore.getState().addToast({ type: 'info', message: 'Nothing to undo', duration: 2000 })
+      return
+    }
     if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
     const entry = useTrashStore.getState().items.find((i) => i.id === pending.card.id && i.type === 'card')
     useLibraryStore.setState((s) => ({
@@ -1164,11 +1171,11 @@ function SessionContent() {
                   {showRetentionInfo && (
                     <div className="grid grid-cols-4 gap-2 px-4 pb-2.5 animate-fade-in">
                       <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Stability</p>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Stability' : 'Interval'}</p>
                         <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
                       </div>
                       <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Retrievability</p>
+                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Retrievability' : 'Mastery'}</p>
                         <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
                       </div>
                       <div>

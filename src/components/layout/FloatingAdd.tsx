@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, CreditCard, FileText, FolderPlus, X } from 'lucide-react'
+import { Plus, CreditCard, FileText, FolderPlus } from 'lucide-react'
 import { useNotesStore } from '@/store/useNotesStore'
 import { cn } from '@/lib/utils'
 

@@ -5,6 +5,7 @@ import { useTrashStore } from '@/store/useTrashStore'
 import { generateId } from '@/lib/utils'
 import type { Card, Note } from '@/lib/types'
 
+const DEBUG_SYNC = false
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function isUuid(id: string): boolean {
@@ -142,5 +143,5 @@ export function migrateLegacyIds(): void {
     })),
   })
 
-  console.log(`[SYNC] migrateLegacyIds: rewrote ${idMap.size} legacy id(s) to UUIDs`)
+  if (DEBUG_SYNC) console.log(`[SYNC] migrateLegacyIds: rewrote ${idMap.size} legacy id(s) to UUIDs`)
 }
