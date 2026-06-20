@@ -840,3 +840,10 @@ export const useLibraryStore = create<LibraryState>()(
     }
   )
 )
+
+// TEMP DEBUG — remove once the production review_logs issue is confirmed fixed.
+// Lets us inspect live store state from the production console, where there's
+// no React DevTools access to the underlying zustand state otherwise.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __nemosLibraryStore: typeof useLibraryStore }).__nemosLibraryStore = useLibraryStore
+}
