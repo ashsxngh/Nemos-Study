@@ -244,11 +244,10 @@ interface DeckViewProps {
 
 export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const router = useRouter()
-  const { decks, getDeckCards, getDeckMastery, getDueCards, deleteCard, updateCard, resetCardSRS } = useLibraryStore()
+  const { decks, getDeckCards, getDeckMastery, deleteCard, updateCard, resetCardSRS } = useLibraryStore()
   const deck = decks.find((d) => d.id === deckId)
   const cards = getDeckCards(deckId)
   const mastery = getDeckMastery(deckId)
-  const dueCount = getDueCards(deckId).length
   const srsData = useLibraryStore((s) => s.srsData)
 
   const [addingCard, setAddingCard] = useState(false)
@@ -483,9 +482,6 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
           <span className="text-xs text-[var(--text-muted)]">
             <span className="text-[var(--text-primary)] font-medium">{cards.length}</span> cards
           </span>
-          {dueCount > 0 && (
-            <Badge variant="accent">{dueCount} due</Badge>
-          )}
           <div className="flex-1 flex items-center gap-2 max-w-[160px]">
             <Progress value={mastery} size="sm" color={mastery >= 70 ? 'success' : mastery >= 40 ? 'accent' : 'warning'} />
             <span className="text-xs text-[var(--text-muted)] shrink-0">{mastery}%</span>

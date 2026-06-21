@@ -64,7 +64,7 @@ export interface ExamRetentionStats {
   reviewedCards: number
   onTarget: number           // predicted retention ≥ targetRetention on exam day
   atRisk: number             // predicted retention < targetRetention
-  avgRetention: number       // avg predicted retention across reviewed cards (0–1)
+  avgRetention: number       // avg predicted retention across all exam cards; new cards count as 0 (0–1)
   pulledForwardCount: number // cards whose natural due date is past the exam
   /** Per-day review load needed if we spread pulled-forward cards evenly. */
   dailyLoadNeeded: number
@@ -114,7 +114,9 @@ export function computeExamRetentionStats(
     reviewedCards: reviewed,
     onTarget,
     atRisk,
-    avgRetention: reviewed > 0 ? retentionSum / reviewed : 0,
+    // New/unreviewed cards count as 0 retention so readiness reflects overall
+    // mastery, not just the subset of cards that have been studied at least once.
+    avgRetention: cards.length > 0 ? retentionSum / cards.length : 0,
     pulledForwardCount: pulledForward,
     dailyLoadNeeded: pulledForward > 0 ? Math.ceil(pulledForward / daysUntilExam) : 0,
   }
@@ -243,9 +245,9 @@ export function computePerTopicBreakdown(
     const folderCards = cards.filter((c) => deckIds.has(c.deckId))
     const reviewed = folderCards.filter((c) => fsrsData[c.id]?.state !== 'new')
     const avg =
-      reviewed.length > 0
+      folderCards.length > 0
         ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
-          reviewed.length
+          folderCards.length
         : 0
     result.push({
       id: folderId,
@@ -263,9 +265,9 @@ export function computePerTopicBreakdown(
     const deckCards = cards.filter((c) => c.deckId === deckId)
     const reviewed = deckCards.filter((c) => fsrsData[c.id]?.state !== 'new')
     const avg =
-      reviewed.length > 0
+      deckCards.length > 0
         ? reviewed.reduce((s, c) => s + fsrsRetentionAtDate(fsrsData[c.id], examDate), 0) /
-          reviewed.length
+          deckCards.length
         : 0
     result.push({
       id: deckId,

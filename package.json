@@ -15,7 +15,6 @@
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
     "@types/jszip": "^3.4.0",
-    "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.3.0",
@@ -37,7 +36,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/canvas-confetti": "^1.9.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^20",
     "@types/react": "^19",

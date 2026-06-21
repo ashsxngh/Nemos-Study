@@ -77,6 +77,10 @@ create table if not exists srs_data (
 -- Adds the state column for databases created before it existed.
 alter table srs_data add column if not exists state text not null default 'new';
 
+-- Adds updated_at for incremental sync (lets the client filter "what changed
+-- since my last pull" instead of always fetching the whole table).
+alter table srs_data add column if not exists updated_at timestamptz not null default now();
+
 -- fsrs_data — FSRS scheduling state, parallel to srs_data (SM-2). Previously
 -- local-only (never synced), which left FSRS-mode queues stale on any device
 -- that didn't perform the review.
@@ -90,8 +94,12 @@ create table if not exists fsrs_data (
   last_reviewed_at timestamptz,
   repetitions      int  not null default 0,
   lapses           int  not null default 0,
-  state            text not null default 'new'
+  state            text not null default 'new',
+  updated_at       timestamptz not null default now()
 );
+
+-- Adds updated_at for databases created before this existed (incremental sync).
+alter table fsrs_data add column if not exists updated_at timestamptz not null default now();
 
 -- review_logs
 create table if not exists review_logs (
@@ -159,6 +167,9 @@ alter table exams add column if not exists target_retention float not null defau
 alter table exams add column if not exists rating int;
 alter table exams add column if not exists predicted_retention_at_exam float;
 
+-- Adds updated_at for incremental sync filtering.
+alter table exams add column if not exists updated_at timestamptz not null default now();
+
 -- user_settings (one row per user; currently holds the global daily new-card limit)
 create table if not exists user_settings (
   user_id           uuid primary key references auth.users(id) on delete cascade,
@@ -171,6 +182,32 @@ create table if not exists user_settings (
 -- table, so an earlier partial run can leave this column missing).
 alter table user_settings add column if not exists new_cards_per_day int not null default 20;
 alter table user_settings add column if not exists updated_at timestamptz not null default now();
+
+-- ────────────────────────────────────────────────────────────
+-- INCREMENTAL SYNC TRIGGERS
+-- ────────────────────────────────────────────────────────────
+-- srs_data/fsrs_data/exams have no client-maintained updated_at field (unlike
+-- folders/decks/cards/notes, which already stamp it on every local edit), so
+-- a DB trigger stamps it on every insert/update instead. This is what lets
+-- incremental pulls filter "rows changed since my last pull" for these tables.
+create or replace function set_updated_at() returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_srs_data_updated_at on srs_data;
+create trigger trg_srs_data_updated_at before insert or update on srs_data
+  for each row execute function set_updated_at();
+
+drop trigger if exists trg_fsrs_data_updated_at on fsrs_data;
+create trigger trg_fsrs_data_updated_at before insert or update on fsrs_data
+  for each row execute function set_updated_at();
+
+drop trigger if exists trg_exams_updated_at on exams;
+create trigger trg_exams_updated_at before insert or update on exams
+  for each row execute function set_updated_at();
 
 -- ────────────────────────────────────────────────────────────
 -- ROW LEVEL SECURITY
@@ -241,3 +278,9 @@ create index if not exists idx_review_sessions_user_id on review_sessions (user_
 create index if not exists idx_notes_user_id          on notes          (user_id);
 create index if not exists idx_exams_user_id          on exams          (user_id);
 create index if not exists idx_user_settings_user_id  on user_settings  (user_id);
+
+-- Incremental sync filters on these columns directly (in addition to user_id).
+create index if not exists idx_srs_data_updated_at    on srs_data       (updated_at);
+create index if not exists idx_fsrs_data_updated_at   on fsrs_data      (updated_at);
+create index if not exists idx_exams_updated_at       on exams          (updated_at);
+create index if not exists idx_review_logs_reviewed_at on review_logs   (reviewed_at);

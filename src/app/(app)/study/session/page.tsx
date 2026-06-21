@@ -115,6 +115,9 @@ function SessionContent() {
     getDueCards,
     getNewCards,
     getReviewsDue,
+    getDeckReviewsAll,
+    getDeckNewAll,
+    getDeckBoth,
     reviewCard,
     decks,
     fsrsData,
@@ -146,6 +149,10 @@ function SessionContent() {
     // due dates and the daily new-card limit. Distinct from 'standard' (the
     // due-date-driven inbox session) so stats/wasNew tracking stay separate.
     if (modeParam === 'deck-all') return 'deck-all' as const
+    // Deck Study popup — three deck-scoped modes (see StudyModePopup).
+    if (modeParam === 'deck-reviews') return 'deck-reviews' as const
+    if (modeParam === 'deck-new') return 'deck-new' as const
+    if (modeParam === 'deck-both') return 'deck-both' as const
     return 'standard' as const
   })()
 
@@ -172,6 +179,14 @@ function SessionContent() {
   const [history, setHistory] = useState<number[]>([])
   const [showMoreRatings, setShowMoreRatings] = useState(false)
   const [showRetentionInfo, setShowRetentionInfo] = useState(false)
+  // "Show card details" — toggled from the bottom-right options menu, persisted
+  // across sessions. Read lazily so SSR/first-paint doesn't flash the panel
+  // before localStorage is checked.
+  const [showCardDetailsEnabled, setShowCardDetailsEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true
+    const stored = window.localStorage.getItem('nemo-show-card-details')
+    return stored === null ? true : stored === 'true'
+  })
   const [loaded, setLoaded] = useState(false)
   // Cards the user has dismissed the "struggle" prompt for, this session only.
   const [dismissedStruggleIds, setDismissedStruggleIds] = useState<Set<string>>(new Set())
@@ -211,6 +226,12 @@ function SessionContent() {
   const optionsMenuRef = useRef<HTMLDivElement>(null)
   const optionsButtonRef = useRef<HTMLButtonElement>(null)
 
+  // Set just before reset()+router.push() on exit — reset() empties the queue
+  // synchronously, which would otherwise make this component re-render with
+  // an empty queue and flash "All caught up!" for the instant before the
+  // navigation to /study actually completes.
+  const isExitingRef = useRef(false)
+
   /* Resolve deck name */
   const deckName = examId
     ? (exams.find((e) => e.id === examId)?.name ?? 'Exam Study')
@@ -247,6 +268,10 @@ function SessionContent() {
     }
     if (resolvedMode === 'new-only') return getNewCards(deckId)
     if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
+    // Deck Study popup modes — deck-scoped, ignore the inbox entirely.
+    if (resolvedMode === 'deck-reviews') return deckId ? getDeckReviewsAll(deckId) : []
+    if (resolvedMode === 'deck-new') return deckId ? getDeckNewAll(deckId) : []
+    if (resolvedMode === 'deck-both') return deckId ? getDeckBoth(deckId) : []
     // Standard/inbox session — cap to the user's session length. The queue is
     // already ordered (due date + deck interleave + warmup), so truncating
     // here just drops the lowest-priority tail.
@@ -505,7 +530,6 @@ function SessionContent() {
       const libState = useLibraryStore.getState()
       const prevSRS = libState.srsData[card.id]
       const prevFSRS = libState.fsrsData[card.id]
-      const prevMastery = deckId ? libState.getDeckMastery(deckId) : null
 
       const logId = Math.random().toString(36).slice(2)
       addLog({
@@ -528,19 +552,6 @@ function SessionContent() {
         setRememberedCount((c) => c + 1)
       } else {
         setForgottenReviewCount((c) => c + 1)
-      }
-
-      // Confetti on mastery milestone
-      if (deckId && prevMastery !== null) {
-        const newMastery = useLibraryStore.getState().getDeckMastery(deckId)
-        const milestones = [50, 75, 90, 100]
-        const crossed = milestones.some((m) => prevMastery < m && newMastery >= m)
-        if (crossed) {
-          import('canvas-confetti').then((mod) => {
-            const confetti = mod.default ?? mod
-            confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, colors: ['#818cf8', '#4ade80', '#f59e0b'] })
-          }).catch(() => {})
-        }
       }
 
       if (prevSRS) pushUndo(card.id, prevSRS, logId, isNew, rating, prevFSRS)
@@ -582,9 +593,13 @@ function SessionContent() {
   function handleBack() {
     if (history.length === 0) return
     const prev = history[history.length - 1]
-    const newQueue = queue.slice(prev)
     setHistory((h) => h.slice(0, -1))
-    reorderQueue(newQueue, 0)
+    // Only move the cursor back — never truncate the queue. Slicing the
+    // queue here used to be able to shrink it to zero-length in edge cases
+    // (e.g. stepping back right as the last card completed the session),
+    // which made the "All caught up" empty-inbox screen flash instead of
+    // the normal card view.
+    reorderQueue(queue, prev)
   }
 
   /* ── Skip forward without rating ── */
@@ -811,6 +826,19 @@ function SessionContent() {
   const greenPct = Math.min(100, rawGreenPct)
   const redPct = Math.min(100 - greenPct, (forgottenReviewCount / total) * 100)
 
+  // Mid-exit — render a loading skeleton instead of letting the now-empty
+  // queue fall through to the "All caught up!" empty-inbox screen below.
+  if (isExitingRef.current) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
+        <div className="space-y-3 animate-pulse">
+          <div className="skeleton w-48 h-4 mx-auto rounded" />
+          <div className="skeleton w-32 h-4 mx-auto rounded" />
+        </div>
+      </div>
+    )
+  }
+
   /* ════════════════════════════════════════════════════════════
      SESSION COMPLETE
   ════════════════════════════════════════════════════════════ */
@@ -879,7 +907,7 @@ function SessionContent() {
               Review Again
             </button>
             <button
-              onClick={() => { clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
+              onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
             >
@@ -962,7 +990,7 @@ function SessionContent() {
         style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}
       >
         <button
-          onClick={() => { clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
+          onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
           style={{ color: '#6b6b72' }}
           title="Exit session"
@@ -1149,7 +1177,7 @@ function SessionContent() {
               )}
 
               {/* Retention transparency — collapsed by default */}
-              {retentionInfo && (
+              {showCardDetailsEnabled && retentionInfo && (
                 <div className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <button
                     onClick={() => setShowRetentionInfo((v) => !v)}
@@ -1370,6 +1398,27 @@ function SessionContent() {
                 <History size={13} style={{ color: '#8e8ea0' }} />
                 Review history
               </button>
+              <div className="border-t mx-3" style={{ borderColor: '#333338' }} />
+              <div className="w-full flex items-center justify-between gap-2.5 px-3 py-2.5 text-xs">
+                <span style={{ color: '#e8e8ea' }}>Show card details</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showCardDetailsEnabled}
+                  onClick={() => {
+                    const next = !showCardDetailsEnabled
+                    setShowCardDetailsEnabled(next)
+                    window.localStorage.setItem('nemo-show-card-details', String(next))
+                  }}
+                  className="w-8 h-[18px] rounded-full relative transition-colors duration-150 shrink-0"
+                  style={{ background: showCardDetailsEnabled ? '#818cf8' : '#3a3a42' }}
+                >
+                  <div
+                    className="absolute top-0.5 w-3.5 h-3.5 rounded-full transition-transform duration-150"
+                    style={{ background: '#fff', transform: showCardDetailsEnabled ? 'translateX(16px)' : 'translateX(2px)' }}
+                  />
+                </button>
+              </div>
               <div className="border-t mx-3" style={{ borderColor: '#333338' }} />
               <button
                 onClick={() => { setShowOptionsMenu(false); setShowDeleteConfirm(true) }}

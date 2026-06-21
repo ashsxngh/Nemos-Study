@@ -21,10 +21,10 @@ import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { DeckView } from '@/components/library/DeckView'
+import { StudyModePopup } from '@/components/library/StudyModePopup'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
@@ -218,6 +218,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const [filterStarred, setFilterStarred] = useState(false)
   const [filterHasDue, setFilterHasDue] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
+  const [studyPopupDeck, setStudyPopupDeck] = useState<DeckType | null>(null)
 
   // Bulk deck selection — select decks in the current folder and move them
   // to another folder in one action.
@@ -249,15 +250,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
   const currentFolderId = folderStack[folderStack.length - 1]
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null
-
-  // ── Auto-open last deck on mount ──────────────────────────────────────────
-  useEffect(() => {
-    const lastId = useAppStore.getState().lastOpenDeckId
-    if (lastId && decks.some((d) => d.id === lastId)) {
-      setActiveDeckId(lastId)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const buildPath = (fid: string | null): (FolderType | null)[] => {
     if (!fid) return [null]
@@ -623,7 +615,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
         {/* Tree table view */}
         {view === 'table' && (visibleFolders.length > 0 || visibleDecks.length > 0 || search) && (
-          <LibraryTreeTable rootId={currentFolderId} search={search} onOpenDeck={openDeck} />
+          <LibraryTreeTable rootId={currentFolderId} search={search} onOpenDeck={openDeck} onStudyClick={setStudyPopupDeck} />
         )}
 
         {/* Folders section */}
@@ -720,7 +712,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
             >
               {sortedDecks.map((deck) => {
                 const cardCount = getDeckCards(deck.id).length
-                const dueCount = getDueCards(deck.id).length
                 const mastery = getDeckMastery(deck.id)
                 const deckMenuItems: DropdownItem[] = [
                   {
@@ -752,9 +743,9 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     key={deck.id}
                     deck={deck}
                     cardCount={cardCount}
-                    dueCount={dueCount}
                     mastery={mastery}
                     onClick={() => openDeck(deck.id)}
+                    onStudyClick={setStudyPopupDeck}
                     menuItems={deckMenuItems}
                     checked={selectedDeckIds.has(deck.id)}
                     onToggleCheck={toggleDeckSelect}
@@ -764,9 +755,9 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     key={deck.id}
                     deck={deck}
                     cardCount={cardCount}
-                    dueCount={dueCount}
                     mastery={mastery}
                     onClick={() => openDeck(deck.id)}
+                    onStudyClick={setStudyPopupDeck}
                     menuItems={deckMenuItems}
                     checked={selectedDeckIds.has(deck.id)}
                     onToggleCheck={toggleDeckSelect}
@@ -815,6 +806,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         }}
       />
 
+      <StudyModePopup deck={studyPopupDeck} onClose={() => setStudyPopupDeck(null)} />
+
       {/* Bulk: move selected decks to a folder */}
       <Dialog
         open={showBulkMoveDecks}
@@ -843,7 +836,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
 interface DeckCounts {
   newCount: number
-  dueCount: number
   total: number
 }
 
@@ -851,14 +843,15 @@ function LibraryTreeTable({
   rootId,
   search,
   onOpenDeck,
+  onStudyClick,
 }: {
   rootId: string | null
   search: string
   onOpenDeck: (deckId: string) => void
+  onStudyClick: (deck: DeckType) => void
 }) {
-  const router = useRouter()
   const {
-    folders, decks, getDeckCards, getNewCards, getReviewsDue,
+    folders, decks, getDeckCards, getNewCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore()
 
@@ -876,7 +869,6 @@ function LibraryTreeTable({
 
   const deckCounts = (deckId: string): DeckCounts => ({
     newCount: getNewCards(deckId).length,
-    dueCount: getReviewsDue(deckId).length,
     total: getDeckCards(deckId).length,
   })
 
@@ -890,10 +882,9 @@ function LibraryTreeTable({
     return [...direct, ...nested].reduce(
       (acc, c) => ({
         newCount: acc.newCount + c.newCount,
-        dueCount: acc.dueCount + c.dueCount,
         total: acc.total + c.total,
       }),
-      { newCount: 0, dueCount: 0, total: 0 }
+      { newCount: 0, total: 0 }
     )
   }
 
@@ -980,7 +971,7 @@ function LibraryTreeTable({
           onClick={() => toggleFolder(folder.id)}
         >
           <div
-            className="col-span-6 flex items-center gap-2 min-w-0"
+            className="col-span-7 flex items-center gap-2 min-w-0"
             style={{ paddingLeft: depth * 20 }}
           >
             {isOpen ? (
@@ -994,9 +985,6 @@ function LibraryTreeTable({
           </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">
             {counts.newCount > 0 ? counts.newCount : '–'}
-          </div>
-          <div className={cn('col-span-1 text-center text-xs font-semibold', counts.dueCount > 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-            {counts.dueCount > 0 ? counts.dueCount : '–'}
           </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">{counts.total}</div>
           <div className="col-span-3 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1016,7 +1004,7 @@ function LibraryTreeTable({
           onClick={() => onOpenDeck(deck.id)}
         >
           <div
-            className="col-span-6 flex items-center gap-2 min-w-0"
+            className="col-span-7 flex items-center gap-2 min-w-0"
             style={{ paddingLeft: depth * 20 + 17 }}
           >
             <BookOpen size={14} className="text-[var(--accent)] shrink-0" />
@@ -1028,15 +1016,12 @@ function LibraryTreeTable({
           <div className={cn('col-span-1 text-center text-xs', counts.newCount > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]')}>
             {counts.newCount > 0 ? counts.newCount : '–'}
           </div>
-          <div className={cn('col-span-1 text-center text-xs font-semibold', counts.dueCount > 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-            {counts.dueCount > 0 ? counts.dueCount : '–'}
-          </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">{counts.total}</div>
           <div className="col-span-3 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                router.push(`/study/session?deck=${deck.id}`)
+                onStudyClick(deck)
               }}
               className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
             >
@@ -1057,9 +1042,8 @@ function LibraryTreeTable({
     <div className="border border-[var(--border)] rounded-[var(--radius)] overflow-hidden bg-[var(--bg-surface)]">
       {/* Header */}
       <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-hover)] text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
-        <div className="col-span-6">Name</div>
+        <div className="col-span-7">Name</div>
         <div className="col-span-1 text-center">New</div>
-        <div className="col-span-1 text-center">Due</div>
         <div className="col-span-1 text-center">Total</div>
         <div className="col-span-3 text-right">Actions</div>
       </div>
@@ -1212,13 +1196,12 @@ function FolderCardList({
 }
 
 function DeckCardGrid({
-  deck, cardCount, dueCount, mastery, onClick, menuItems, checked, onToggleCheck,
+  deck, cardCount, mastery, onClick, onStudyClick, menuItems, checked, onToggleCheck,
 }: {
-  deck: DeckType; cardCount: number; dueCount: number; mastery: number
-  onClick: () => void; menuItems: DropdownItem[]
+  deck: DeckType; cardCount: number; mastery: number
+  onClick: () => void; onStudyClick: (deck: DeckType) => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
-  const router = useRouter()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
     data: { type: 'deck', deckId: deck.id },
@@ -1267,7 +1250,7 @@ function DeckCardGrid({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              router.push(`/study/session?deck=${deck.id}`)
+              onStudyClick(deck)
             }}
             className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
           >
@@ -1282,7 +1265,6 @@ function DeckCardGrid({
         <p className="text-sm font-medium text-[var(--text-primary)] truncate mb-1">{deck.name}</p>
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] text-[var(--text-muted)]">{cardCount} cards</span>
-          {dueCount > 0 && <Badge variant="accent">{dueCount} due</Badge>}
         </div>
         <Progress value={mastery} size="sm" color={mastery >= 70 ? 'success' : mastery >= 40 ? 'accent' : 'warning'} />
       </div>
@@ -1291,13 +1273,12 @@ function DeckCardGrid({
 }
 
 function DeckCardList({
-  deck, cardCount, dueCount, mastery, onClick, menuItems, checked, onToggleCheck,
+  deck, cardCount, mastery, onClick, onStudyClick, menuItems, checked, onToggleCheck,
 }: {
-  deck: DeckType; cardCount: number; dueCount: number; mastery: number
-  onClick: () => void; menuItems: DropdownItem[]
+  deck: DeckType; cardCount: number; mastery: number
+  onClick: () => void; onStudyClick: (deck: DeckType) => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
-  const router = useRouter()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
     data: { type: 'deck', deckId: deck.id },
@@ -1345,13 +1326,12 @@ function DeckCardList({
         <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{deck.name}</span>
         <span className="text-xs text-[var(--text-muted)]">{cardCount} cards</span>
         <span className="text-xs text-[var(--text-muted)]">{mastery}%</span>
-        {dueCount > 0 && <Badge variant="accent">{dueCount} due</Badge>}
       </div>
 
       <button
         onClick={(e) => {
           e.stopPropagation()
-          router.push(`/study/session?deck=${deck.id}`)
+          onStudyClick(deck)
         }}
         className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white flex-shrink-0"
       >

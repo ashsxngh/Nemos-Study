@@ -143,6 +143,11 @@ interface LibraryState {
   getNewCards: (deckId?: string) => Card[]
   getReviewsDue: (deckId?: string) => Card[]
   getDueCards: (deckId?: string) => Card[]
+  // Deck-scoped "Study" popup modes — operate only on one deck, bypass the
+  // inbox's due-date gating entirely.
+  getDeckReviewsAll: (deckId: string) => Card[]
+  getDeckNewAll: (deckId: string) => Card[]
+  getDeckBoth: (deckId: string) => Card[]
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
   getDeckMastery: (deckId: string) => number
@@ -658,11 +663,21 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData, decks } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { cards, fsrsData, srsData, decks, reviewLogs } = get()
+        const { algorithm, newCardsPerDay } = useSettingsStore.getState()
+        const todayStr = new Date().toISOString().slice(0, 10)
         const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
+
+        // Count new cards introduced today using wasNew-flagged logs (Issue 7).
+        // This correctly excludes lapsed graduated cards regardless of algorithm.
+        const studiedNewToday = pool.filter((c) =>
+          reviewLogs.some((l) => l.cardId === c.id && l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr)
+        ).length
+
+        const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
+        if (remaining === 0) return []
 
         const eligible = pool.filter((c) => {
           if (algorithm === 'fsrs') {
@@ -680,7 +695,9 @@ export const useLibraryStore = create<LibraryState>()(
         const sorted = [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
 
         // Secondary sort: round-robin across decks, weighted by overdue severity.
-        return interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
+        const interleaved = interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
+
+        return interleaved.slice(0, remaining)
       },
 
       getReviewsDue: (deckId) => {
@@ -753,6 +770,57 @@ export const useLibraryStore = create<LibraryState>()(
         })
       },
 
+      // "Reviews" mode in the deck Study popup — every previously-learned
+      // card in this deck, regardless of due date (early review allowed).
+      getDeckReviewsAll: (deckId) => {
+        const { cards, fsrsData, srsData } = get()
+        const { algorithm } = useSettingsStore.getState()
+        const pool = cards.filter((c) => c.deckId === deckId && !c.isArchived)
+        const reviewed = pool.filter((c) => {
+          if (algorithm === 'fsrs') {
+            const fs = fsrsData[c.id]
+            return !!fs && fs.state !== 'new'
+          }
+          const srs = srsData[c.id]
+          return !!srs && srs.repetitions > 0
+        })
+        const dueDateOf = (c: Card) =>
+          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        return [...reviewed].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
+      },
+
+      // "New Cards" mode in the deck Study popup — every new card from this
+      // deck, unthrottled. The daily new-card limit is an inbox-only concept
+      // (see getNewCards); a manual per-deck study session deliberately
+      // ignores it, the same way "deck-all" ignores due dates.
+      getDeckNewAll: (deckId) => {
+        const { cards, fsrsData, srsData } = get()
+        const { algorithm } = useSettingsStore.getState()
+        const pool = cards.filter((c) => c.deckId === deckId && !c.isArchived)
+        const eligible = pool.filter((c) => {
+          if (algorithm === 'fsrs') return (fsrsData[c.id]?.state ?? 'new') === 'new'
+          return (srsData[c.id]?.repetitions ?? 0) === 0
+        })
+
+        const dueDateOf = (c: Card) =>
+          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        return [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
+      },
+
+      // "Both" mode in the deck Study popup — interleaves reviews and new
+      // cards from this deck, same per-type rules as the two modes above.
+      getDeckBoth: (deckId) => {
+        const reviews = get().getDeckReviewsAll(deckId)
+        const newCards = get().getDeckNewAll(deckId)
+        const result: Card[] = []
+        const max = Math.max(reviews.length, newCards.length)
+        for (let i = 0; i < max; i++) {
+          if (i < reviews.length) result.push(reviews[i])
+          if (i < newCards.length) result.push(newCards[i])
+        }
+        return result
+      },
+
       getDeckCards: (deckId) => {
         return get().cards.filter((c) => c.deckId === deckId)
       },
@@ -767,22 +835,13 @@ export const useLibraryStore = create<LibraryState>()(
         const deckCards = cards.filter((c) => c.deckId === deckId)
         if (deckCards.length === 0) return 0
 
-        if (algorithm === 'fsrs') {
-          const graduated = deckCards.filter((c) => fsrsData[c.id]?.state !== 'new')
-          if (graduated.length === 0) return 0
-          const total = graduated.reduce((sum, c) => {
-            const state = fsrsData[c.id]
-            return sum + (state ? fsrsRetrievability(state) * 100 : 0)
-          }, 0)
-          return Math.round(total / graduated.length)
-        }
+        const data = algorithm === 'fsrs' ? fsrsData : srsData
+        const learned = deckCards.filter((c) => {
+          const state = data[c.id]?.state
+          return state === 'review' || state === 'relearning'
+        }).length
 
-        // SM2 path — masteryPercent is computed by computeMastery() inside scheduleCard
-        const total = deckCards.reduce((sum, c) => {
-          const srs = srsData[c.id]
-          return sum + (srs ? srs.masteryPercent : 0)
-        }, 0)
-        return Math.round(total / deckCards.length)
+        return Math.round((learned / deckCards.length) * 100)
       },
 
       // ── Session ──────────────────────────────────────────────────────────────

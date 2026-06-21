@@ -132,13 +132,78 @@ function mergeKeepLocal<T extends { id: string }>(
   return [...serverRows, ...localOnly]
 }
 
+// Merge server rows from an *incremental* pull (only rows changed since the
+// last watermark) into local state. Unlike mergeKeepLocal, absence from
+// serverRows never means "deleted elsewhere" here — it just means "unchanged
+// since the watermark" — so nothing is ever dropped. Hard deletes are only
+// detected by the once-per-session full pull (see preExistingIds).
+function mergeIncremental<T extends { id: string }>(serverRows: T[], currentRows: T[]): T[] {
+  if (serverRows.length === 0) return currentRows
+  const serverMap = new Map(serverRows.map((r) => [r.id, r]))
+  const updated = currentRows.map((r) => serverMap.get(r.id) ?? r)
+  const currentIds = new Set(currentRows.map((r) => r.id))
+  const added = serverRows.filter((r) => !currentIds.has(r.id))
+  return [...updated, ...added]
+}
+
 // ─── Pull ─────────────────────────────────────────────────────────────────────
+
+// The first pull of a browser session is always a full pull (needed to catch
+// hard deletes — see mergeIncremental's docstring). Every subsequent pull in
+// the same session only fetches rows changed since this watermark.
+// sessionStorage (not localStorage) is deliberate: a new tab/session should
+// always start with a full pull.
+const LAST_FULL_PULL_KEY = 'nemos-last-pull-at'
+
+function getLastPullAt(): string | null {
+  if (typeof sessionStorage === 'undefined') return null
+  try {
+    return sessionStorage.getItem(LAST_FULL_PULL_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setLastPullAt(iso: string): void {
+  if (typeof sessionStorage === 'undefined') return
+  try {
+    sessionStorage.setItem(LAST_FULL_PULL_KEY, iso)
+  } catch {
+    // sessionStorage unavailable (e.g. private browsing) — every pull in this
+    // session will simply stay a full pull, which is correct, just unoptimized.
+  }
+}
 
 async function pullFromSupabase(): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
   const userId = await getCachedUserId(supabase)
   if (!userId) return
+
+  const since = getLastPullAt()
+  try {
+    await runPull(supabase, userId, since)
+  } catch (err) {
+    if (since !== null) {
+      console.error('[SYNC] pullFromSupabase: incremental pull failed, falling back to full pull', err)
+      try {
+        await runPull(supabase, userId, null)
+      } catch (fallbackErr) {
+        console.error('[SYNC] pullFromSupabase: full-pull fallback also failed', fallbackErr)
+      }
+    } else {
+      console.error('[SYNC] pullFromSupabase: full pull failed', err)
+    }
+  }
+}
+
+async function runPull(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  since: string | null,
+): Promise<void> {
+  const incremental = since !== null
+  const pullStartedAt = new Date().toISOString()
 
   const [
     foldersRes,
@@ -152,16 +217,36 @@ async function pullFromSupabase(): Promise<void> {
     examsRes,
     settingsRes,
   ] = await Promise.all([
-    supabase.from('folders').select('*').eq('user_id', userId),
-    supabase.from('decks').select('*').eq('user_id', userId),
-    supabase.from('cards').select('*').eq('user_id', userId),
-    supabase.from('srs_data').select('*').eq('user_id', userId),
-    supabase.from('fsrs_data').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('folders').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('folders').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('decks').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('decks').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('cards').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('cards').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('srs_data').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('srs_data').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('fsrs_data').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('fsrs_data').select('*').eq('user_id', userId),
+    // review_sessions has no updated_at and isn't part of the incremental-pull
+    // scope — always fetched in full (it's cheap, append-mostly, low volume).
     supabase.from('review_sessions').select('*').eq('user_id', userId),
-    supabase.from('review_logs').select('*').eq('user_id', userId),
-    supabase.from('notes').select('*').eq('user_id', userId),
-    supabase.from('exams').select('*').eq('user_id', userId),
-    supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    since !== null
+      ? supabase.from('review_logs').select('*').eq('user_id', userId).gt('reviewed_at', since)
+      : supabase.from('review_logs').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('notes').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('notes').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('exams').select('*').eq('user_id', userId).gt('updated_at', since)
+      : supabase.from('exams').select('*').eq('user_id', userId),
+    since !== null
+      ? supabase.from('user_settings').select('*').eq('user_id', userId).gt('updated_at', since).maybeSingle()
+      : supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ])
 
   // On error, log clearly and skip that table — local state is left untouched.
@@ -175,6 +260,16 @@ async function pullFromSupabase(): Promise<void> {
   if (notesRes.error)    console.error('[SYNC] pullFromSupabase: notes error', formatPgError(notesRes.error))
   if (examsRes.error)    console.error('[SYNC] pullFromSupabase: exams error', formatPgError(examsRes.error))
   if (settingsRes.error) console.error('[SYNC] pullFromSupabase: user_settings error', formatPgError(settingsRes.error))
+
+  // An incremental pull that errored on any table can't be trusted to have a
+  // complete picture — bail out and let the caller retry as a full pull.
+  if (incremental) {
+    const anyError = foldersRes.error || decksRes.error || cardsRes.error || srsRes.error ||
+      fsrsRes.error || sessionsRes.error || logsRes.error || notesRes.error || examsRes.error || settingsRes.error
+    if (anyError) {
+      throw new Error('incremental pull: one or more tables errored')
+    }
+  }
 
   // Filter out anything locally queued for deletion so a pull never resurrects
   // an item the user deleted before the push debounce fired.
@@ -233,13 +328,13 @@ async function pullFromSupabase(): Promise<void> {
 
   useLibraryStore.setState((current) => {
     const mergedDecks = decks !== null
-      ? mergeKeepLocal(decks, current.decks, preExistingIds.decks)
+      ? (incremental ? mergeIncremental(decks, current.decks) : mergeKeepLocal(decks, current.decks, preExistingIds.decks))
       : current.decks
     const mergedDeckSet = new Set(mergedDecks.map((d) => d.id))
 
     // Remove cards whose deck no longer exists (orphans from deleted decks).
     const rawMergedCards = cards !== null
-      ? mergeKeepLocal(cards, current.cards, preExistingIds.cards)
+      ? (incremental ? mergeIncremental(cards, current.cards) : mergeKeepLocal(cards, current.cards, preExistingIds.cards))
       : current.cards
     const orphanCardIds = rawMergedCards
       .filter((c) => !mergedDeckSet.has(c.deckId))
@@ -274,7 +369,11 @@ async function pullFromSupabase(): Promise<void> {
       : Object.fromEntries(Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id)))
 
     return {
-      ...(folders !== null ? { folders: mergeKeepLocal(folders, current.folders, preExistingIds.folders) } : {}),
+      ...(folders !== null ? {
+        folders: incremental
+          ? mergeIncremental(folders, current.folders)
+          : mergeKeepLocal(folders, current.folders, preExistingIds.folders),
+      } : {}),
       decks: mergedDecks,
       cards: mergedCards,
       srsData: mergedSrsData,
@@ -292,18 +391,24 @@ async function pullFromSupabase(): Promise<void> {
 
   if (notes !== null) {
     useNotesStore.setState((current) => ({
-      notes: mergeKeepLocal(notes, current.notes, preExistingIds.notes),
+      notes: incremental
+        ? mergeIncremental(notes, current.notes)
+        : mergeKeepLocal(notes, current.notes, preExistingIds.notes),
     }))
   }
 
   if (exams !== null) {
     useExamStore.setState((current) => ({
-      exams: mergeKeepLocal(exams, current.exams, preExistingIds.exams),
+      exams: incremental
+        ? mergeIncremental(exams, current.exams)
+        : mergeKeepLocal(exams, current.exams, preExistingIds.exams),
     }))
   }
 
   // user_settings is a single row, not a list — server always wins outright
-  // when a row exists. No row yet (new user) means nothing to hydrate.
+  // when a row exists. No row yet (new user) means nothing to hydrate. On an
+  // incremental pull, no row simply means settings haven't changed since the
+  // watermark — local state is already correct, so this is a no-op either way.
   if (!settingsRes.error && settingsRes.data) {
     const s = toCamel(settingsRes.data) as { newCardsPerDay: number }
     useSettingsStore.setState({ newCardsPerDay: s.newCardsPerDay })
@@ -328,6 +433,11 @@ async function pullFromSupabase(): Promise<void> {
   realtimePending.cards.clear()
   realtimePending.reviewLogs.clear()
   realtimePending.notes.clear()
+
+  // Advance the watermark only after every table above has been applied
+  // successfully — using the timestamp captured before the fetches ran avoids
+  // missing rows that changed mid-fetch.
+  setLastPullAt(pullStartedAt)
 }
 
 // ─── Push helpers ─────────────────────────────────────────────────────────────
