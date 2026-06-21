@@ -196,7 +196,7 @@ function SessionContent() {
   const [newCardCorrectCount, setNewCardCorrectCount] = useState(0)
 
   // Card swipe animation
-  const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | null>(null)
+  const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | 'delete' | null>(null)
   // Blocks any second call to handleRate until the first fully completes
   const ratingInFlightRef = useRef(false)
 
@@ -606,29 +606,37 @@ function SessionContent() {
   /* ── Delete current card ── */
   function handleDeleteCard() {
     const card = queue[currentIndex]
-    if (!card) return
+    if (!card || animatingOut) return
     setShowOptionsMenu(false)
     setShowDeleteConfirm(false)
-    deleteCard(card.id)
-    removeCurrentCard()
-    useAppStore.getState().addToast({ type: 'info', message: 'Card deleted', duration: 2000 })
+    setAnimatingOut('delete')
+    setTimeout(() => {
+      setAnimatingOut(null)
+      deleteCard(card.id)
+      removeCurrentCard()
+      useAppStore.getState().addToast({ type: 'info', message: 'Card deleted', duration: 2000 })
+    }, 160)
   }
 
   /* ── D shortcut: instantly trash the current card, no confirm ── */
   function handleQuickDelete() {
     const card = queue[currentIndex]
-    if (!card) return
+    if (!card || animatingOut) return
     lastQuickDeletedRef.current = { card, index: currentIndex }
     if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
     quickDeleteTimerRef.current = setTimeout(() => { lastQuickDeletedRef.current = null }, 5000)
-    deleteCard(card.id)
-    removeCurrentCard()
-    useAppStore.getState().addToast({
-      type: 'info',
-      message: 'Card deleted — Undo?',
-      duration: 5000,
-      action: { label: 'Undo', onClick: () => handleUndoQuickDelete() },
-    })
+    setAnimatingOut('delete')
+    setTimeout(() => {
+      setAnimatingOut(null)
+      deleteCard(card.id)
+      removeCurrentCard()
+      useAppStore.getState().addToast({
+        type: 'info',
+        message: 'Card deleted — Undo?',
+        duration: 5000,
+        action: { label: 'Undo', onClick: () => handleUndoQuickDelete() },
+      })
+    }, 160)
   }
 
   /* ── Ctrl+Z/Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
@@ -1086,7 +1094,8 @@ function SessionContent() {
           <div
             className={cn(
               animatingOut === 'left' && 'animate-swipe-left',
-              animatingOut === 'right' && 'animate-swipe-right'
+              animatingOut === 'right' && 'animate-swipe-right',
+              animatingOut === 'delete' && 'animate-delete-out'
             )}
           >
             <div

@@ -120,11 +120,16 @@ button { cursor: pointer; }
   from { transform: translateX(0) scale(1) rotate(0deg); opacity: 1; }
   to   { transform: translateX(90px) scale(0.88) rotate(5deg); opacity: 0; }
 }
+@keyframes deleteOut {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(0.92); opacity: 0; }
+}
 
 .animate-fade-in    { animation: fadeIn    0.18s ease-out; }
 .animate-scale-in   { animation: scaleIn   0.14s ease-out; }
 .animate-swipe-left  { animation: swipeLeft  0.12s ease-in forwards; }
 .animate-swipe-right { animation: swipeRight 0.12s ease-in forwards; }
+.animate-delete-out  { animation: deleteOut  0.16s ease-in forwards; }
 
 /* ── Skeleton ────────────────────────────────────────────── */
 .skeleton {

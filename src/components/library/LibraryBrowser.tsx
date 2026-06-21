@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
@@ -199,6 +200,7 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: LibraryBrowserProps) {
+  const router = useRouter()
   const {
     folders, decks, getDeckCards, getDeckMastery, getDueCards, sessions,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
@@ -416,7 +418,11 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         <DeckView
           deckId={activeDeckId}
           onStudy={() => {
-            window.location.href = `/study/session?deck=${activeDeckId}&mode=deck-all`
+            // Client-side nav, not a hard reload — the library store is
+            // already hydrated in this SPA session. A full reload here would
+            // race the async IndexedDB rehydration in useSync and land on
+            // an empty queue ("All caught up!") before data loads.
+            router.push(`/study/session?deck=${activeDeckId}&mode=deck-all`)
           }}
         />
       </div>
@@ -850,6 +856,7 @@ function LibraryTreeTable({
   search: string
   onOpenDeck: (deckId: string) => void
 }) {
+  const router = useRouter()
   const {
     folders, decks, getDeckCards, getNewCards, getReviewsDue,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
@@ -1026,13 +1033,15 @@ function LibraryTreeTable({
           </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">{counts.total}</div>
           <div className="col-span-3 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <a
-              href={`/study/session?deck=${deck.id}`}
-              onClick={(e) => e.stopPropagation()}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                router.push(`/study/session?deck=${deck.id}`)
+              }}
               className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
             >
               <Play size={9} /> Study
-            </a>
+            </button>
             <ItemDropdown items={deckMenu(deck)} />
           </div>
         </div>
@@ -1209,6 +1218,7 @@ function DeckCardGrid({
   onClick: () => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
+  const router = useRouter()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
     data: { type: 'deck', deckId: deck.id },
@@ -1254,13 +1264,15 @@ function DeckCardGrid({
           <BookOpen size={16} className="text-[var(--accent)] shrink-0" />
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <a
-            href={`/study/session?deck=${deck.id}`}
-            onClick={(e) => e.stopPropagation()}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              router.push(`/study/session?deck=${deck.id}`)
+            }}
             className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
           >
             <Play size={9} /> Study
-          </a>
+          </button>
           <ItemDropdown items={menuItems} />
         </div>
       </div>
@@ -1285,6 +1297,7 @@ function DeckCardList({
   onClick: () => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
+  const router = useRouter()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
     data: { type: 'deck', deckId: deck.id },
@@ -1335,13 +1348,15 @@ function DeckCardList({
         {dueCount > 0 && <Badge variant="accent">{dueCount} due</Badge>}
       </div>
 
-      <a
-        href={`/study/session?deck=${deck.id}`}
-        onClick={(e) => e.stopPropagation()}
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          router.push(`/study/session?deck=${deck.id}`)
+        }}
         className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white flex-shrink-0"
       >
         <Play size={9} /> Study
-      </a>
+      </button>
       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <ItemDropdown items={menuItems} />
       </div>

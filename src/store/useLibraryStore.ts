@@ -658,21 +658,11 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData, decks, reviewLogs } = get()
-        const { algorithm, newCardsPerDay } = useSettingsStore.getState()
-        const todayStr = new Date().toISOString().slice(0, 10)
+        const { cards, fsrsData, srsData, decks } = get()
+        const { algorithm } = useSettingsStore.getState()
         const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
-
-        // Count new cards introduced today using wasNew-flagged logs (Issue 7).
-        // This correctly excludes lapsed graduated cards regardless of algorithm.
-        const studiedNewToday = pool.filter((c) =>
-          reviewLogs.some((l) => l.cardId === c.id && l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr)
-        ).length
-
-        const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
-        if (remaining === 0) return []
 
         const eligible = pool.filter((c) => {
           if (algorithm === 'fsrs') {
@@ -690,9 +680,7 @@ export const useLibraryStore = create<LibraryState>()(
         const sorted = [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
 
         // Secondary sort: round-robin across decks, weighted by overdue severity.
-        const interleaved = interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
-
-        return interleaved.slice(0, remaining)
+        return interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
       },
 
       getReviewsDue: (deckId) => {
