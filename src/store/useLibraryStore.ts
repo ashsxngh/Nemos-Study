@@ -148,7 +148,7 @@ interface LibraryState {
   getDeckMastery: (deckId: string) => number
 
   // Session
-  startSession: (deckId?: string) => ReviewSession
+  startSession: (deckId?: string, mode?: ReviewSession['mode']) => ReviewSession
   endSession: (sessionId: string, cardsReviewed: number, correct: number) => void
 }
 
@@ -798,7 +798,7 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       // ── Session ──────────────────────────────────────────────────────────────
-      startSession: (deckId) => {
+      startSession: (deckId, mode = 'standard') => {
         const session: ReviewSession = {
           id: generateId(),
           userId: USER_ID,
@@ -808,7 +808,7 @@ export const useLibraryStore = create<LibraryState>()(
           cardsCorrect: 0,
           cardsIncorrect: 0,
           averageResponseMs: 0,
-          mode: 'standard',
+          mode,
         }
         set((s) => ({ sessions: [...s.sessions, session] }))
         return session
@@ -840,10 +840,3 @@ export const useLibraryStore = create<LibraryState>()(
     }
   )
 )
-
-// TEMP DEBUG — remove once the production review_logs issue is confirmed fixed.
-// Lets us inspect live store state from the production console, where there's
-// no React DevTools access to the underlying zustand state otherwise.
-if (typeof window !== 'undefined') {
-  (window as unknown as { __nemosLibraryStore: typeof useLibraryStore }).__nemosLibraryStore = useLibraryStore
-}

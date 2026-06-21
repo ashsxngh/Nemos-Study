@@ -409,7 +409,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
       if (e.key === 'n' || e.key === 'N') { setAddingCard(true); return }
 
       if (e.key === 'r' || e.key === 'R') {
-        router.push(`/study/session?deck=${deckId}`)
+        router.push(`/study/session?deck=${deckId}&mode=deck-all`)
         return
       }
 
@@ -465,8 +465,14 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
               Add Card
             </Button>
             {onStudy && (
-              <Button variant="primary" size="sm" onClick={onStudy} disabled={cards.length === 0}>
-                Study {dueCount > 0 ? `(${dueCount} due)` : ''}
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={onStudy}
+                disabled={cards.length === 0}
+                title="Study every card in this deck, regardless of due date"
+              >
+                Study all ({cards.length})
               </Button>
             )}
           </div>

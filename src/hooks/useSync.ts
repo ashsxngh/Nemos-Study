@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
+import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useExamStore } from '@/store/useExamStore'
@@ -137,8 +137,8 @@ function mergeKeepLocal<T extends { id: string }>(
 async function pullFromSupabase(): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  const userId = await getCachedUserId(supabase)
+  if (!userId) return
 
   const [
     foldersRes,
@@ -152,16 +152,16 @@ async function pullFromSupabase(): Promise<void> {
     examsRes,
     settingsRes,
   ] = await Promise.all([
-    supabase.from('folders').select('*').eq('user_id', user.id),
-    supabase.from('decks').select('*').eq('user_id', user.id),
-    supabase.from('cards').select('*').eq('user_id', user.id),
-    supabase.from('srs_data').select('*').eq('user_id', user.id),
-    supabase.from('fsrs_data').select('*').eq('user_id', user.id),
-    supabase.from('review_sessions').select('*').eq('user_id', user.id),
-    supabase.from('review_logs').select('*').eq('user_id', user.id),
-    supabase.from('notes').select('*').eq('user_id', user.id),
-    supabase.from('exams').select('*').eq('user_id', user.id),
-    supabase.from('user_settings').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('folders').select('*').eq('user_id', userId),
+    supabase.from('decks').select('*').eq('user_id', userId),
+    supabase.from('cards').select('*').eq('user_id', userId),
+    supabase.from('srs_data').select('*').eq('user_id', userId),
+    supabase.from('fsrs_data').select('*').eq('user_id', userId),
+    supabase.from('review_sessions').select('*').eq('user_id', userId),
+    supabase.from('review_logs').select('*').eq('user_id', userId),
+    supabase.from('notes').select('*').eq('user_id', userId),
+    supabase.from('exams').select('*').eq('user_id', userId),
+    supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
   ])
 
   // On error, log clearly and skip that table — local state is left untouched.
@@ -309,6 +309,20 @@ async function pullFromSupabase(): Promise<void> {
     useSettingsStore.setState({ newCardsPerDay: s.newCardsPerDay })
   }
 
+  // Seed dirty-tracking with what the server already has, so the next push
+  // doesn't immediately re-upload rows we just pulled unchanged.
+  for (const row of srsRes.data ?? []) {
+    const s = toCamel(row) as SRSData
+    lastPushedSrs.set(s.cardId, JSON.stringify(s))
+  }
+  for (const row of fsrsRes.data ?? []) {
+    const f = toCamel(row) as FSRSState
+    lastPushedFsrs.set(f.cardId, JSON.stringify(f))
+  }
+  for (const row of logsRes.data ?? []) {
+    pushedLogIds.add((row as { id: string }).id)
+  }
+
   realtimePending.folders.clear()
   realtimePending.decks.clear()
   realtimePending.cards.clear()
@@ -317,6 +331,18 @@ async function pullFromSupabase(): Promise<void> {
 }
 
 // ─── Push helpers ─────────────────────────────────────────────────────────────
+
+// ─── Dirty tracking (push only rows that changed since the last successful
+// push) ────────────────────────────────────────────────────────────────────
+// fsrs_data/srs_data are keyed by cardId and get rewritten in full on every
+// review; review_logs is append-only. Tracking what we've already sent lets
+// repeated 400ms-debounced pushes skip rows that haven't changed, instead of
+// re-upserting the entire table every cycle (181+ fsrs_data rows, an
+// ever-growing review_logs array, etc.) — this was the dominant source of
+// excess Supabase request volume.
+const lastPushedFsrs = new Map<string, string>()
+const lastPushedSrs  = new Map<string, string>()
+const pushedLogIds   = new Set<string>()
 
 async function pushToSupabase(
   folders: Folder[],
@@ -333,25 +359,21 @@ async function pushToSupabase(
     return
   }
   const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError) {
-    console.error('[SYNC] pushToSupabase: auth error', authError)
-    throw new Error(`Auth error: ${authError.message}`)
-  }
-  if (!user) {
+  const userId = await getCachedUserId(supabase)
+  if (!userId) {
     console.warn('[SYNC] pushToSupabase: no authenticated user, skipping push')
     return
   }
 
   const upsertOpts = { onConflict: 'id' } as const
-  const withUserId = (r: unknown) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })
+  const withUserId = (r: unknown) => ({ ...(toSnake(r) as PlainObject), user_id: userId })
 
   // PostgREST sends .in() filters as URL query params — large arrays exceed
   // server URL-length limits (~8KB). Batch deletes to stay well under that.
   const BATCH = 100
 
   if (DEBUG_SYNC) {
-    console.log('[SYNC] pushToSupabase: upserting to Supabase as user', user.id, {
+    console.log('[SYNC] pushToSupabase: upserting to Supabase as user', userId, {
       folders: folders.length,
       decks: decks.length,
       cards: cards.length,
@@ -369,12 +391,26 @@ async function pushToSupabase(
   // (upsert + delete on the same row in the same push → PostgreSQL 40P01).
   const activeCardSet  = new Set(cards.map((c) => c.id))
   const cardDeleteSet  = new Set(pendingDeletes?.cards ?? [])
-  const srsToUpsert = Object.values(srsData).filter(
-    (s) => activeCardSet.has(s.cardId) && !cardDeleteSet.has(s.cardId)
-  )
-  const fsrsToUpsert = Object.values(fsrsData).filter(
-    (f) => activeCardSet.has(f.cardId) && !cardDeleteSet.has(f.cardId)
-  )
+
+  // Clean up tracking maps for deleted cards so they don't grow unbounded.
+  for (const id of cardDeleteSet) {
+    lastPushedSrs.delete(id)
+    lastPushedFsrs.delete(id)
+  }
+
+  // Dirty filter: only upsert a row if its serialized contents differ from
+  // what we last successfully pushed for that id.
+  const srsToUpsert = Object.values(srsData).filter((s) => {
+    if (!activeCardSet.has(s.cardId) || cardDeleteSet.has(s.cardId)) return false
+    const serialized = JSON.stringify(s)
+    return lastPushedSrs.get(s.cardId) !== serialized
+  })
+  const fsrsToUpsert = Object.values(fsrsData).filter((f) => {
+    if (!activeCardSet.has(f.cardId) || cardDeleteSet.has(f.cardId)) return false
+    const serialized = JSON.stringify(f)
+    return lastPushedFsrs.get(f.cardId) !== serialized
+  })
+  const reviewLogsToUpsert = reviewLogs.filter((l) => !pushedLogIds.has(l.id))
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
@@ -415,10 +451,15 @@ async function pushToSupabase(
     sessions.length
       ? upsertBatched('review_sessions', sessions.map(withUserId), upsertOpts)
       : null,
-    reviewLogs.length
-      ? upsertBatched('review_logs', reviewLogs.map(withUserId), upsertOpts)
+    reviewLogsToUpsert.length
+      ? upsertBatched('review_logs', reviewLogsToUpsert.map(withUserId), upsertOpts)
       : null,
   ])
+
+  // Record what we just pushed so the next cycle can skip unchanged rows.
+  for (const s of srsToUpsert)  lastPushedSrs.set(s.cardId, JSON.stringify(s))
+  for (const f of fsrsToUpsert) lastPushedFsrs.set(f.cardId, JSON.stringify(f))
+  for (const l of reviewLogsToUpsert) pushedLogIds.add(l.id)
 
   if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: all upserts succeeded')
 
@@ -471,9 +512,8 @@ async function pushToSupabase(
 async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[]): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError) throw new Error(`Auth error: ${authError.message}`)
-  if (!user) return
+  const userId = await getCachedUserId(supabase)
+  if (!userId) return
 
   const BATCH = 100
 
@@ -490,7 +530,7 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
 
   if (!notes.length) return
   const res = await supabase.from('notes').upsert(
-    notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: user.id })),
+    notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: userId })),
     { onConflict: 'id' },
   )
   if (res.error) {
@@ -502,9 +542,8 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
 async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[]): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError) throw new Error(`Auth error: ${authError.message}`)
-  if (!user) return
+  const userId = await getCachedUserId(supabase)
+  if (!userId) return
 
   const BATCH = 100
 
@@ -521,7 +560,7 @@ async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[])
 
   if (!exams.length) return
   const res = await supabase.from('exams').upsert(
-    exams.map((e) => ({ ...(toSnake(e) as PlainObject), user_id: user.id })),
+    exams.map((e) => ({ ...(toSnake(e) as PlainObject), user_id: userId })),
     { onConflict: 'id' },
   )
   if (res.error) {
@@ -533,12 +572,11 @@ async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[])
 async function pushSettingsToSupabase(newCardsPerDay: number): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError) throw new Error(`Auth error: ${authError.message}`)
-  if (!user) return
+  const userId = await getCachedUserId(supabase)
+  if (!userId) return
 
   const res = await supabase.from('user_settings').upsert(
-    { user_id: user.id, new_cards_per_day: newCardsPerDay, updated_at: new Date().toISOString() },
+    { user_id: userId, new_cards_per_day: newCardsPerDay, updated_at: new Date().toISOString() },
     { onConflict: 'user_id' },
   )
   if (res.error) {

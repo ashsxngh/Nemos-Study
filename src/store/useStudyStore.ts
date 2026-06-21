@@ -25,7 +25,7 @@ interface StudyState {
   showAnswer: boolean
   logs: Omit<ReviewLog, 'id' | 'sessionId'>[]
   startedAt: Date | null
-  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only'
+  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only' | 'deck-all'
   undoStack: UndoEntry[]
   redoStack: RedoEntry[]
 

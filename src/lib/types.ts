@@ -100,7 +100,7 @@ export interface ReviewSession {
   cardsCorrect: number
   cardsIncorrect: number
   averageResponseMs: number
-  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only'
+  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only' | 'deck-all'
 }
 
 export interface ReviewLog {

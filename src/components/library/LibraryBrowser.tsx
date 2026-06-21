@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { DeckView } from '@/components/library/DeckView'
+import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { FolderColor, Folder as FolderType, Deck as DeckType } from '@/lib/types'
@@ -40,7 +41,7 @@ const FOLDER_COLORS: Record<FolderColor, string> = {
 }
 
 type ViewMode = 'grid' | 'list' | 'table'
-type SortBy = 'alpha' | 'due' | 'mastery' | 'recent'
+type SortBy = 'alpha' | 'name-desc' | 'created' | 'modified' | 'cardCount' | 'due' | 'mastery' | 'recent'
 
 interface LibraryBrowserProps {
   onNewFolder?: () => void
@@ -179,16 +180,18 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
   if (!isDragging) return null
 
   return (
-    <div
-      ref={setNodeRef}
-      className={cn(
-        'mt-4 flex items-center justify-center rounded-[var(--radius)] border-2 border-dashed py-4 text-xs transition-colors',
-        isOver
-          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-          : 'border-[var(--border)] text-[var(--text-muted)]'
-      )}
-    >
-      Drop here to move to root
+    <div className="mt-4 flex justify-center">
+      <div
+        ref={setNodeRef}
+        className={cn(
+          'flex items-center justify-center rounded-[var(--radius)] border-2 border-dashed px-4 py-1.5 text-xs transition-colors w-fit',
+          isOver
+            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+            : 'border-[var(--border)] text-[var(--text-muted)]'
+        )}
+      >
+        Drop here to move to root
+      </div>
     </div>
   )
 }
@@ -206,9 +209,35 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const [folderStack, setFolderStack] = useState<(string | null)[]>([null])
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null)
   const [draggingDeckId, setDraggingDeckId] = useState<string | null>(null)
+  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>('alpha')
   const [activeTags, setActiveTags] = useState<string[]>([])
+  // Session-only filters — reset on reload, not persisted.
+  const [filterStarred, setFilterStarred] = useState(false)
+  const [filterHasDue, setFilterHasDue] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
+
+  // Bulk deck selection — select decks in the current folder and move them
+  // to another folder in one action.
+  const [selectedDeckIds, setSelectedDeckIds] = useState<Set<string>>(new Set())
+  const [showBulkMoveDecks, setShowBulkMoveDecks] = useState(false)
+  const [bulkMoveFolderTarget, setBulkMoveFolderTarget] = useState<string | null>(null)
+
+  const toggleDeckSelect = (id: string) => {
+    setSelectedDeckIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function handleBulkMoveDecks() {
+    selectedDeckIds.forEach((id) => updateDeck(id, { folderId: bulkMoveFolderTarget }))
+    setSelectedDeckIds(new Set())
+    setShowBulkMoveDecks(false)
+    setBulkMoveFolderTarget(null)
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -236,11 +265,13 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   }
   const breadcrumbs = buildPath(currentFolderId)
 
-  const visibleFolders = folders.filter((f) => {
-    const inCurrent = f.parentId === currentFolderId
-    const matchesSearch = !search || f.name.toLowerCase().includes(search.toLowerCase())
-    return inCurrent && matchesSearch
-  })
+  const visibleFolders = folders
+    .filter((f) => {
+      const inCurrent = f.parentId === currentFolderId
+      const matchesSearch = !search || f.name.toLowerCase().includes(search.toLowerCase())
+      return inCurrent && matchesSearch
+    })
+    .sort((a, b) => a.order - b.order)
 
   const visibleDecks = decks.filter((d) => {
     const inCurrent = d.folderId === currentFolderId
@@ -261,7 +292,13 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   // ── Sort + filter decks ───────────────────────────────────────────────────
   const sortedDecks = [...visibleDecks]
     .filter((d) => activeTags.length === 0 || activeTags.every((t) => d.tags.includes(t)))
+    .filter((d) => !filterStarred || d.isStarred)
+    .filter((d) => !filterHasDue || getDueCards(d.id).length > 0)
     .sort((a, b) => {
+      if (sortBy === 'name-desc') return b.name.localeCompare(a.name)
+      if (sortBy === 'created') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      if (sortBy === 'modified') return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      if (sortBy === 'cardCount') return getDeckCards(b.id).length - getDeckCards(a.id).length
       if (sortBy === 'due') return getDueCards(b.id).length - getDueCards(a.id).length
       if (sortBy === 'mastery') return getDeckMastery(a.id) - getDeckMastery(b.id)
       if (sortBy === 'recent') {
@@ -283,6 +320,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     setActiveDeckId(null)
     setSearch('')
     setActiveTags([])
+    setSelectedDeckIds(new Set())
     onFolderChange?.(folderId)
   }
 
@@ -292,6 +330,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     setActiveDeckId(null)
     setSearch('')
     setActiveTags([])
+    setSelectedDeckIds(new Set())
     onFolderChange?.(newStack[newStack.length - 1] ?? null)
   }
 
@@ -302,17 +341,49 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   }
 
   function handleDragStart(event: DragStartEvent) {
-    const deckId = (event.active.data.current as { deckId?: string } | undefined)?.deckId
-    setDraggingDeckId(deckId ?? null)
+    const data = event.active.data.current as { type?: string; deckId?: string; folderId?: string } | undefined
+    if (data?.type === 'folder-drag') {
+      setDraggingFolderId(data.folderId ?? null)
+    } else {
+      setDraggingDeckId(data?.deckId ?? null)
+    }
   }
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
+    const activeData = active.data.current as { type?: string; deckId?: string; folderId?: string } | undefined
     setDraggingDeckId(null)
+    setDraggingFolderId(null)
 
-    if (!active) return
+    if (!active || !activeData) return
 
-    const deckId = (active.data.current as { deckId?: string } | undefined)?.deckId
+    // Reordering a folder among its siblings — drag a folder onto another
+    // folder in the same parent to swap their positions.
+    if (activeData.type === 'folder-drag') {
+      const draggedId = activeData.folderId
+      if (!draggedId || !over || over.data.current?.type !== 'folder') return
+      const targetId = (over.data.current as { folderId: string }).folderId
+      if (targetId === draggedId) return
+
+      const dragged = folders.find((f) => f.id === draggedId)
+      const target = folders.find((f) => f.id === targetId)
+      if (!dragged || !target || dragged.parentId !== target.parentId) return
+
+      const siblings = folders
+        .filter((f) => f.parentId === dragged.parentId)
+        .sort((a, b) => a.order - b.order)
+      const oldIndex = siblings.findIndex((f) => f.id === draggedId)
+      const newIndex = siblings.findIndex((f) => f.id === targetId)
+      if (oldIndex === -1 || newIndex === -1) return
+
+      const reordered = [...siblings]
+      reordered.splice(oldIndex, 1)
+      reordered.splice(newIndex, 0, dragged)
+      reordered.forEach((f, index) => updateFolder(f.id, { order: index * 10 }))
+      return
+    }
+
+    const deckId = activeData.deckId
     if (!deckId) return
 
     if (over && over.data.current?.type === 'folder') {
@@ -327,6 +398,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   }
 
   const draggingDeck = draggingDeckId ? decks.find((d) => d.id === draggingDeckId) : null
+  const draggingFolder = draggingFolderId ? folders.find((f) => f.id === draggingFolderId) : null
 
   if (activeDeckId) {
     return (
@@ -344,7 +416,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         <DeckView
           deckId={activeDeckId}
           onStudy={() => {
-            window.location.href = `/study/session?deck=${activeDeckId}`
+            window.location.href = `/study/session?deck=${activeDeckId}&mode=deck-all`
           }}
         />
       </div>
@@ -443,11 +515,42 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               className="text-xs bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors outline-none cursor-pointer"
               aria-label="Sort decks"
             >
-              <option value="alpha">A – Z</option>
+              <option value="alpha">Name (A – Z)</option>
+              <option value="name-desc">Name (Z – A)</option>
+              <option value="created">Date created</option>
+              <option value="modified">Date modified</option>
+              <option value="cardCount">Card count</option>
               <option value="due">Most due</option>
               <option value="mastery">Least mastered</option>
               <option value="recent">Recently studied</option>
             </select>
+
+            {/* Filter toggles */}
+            <button
+              onClick={() => setFilterStarred((v) => !v)}
+              className={cn(
+                'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
+                filterStarred
+                  ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                  : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
+              )}
+              aria-pressed={filterStarred}
+            >
+              <Star size={11} className={filterStarred ? 'fill-current' : ''} />
+              Starred
+            </button>
+            <button
+              onClick={() => setFilterHasDue((v) => !v)}
+              className={cn(
+                'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
+                filterHasDue
+                  ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                  : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
+              )}
+              aria-pressed={filterHasDue}
+            >
+              Has due cards
+            </button>
 
             {/* Tag chips */}
             {allTags.length > 0 && (
@@ -584,9 +687,24 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         {/* Decks section */}
         {view !== 'table' && sortedDecks.length > 0 && (
           <section>
-            <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-3">
-              Decks
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+                Decks
+              </h3>
+              {selectedDeckIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-[var(--accent)]">
+                    {selectedDeckIds.size} selected
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={() => setShowBulkMoveDecks(true)}>
+                    Move to folder
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedDeckIds(new Set())}>
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
             <div
               className={cn(
                 view === 'grid'
@@ -632,6 +750,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     mastery={mastery}
                     onClick={() => openDeck(deck.id)}
                     menuItems={deckMenuItems}
+                    checked={selectedDeckIds.has(deck.id)}
+                    onToggleCheck={toggleDeckSelect}
                   />
                 ) : (
                   <DeckCardList
@@ -642,6 +762,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     mastery={mastery}
                     onClick={() => openDeck(deck.id)}
                     menuItems={deckMenuItems}
+                    checked={selectedDeckIds.has(deck.id)}
+                    onToggleCheck={toggleDeckSelect}
                   />
                 )
               })}
@@ -652,7 +774,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         {/* Empty filtered state — decks exist but filtered out */}
         {view !== 'table' && visibleDecks.length > 0 && sortedDecks.length === 0 && (
           <div className="flex flex-col items-center justify-center py-10 text-[var(--text-muted)] text-xs">
-            No decks match the selected tags.
+            No decks match the selected filters.
           </div>
         )}
 
@@ -668,6 +790,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               {draggingDeck.name}
             </p>
           </div>
+        ) : draggingFolder ? (
+          <div className="bg-[var(--bg-surface)] border-2 border-[var(--accent)] rounded-[var(--radius)] p-3 shadow-xl opacity-90 w-40">
+            <p className="text-xs font-medium text-[var(--text-primary)] truncate">
+              {draggingFolder.name}
+            </p>
+          </div>
         ) : null}
       </DragOverlay>
 
@@ -680,6 +808,27 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
           setConfirmDelete(null)
         }}
       />
+
+      {/* Bulk: move selected decks to a folder */}
+      <Dialog
+        open={showBulkMoveDecks}
+        onClose={() => setShowBulkMoveDecks(false)}
+        title={`Move ${selectedDeckIds.size} ${selectedDeckIds.size === 1 ? 'deck' : 'decks'}`}
+        size="sm"
+      >
+        <div className="p-4 space-y-3">
+          <FolderTreePicker
+            folders={folders}
+            value={bulkMoveFolderTarget}
+            onChange={setBulkMoveFolderTarget}
+            noFolderLabel="Library root"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowBulkMoveDecks(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={handleBulkMoveDecks}>Move</Button>
+          </div>
+        </div>
+      </Dialog>
     </DndContext>
   )
 }
@@ -941,14 +1090,24 @@ function FolderCardGrid({
   onClick: () => void
   menuItems: DropdownItem[]
 }) {
-  const { setNodeRef, isOver } = useDroppable({
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `folder-${folder.id}`,
     data: { type: 'folder', folderId: folder.id },
   })
+  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
+    id: `folder-drag-${folder.id}`,
+    data: { type: 'folder-drag', folderId: folder.id },
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setDropRef}
+      style={style}
       className={cn(
         'relative text-left bg-[var(--bg-surface)] border rounded-[var(--radius)] p-3.5 hover:bg-[var(--bg-hover)] transition-colors group cursor-pointer',
         isOver
@@ -958,7 +1117,19 @@ function FolderCardGrid({
       onClick={onClick}
     >
       <div className="flex items-start justify-between mb-3">
-        <Folder size={20} className={FOLDER_COLORS[folder.color]} />
+        <div className="flex items-center gap-1.5">
+          <button
+            ref={setDragRef}
+            {...listeners}
+            {...attributes}
+            className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 rounded shrink-0"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Drag to reorder folder"
+          >
+            <GripVertical size={13} />
+          </button>
+          <Folder size={20} className={FOLDER_COLORS[folder.color]} />
+        </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {folder.isStarred && <Star size={12} className="text-yellow-400 fill-yellow-400" />}
           <ItemDropdown items={menuItems} />
@@ -983,14 +1154,24 @@ function FolderCardList({
   onClick: () => void
   menuItems: DropdownItem[]
 }) {
-  const { setNodeRef, isOver } = useDroppable({
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `folder-${folder.id}`,
     data: { type: 'folder', folderId: folder.id },
   })
+  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
+    id: `folder-drag-${folder.id}`,
+    data: { type: 'folder-drag', folderId: folder.id },
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setDropRef}
+      style={style}
       className={cn(
         'w-full flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] transition-colors group text-left cursor-pointer',
         isOver
@@ -999,6 +1180,16 @@ function FolderCardList({
       )}
       onClick={onClick}
     >
+      <button
+        ref={setDragRef}
+        {...listeners}
+        {...attributes}
+        className="cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+        onClick={(e) => e.stopPropagation()}
+        aria-label="Drag to reorder folder"
+      >
+        <GripVertical size={13} />
+      </button>
       <Folder size={15} className={FOLDER_COLORS[folder.color]} />
       <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{folder.name}</span>
       <span className="text-xs text-[var(--text-muted)]">{cardCount} cards</span>
@@ -1012,10 +1203,11 @@ function FolderCardList({
 }
 
 function DeckCardGrid({
-  deck, cardCount, dueCount, mastery, onClick, menuItems,
+  deck, cardCount, dueCount, mastery, onClick, menuItems, checked, onToggleCheck,
 }: {
   deck: DeckType; cardCount: number; dueCount: number; mastery: number
   onClick: () => void; menuItems: DropdownItem[]
+  checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
@@ -1036,6 +1228,19 @@ function DeckCardGrid({
       {/* Top row: drag handle + icon + actions */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5">
+          {onToggleCheck && (
+            <input
+              type="checkbox"
+              checked={!!checked}
+              onClick={(e) => e.stopPropagation()}
+              onChange={() => onToggleCheck(deck.id)}
+              className={cn(
+                'w-3.5 h-3.5 accent-[var(--accent)] transition-opacity',
+                checked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              )}
+              aria-label="Select deck"
+            />
+          )}
           {/* Drag handle — left of icon, not overlapping */}
           <button
             {...listeners}
@@ -1074,10 +1279,11 @@ function DeckCardGrid({
 }
 
 function DeckCardList({
-  deck, cardCount, dueCount, mastery, onClick, menuItems,
+  deck, cardCount, dueCount, mastery, onClick, menuItems, checked, onToggleCheck,
 }: {
   deck: DeckType; cardCount: number; dueCount: number; mastery: number
   onClick: () => void; menuItems: DropdownItem[]
+  checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `deck-${deck.id}`,
@@ -1095,6 +1301,20 @@ function DeckCardList({
       style={style}
       className="w-full flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] hover:bg-[var(--bg-hover)] transition-colors text-left group"
     >
+      {onToggleCheck && (
+        <input
+          type="checkbox"
+          checked={!!checked}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleCheck(deck.id)}
+          className={cn(
+            'w-3.5 h-3.5 accent-[var(--accent)] flex-shrink-0 transition-opacity',
+            checked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+          aria-label="Select deck"
+        />
+      )}
+
       {/* Drag handle */}
       <button
         {...listeners}

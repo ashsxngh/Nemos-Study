@@ -61,26 +61,24 @@ function FolderTreeRow({
             : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
         )}
       >
-        {/* Expand/collapse toggle — only shown when folder has children */}
-        <button
-          type="button"
-          onClick={() => hasChildren && onToggle(node.folder.id)}
-          className={cn(
-            'flex items-center justify-center w-4 h-6 shrink-0 transition-colors',
-            hasChildren ? 'hover:text-[var(--text-primary)] cursor-pointer' : 'cursor-default opacity-0 pointer-events-none'
+        {/* Expand/collapse indicator — purely visual; the whole row below
+            handles both selecting and toggling */}
+        <span className="flex items-center justify-center w-4 h-6 shrink-0 text-current">
+          {hasChildren && (
+            <ChevronRight
+              size={11}
+              className={cn('transition-transform duration-150', isOpen && 'rotate-90')}
+            />
           )}
-          tabIndex={hasChildren ? 0 : -1}
-        >
-          <ChevronRight
-            size={11}
-            className={cn('transition-transform duration-150', isOpen && 'rotate-90')}
-          />
-        </button>
+        </span>
 
-        {/* Folder name — selectable */}
+        {/* Folder name — selects this folder and expands/collapses its children */}
         <button
           type="button"
-          onClick={() => onSelect(node.folder.id)}
+          onClick={() => {
+            onSelect(node.folder.id)
+            if (hasChildren) onToggle(node.folder.id)
+          }}
           className={cn(
             'flex items-center gap-1.5 flex-1 min-w-0 py-1.5 text-left',
             isSelected ? 'font-medium' : ''

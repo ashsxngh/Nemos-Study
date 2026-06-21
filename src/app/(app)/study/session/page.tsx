@@ -81,20 +81,6 @@ const RATING_COLORS: Record<number, string> = {
   1: '#9b9ba4', 2: '#fbbf24', 3: '#818cf8', 4: '#4ade80',
 }
 
-const INTENTION_OPTIONS: { value: 'quick' | 'exam' | 'deep' | 'explore'; label: string }[] = [
-  { value: 'quick', label: 'Quick review' },
-  { value: 'exam', label: 'Exam prep' },
-  { value: 'deep', label: 'Deep focus' },
-  { value: 'explore', label: 'Just exploring' },
-]
-
-const INTENTION_COMPLETE_COPY: Record<'quick' | 'exam' | 'deep' | 'explore', string> = {
-  quick: 'Quick session done!',
-  exam: 'Solid exam prep!',
-  deep: 'Great focus session!',
-  explore: 'Hope that was useful!',
-}
-
 function SessionContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -148,10 +134,25 @@ function SessionContent() {
   // this study session — separate from useStudyStore's local sessionId.
   const librarySessionIdRef = useRef<string | null>(null)
 
+  /* Resolve mode */
+  const resolvedMode = (() => {
+    if (modeParam === 'cram') return 'cram' as const
+    if (modeParam === 'random') return 'random' as const
+    if (modeParam === 'failed') return 'failed-only' as const
+    if (modeParam === 'new') return 'new-only' as const
+    if (modeParam === 'reviews') return 'reviews-only' as const
+    if (modeParam === 'weakest') return 'cram' as const
+    // Manual "Study" from a specific deck — every card in that deck, ignoring
+    // due dates and the daily new-card limit. Distinct from 'standard' (the
+    // due-date-driven inbox session) so stats/wasNew tracking stay separate.
+    if (modeParam === 'deck-all') return 'deck-all' as const
+    return 'standard' as const
+  })()
+
   const startLibrarySession = useCallback(() => {
-    const session = useLibraryStore.getState().startSession(deckId)
+    const session = useLibraryStore.getState().startSession(deckId, resolvedMode)
     librarySessionIdRef.current = session.id
-  }, [deckId])
+  }, [deckId, resolvedMode])
 
   const endLibrarySession = useCallback(() => {
     const sessionId = librarySessionIdRef.current
@@ -175,11 +176,9 @@ function SessionContent() {
   // Cards the user has dismissed the "struggle" prompt for, this session only.
   const [dismissedStruggleIds, setDismissedStruggleIds] = useState<Set<string>>(new Set())
 
-  // Session intention — ephemeral, messaging-only (never affects SRS scheduling).
-  type SessionIntention = 'quick' | 'exam' | 'deep' | 'explore' | null
-  const [intention, setIntention] = useState<SessionIntention>(null)
-  const [showIntentionPrompt, setShowIntentionPrompt] = useState(false)
-  const intentionAskedRef = useRef(false)
+  // Tracks whether the burnout check has run yet this session — it should
+  // only fire once, at session start.
+  const burnoutCheckedRef = useRef(false)
 
   // Burnout detection — gentle one-time nudge when rolling 3-day retention
   // drops well below the user's own historical baseline. Shown at session
@@ -212,17 +211,6 @@ function SessionContent() {
   const optionsMenuRef = useRef<HTMLDivElement>(null)
   const optionsButtonRef = useRef<HTMLButtonElement>(null)
 
-  /* Resolve mode */
-  const resolvedMode = (() => {
-    if (modeParam === 'cram') return 'cram' as const
-    if (modeParam === 'random') return 'random' as const
-    if (modeParam === 'failed') return 'failed-only' as const
-    if (modeParam === 'new') return 'new-only' as const
-    if (modeParam === 'reviews') return 'reviews-only' as const
-    if (modeParam === 'weakest') return 'cram' as const
-    return 'standard' as const
-  })()
-
   /* Resolve deck name */
   const deckName = examId
     ? (exams.find((e) => e.id === examId)?.name ?? 'Exam Study')
@@ -247,6 +235,9 @@ function SessionContent() {
     ).filter((c) => !c.isArchived)
 
     if (resolvedMode === 'cram') return [...pool]
+    // Manual deck Study button — all cards in the deck, no due-date filter,
+    // no daily new-card cap, no sessionLength truncation.
+    if (resolvedMode === 'deck-all') return [...pool]
     if (resolvedMode === 'random') return [...pool].sort(() => Math.random() - 0.5)
     if (resolvedMode === 'failed-only') {
       return pool.filter((c) => {
@@ -263,12 +254,10 @@ function SessionContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckId, examId, resolvedMode, sessionLength])
 
-  // Returns true if a nudge was triggered (caller should defer the intention
-  // prompt until the nudge dialog is dismissed).
-  const checkBurnoutAndMaybeNudge = useCallback((): boolean => {
+  const checkBurnoutAndMaybeNudge = useCallback((): void => {
     const { lastBurnoutNudgeAt, setLastBurnoutNudgeAt } = useAppStore.getState()
     if (lastBurnoutNudgeAt && Date.now() - new Date(lastBurnoutNudgeAt).getTime() < 7 * 86400000) {
-      return false
+      return
     }
     const { reviewLogs: logs } = useLibraryStore.getState()
     const now = Date.now()
@@ -276,15 +265,13 @@ function SessionContent() {
     const recent = real.filter((l) => now - new Date(l.reviewedAt).getTime() <= 3 * 86400000)
     const baseline = real.filter((l) => now - new Date(l.reviewedAt).getTime() > 3 * 86400000)
     // Require enough data in both windows — otherwise the comparison is noise.
-    if (recent.length < 5 || baseline.length < 10) return false
+    if (recent.length < 5 || baseline.length < 10) return
     const recentRetention = (recent.filter((l) => l.rating >= 3).length / recent.length) * 100
     const baselineRetention = (baseline.filter((l) => l.rating >= 3).length / baseline.length) * 100
     if (baselineRetention - recentRetention > 15) {
       setShowBurnoutNudge(true)
       setLastBurnoutNudgeAt(new Date().toISOString())
-      return true
     }
-    return false
   }, [])
 
   /* Starts a brand-new session — used on first load (no recovery offered/
@@ -307,10 +294,9 @@ function SessionContent() {
     setForgottenReviewCount(0)
     setNewCardReviewedCount(0)
     setNewCardCorrectCount(0)
-    if (!intentionAskedRef.current && sessionCards.length > 0) {
-      intentionAskedRef.current = true
-      const nudged = checkBurnoutAndMaybeNudge()
-      if (!nudged) setShowIntentionPrompt(true)
+    if (!burnoutCheckedRef.current && sessionCards.length > 0) {
+      burnoutCheckedRef.current = true
+      checkBurnoutAndMaybeNudge()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildQueue, resolvedMode, algorithm])
@@ -691,7 +677,7 @@ function SessionContent() {
       // Block all session shortcuts while any dialog is open — otherwise keys
       // typed inside the dialog (on non-input elements) fall through and
       // rate/flip/undo the card sitting behind it.
-      if (showEditDialog || showHistoryDialog || showDeleteConfirm || showIntentionPrompt || showBurnoutNudge) return
+      if (showEditDialog || showHistoryDialog || showDeleteConfirm || showBurnoutNudge) return
 
       // Ctrl/Cmd+Z — if a "D" quick-delete toast is still active (within its
       // 5s undo window), undo that delete first; otherwise undo the last
@@ -764,7 +750,7 @@ function SessionContent() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm, showIntentionPrompt, showBurnoutNudge])
+  }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm, showBurnoutNudge])
 
   const isComplete = loaded && queue.length > 0 && currentIndex >= queue.length
   const isLoading = !loaded
@@ -834,7 +820,7 @@ function SessionContent() {
               <div className="text-3xl mb-3">🎉</div>
               <h1 className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Session Complete</h1>
               <p className="text-sm" style={{ color: '#6b6b72' }}>
-                {intention ? INTENTION_COMPLETE_COPY[intention] : 'Great work!'}
+                Great work!
               </p>
             </div>
             <div className="border-t grid grid-cols-2" style={{ borderColor: 'var(--border)' }}>
@@ -1449,7 +1435,7 @@ function SessionContent() {
       {/* ── Burnout nudge — gentle, one-time, shown only at session start ── */}
       <Dialog
         open={showBurnoutNudge}
-        onClose={() => { setShowBurnoutNudge(false); setShowIntentionPrompt(true) }}
+        onClose={() => setShowBurnoutNudge(false)}
         title="Just so you know"
         size="sm"
       >
@@ -1459,41 +1445,13 @@ function SessionContent() {
           </p>
           <div className="flex justify-end">
             <button
-              onClick={() => { setShowBurnoutNudge(false); setShowIntentionPrompt(true) }}
+              onClick={() => setShowBurnoutNudge(false)}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
               style={{ background: 'var(--accent)', color: '#fff' }}
             >
               Got it
             </button>
           </div>
-        </div>
-      </Dialog>
-
-      {/* ── Session intention prompt — optional, ephemeral, messaging-only ── */}
-      <Dialog
-        open={showIntentionPrompt}
-        onClose={() => setShowIntentionPrompt(false)}
-        title="What are you studying for?"
-        size="sm"
-      >
-        <div className="p-4 space-y-2">
-          {INTENTION_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => { setIntention(opt.value); setShowIntentionPrompt(false) }}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors hover:brightness-110"
-              style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', color: '#e8e8ea' }}
-            >
-              {opt.label}
-            </button>
-          ))}
-          <button
-            onClick={() => setShowIntentionPrompt(false)}
-            className="w-full text-center px-3 py-2 text-xs mt-1"
-            style={{ color: '#6b6b72' }}
-          >
-            Skip
-          </button>
         </div>
       </Dialog>
 

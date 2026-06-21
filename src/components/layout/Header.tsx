@@ -29,8 +29,8 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
   useEffect(() => {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUserEmail(user?.email ?? null)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserEmail(session?.user?.email ?? null)
     })
   }, [])
 
