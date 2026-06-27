@@ -88,6 +88,7 @@ function SessionContent() {
   const deckId = searchParams.get('deck') ?? undefined
   const examId = searchParams.get('examId') ?? undefined
   const modeParam = searchParams.get('mode')
+  const deckNewCount = (() => { const v = parseInt(searchParams.get('newCount') ?? ''); return isNaN(v) ? null : v })()
 
   const {
     sessionId,
@@ -275,14 +276,30 @@ function SessionContent() {
     if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
     // Deck Study popup modes — deck-scoped, ignore the inbox entirely.
     if (resolvedMode === 'deck-reviews') return deckId ? getDeckReviewsAll(deckId) : []
-    if (resolvedMode === 'deck-new') return deckId ? getDeckNewAll(deckId) : []
-    if (resolvedMode === 'deck-both') return deckId ? getDeckBoth(deckId) : []
+    if (resolvedMode === 'deck-new') {
+      if (!deckId) return []
+      const all = getDeckNewAll(deckId)
+      return deckNewCount != null ? all.slice(0, deckNewCount) : all
+    }
+    if (resolvedMode === 'deck-both') {
+      if (!deckId) return []
+      const reviews = getDeckReviewsAll(deckId)
+      const allNew = getDeckNewAll(deckId)
+      const newCards = deckNewCount != null ? allNew.slice(0, deckNewCount) : allNew
+      const result: Card[] = []
+      const max = Math.max(reviews.length, newCards.length)
+      for (let i = 0; i < max; i++) {
+        if (i < reviews.length) result.push(reviews[i])
+        if (i < newCards.length) result.push(newCards[i])
+      }
+      return result
+    }
     // Standard/inbox session — cap to the user's session length. The queue is
     // already ordered (due date + deck interleave + warmup), so truncating
     // here just drops the lowest-priority tail.
     return getDueCards(deckId).slice(0, sessionLength)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, examId, resolvedMode, sessionLength])
+  }, [deckId, examId, resolvedMode, sessionLength, deckNewCount])
 
   const checkBurnoutAndMaybeNudge = useCallback((): void => {
     const { lastBurnoutNudgeAt, setLastBurnoutNudgeAt } = useAppStore.getState()
