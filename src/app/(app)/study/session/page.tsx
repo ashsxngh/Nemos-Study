@@ -210,6 +210,11 @@ function SessionContent() {
   const [newCardReviewedCount, setNewCardReviewedCount] = useState(0)
   const [newCardCorrectCount, setNewCardCorrectCount] = useState(0)
 
+  // Missed (rating 1, non-new) counter for badge and progress segment
+  const [missedReviewCount, setMissedReviewCount] = useState(0)
+  // Two-stage session end: 'first' = first pass in progress/done, 'retry' = reviewing missed cards
+  const [sessionPhase, setSessionPhase] = useState<'first' | 'retry'>('first')
+
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | 'delete' | null>(null)
   // Blocks any second call to handleRate until the first fully completes
@@ -319,6 +324,8 @@ function SessionContent() {
     setForgottenReviewCount(0)
     setNewCardReviewedCount(0)
     setNewCardCorrectCount(0)
+    setMissedReviewCount(0)
+    setSessionPhase('first')
     if (!burnoutCheckedRef.current && sessionCards.length > 0) {
       burnoutCheckedRef.current = true
       checkBurnoutAndMaybeNudge()
@@ -353,6 +360,8 @@ function SessionContent() {
     setForgottenReviewCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating < 3).length)
     setNewCardReviewedCount(pendingRecovery.logs.filter((l) => l.wasNew).length)
     setNewCardCorrectCount(pendingRecovery.logs.filter((l) => l.wasNew && l.rating >= 3).length)
+    setMissedReviewCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating === 1).length)
+    setSessionPhase('first')
     setPendingRecovery(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRecovery, algorithm])
@@ -552,6 +561,7 @@ function SessionContent() {
         setRememberedCount((c) => c + 1)
       } else {
         setForgottenReviewCount((c) => c + 1)
+        if (rating === 1) setMissedReviewCount((c) => c + 1)
       }
 
       if (prevSRS) pushUndo(card.id, prevSRS, logId, isNew, rating, prevFSRS)
@@ -585,6 +595,7 @@ function SessionContent() {
       setRememberedCount((c) => Math.max(0, c - 1))
     } else {
       setForgottenReviewCount((c) => Math.max(0, c - 1))
+      if (entry.rating === 1) setMissedReviewCount((c) => Math.max(0, c - 1))
     }
     useAppStore.getState().addToast({ type: 'info', message: 'Undid last review', duration: 2000 })
   }, [popUndo, decrementIndex])
@@ -775,15 +786,27 @@ function SessionContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm, showBurnoutNudge])
 
-  const isComplete = loaded && queue.length > 0 && currentIndex >= queue.length
+  const isFirstPassDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'first'
+  const isSessionDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'retry'
+  const isComplete = isFirstPassDone || isSessionDone
   const isLoading = !loaded
   const hasNoCards = loaded && queue.length === 0
 
-  // Close out the persisted ReviewSession record as soon as the session finishes
+  // Missed cards from first pass (for intermediate screen and retry queue)
+  const firstPassMissedCards: Card[] = isFirstPassDone ? (() => {
+    const lastRatings = new Map<string, number>()
+    for (const log of logs) lastRatings.set(log.cardId, log.rating)
+    const missedIds = new Set([...lastRatings.entries()].filter(([, r]) => r === 1).map(([id]) => id))
+    return queue.filter((c) => missedIds.has(c.id))
+  })() : []
+  const showIntermediate = isFirstPassDone && firstPassMissedCards.length > 0
+  const showCompletion = isSessionDone || (isFirstPassDone && firstPassMissedCards.length === 0)
+
+  // Close out the persisted ReviewSession record only on true completion
   useEffect(() => {
-    if (isComplete) endLibrarySession()
+    if (showCompletion) endLibrarySession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isComplete])
+  }, [showCompletion])
 
   /* ════════════════════════════════════════════════════════════
      SESSION RECOVERY PROMPT — shown before anything else loads
@@ -820,11 +843,10 @@ function SessionContent() {
     )
   }
 
-  // Progress bar: green = remembered, red = forgotten reviews
   const total = Math.max(initialQueueLength, 1)
   const rawGreenPct = (rememberedCount / total) * 100
   const greenPct = Math.min(100, rawGreenPct)
-  const redPct = Math.min(100 - greenPct, (forgottenReviewCount / total) * 100)
+  const missPct = Math.min(100 - greenPct, (missedReviewCount / total) * 100)
 
   // Mid-exit — render a loading skeleton instead of letting the now-empty
   // queue fall through to the "All caught up!" empty-inbox screen below.
@@ -840,9 +862,53 @@ function SessionContent() {
   }
 
   /* ════════════════════════════════════════════════════════════
+     INTERMEDIATE SCREEN — first pass done, missed cards remain
+  ════════════════════════════════════════════════════════════ */
+  if (showIntermediate) {
+    const reviewedNonNew = rememberedCount + forgottenReviewCount
+    const rememberedPct = reviewedNonNew > 0 ? Math.round((rememberedCount / reviewedNonNew) * 100) : 0
+    const missedN = firstPassMissedCards.length
+
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
+        <div className="w-full max-w-sm animate-fade-in space-y-4">
+          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="p-7 text-center space-y-2">
+              <p className="text-xl font-semibold" style={{ color: '#e8e8ea' }}>
+                You remembered {rememberedPct}% of cards.
+              </p>
+              <p className="text-sm" style={{ color: '#6b6b72' }}>
+                Review the cards you missed again.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              reorderQueue(firstPassMissedCards, 0)
+              setSessionPhase('retry')
+              setMissedReviewCount(0)
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            Review missed cards ({missedN})
+          </button>
+          <button
+            onClick={() => setSessionPhase('retry')}
+            className="w-full text-center text-sm py-1"
+            style={{ color: '#6b6b72', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            Skip and finish
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  /* ════════════════════════════════════════════════════════════
      SESSION COMPLETE
   ════════════════════════════════════════════════════════════ */
-  if (isComplete) {
+  if (showCompletion) {
     const totalLogged = logs.length - newCardReviewedCount
     const correct = logs.filter((l) => l.rating >= 3).length - newCardCorrectCount
     const accuracy = totalLogged > 0 ? Math.round((correct / totalLogged) * 100) : 0
@@ -899,6 +965,8 @@ function SessionContent() {
                 setForgottenReviewCount(0)
                 setNewCardReviewedCount(0)
                 setNewCardCorrectCount(0)
+                setMissedReviewCount(0)
+                setSessionPhase('first')
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
               style={{ background: 'var(--accent)', color: '#fff' }}
@@ -978,7 +1046,7 @@ function SessionContent() {
           />
           <div
             className="h-full transition-all duration-300"
-            style={{ width: `${redPct}%`, background: '#6b6b8a' }}
+            style={{ width: `${missPct}%`, background: '#7a3535' }}
           />
         </div>
       )}
@@ -1011,6 +1079,16 @@ function SessionContent() {
         )}
 
         <div className="flex-1" />
+
+        {/* Mistake counter badge — hidden until first miss */}
+        {missedReviewCount > 0 && (
+          <span
+            className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded"
+            style={{ background: '#1c1212', color: '#b87070', border: '1px solid #3a1e1e' }}
+          >
+            ✕ {missedReviewCount}
+          </span>
+        )}
 
         {/* Daily progress */}
         <div

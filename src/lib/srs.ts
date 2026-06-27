@@ -34,6 +34,40 @@ export const DEFAULT_FSRS_PARAMS: FSRSParams = {
   requestRetention: 0.9,
 }
 
+// ── Interval fuzz ─────────────────────────────────────────────────────────────
+// Mirrors Anki's fuzz ranges: intervals < 2.5 days are not fuzzed; longer
+// intervals get ±1 day plus a range-proportional percentage. The card ID is
+// used as a deterministic seed so every card in the same batch spreads out
+// without the fuzz changing between re-renders.
+
+function fuzzDelta(interval: number): number {
+  if (interval < 2.5) return 0
+  const ranges = [
+    { start: 2.5, end: 7.0, factor: 0.15 },
+    { start: 7.0, end: 20.0, factor: 0.10 },
+    { start: 20.0, end: Infinity, factor: 0.05 },
+  ]
+  let delta = 1.0
+  for (const { start, end, factor } of ranges) {
+    if (interval <= start) break
+    delta += factor * (Math.min(interval, end) - start)
+  }
+  return delta
+}
+
+export function withFuzz(interval: number, cardId: string): number {
+  if (interval < 2.5) return Math.round(interval)
+  const delta = fuzzDelta(interval)
+  const lower = Math.max(1, Math.round(interval - delta))
+  const upper = Math.round(interval + delta)
+  let seed = 0
+  for (let i = 0; i < cardId.length; i++) {
+    seed = (seed + cardId.charCodeAt(i)) % 997
+  }
+  const range = Math.max(1, upper - lower + 1)
+  return lower + (seed % range)
+}
+
 export function fsrsInitCard(cardId: string, userId: string): FSRSState {
   return {
     cardId,
@@ -63,6 +97,13 @@ export function fsrsSchedule(
     ? (now.getTime() - new Date(state.lastReviewedAt).getTime()) / (1000 * 60 * 60 * 24)
     : 0
 
+  // Days late relative to scheduled interval (for Good-review bonus)
+  const scheduledInterval =
+    state.lastReviewedAt && state.dueDate
+      ? (new Date(state.dueDate).getTime() - new Date(state.lastReviewedAt).getTime()) / 86400000
+      : 0
+  const daysLate = Math.max(0, t - scheduledInterval)
+
   // Current retrievability
   const R =
     state.stability > 0 && state.lastReviewedAt
@@ -87,8 +128,11 @@ export function fsrsSchedule(
     newRepetitions = 1
     newState = grade === 1 ? 'relearning' : 'learning'
   } else {
-    // Update difficulty: D(D, G) = D - w[6] * (G - 3), clamped to [1,10]
-    newDifficulty = state.difficulty - w[6] * (grade - 3)
+    // Update difficulty with FSRS-5 mean reversion:
+    // D_temp = D - w[6]*(G-3);  D' = w[5]*D0(G=3) + (1 - w[5])*D_temp
+    const d0Good = w[4] - Math.exp(w[5] * (3 - 1)) + 1
+    const dTemp = state.difficulty - w[6] * (grade - 3)
+    newDifficulty = w[5] * d0Good + (1 - w[5]) * dTemp
     newDifficulty = Math.min(10, Math.max(1, newDifficulty))
 
     if (grade === 1) {
@@ -125,10 +169,15 @@ export function fsrsSchedule(
 
   // Interval in days: ceil(9 * S * (1/r - 1)) where r = targetRetention
   const r = params.targetRetention
-  const interval = Math.min(
+  let interval = Math.min(
     params.maximumInterval,
     Math.max(1, Math.ceil(9 * newStability * (1 / r - 1))),
   )
+  // Days-late bonus for Good reviews on established cards
+  if (grade === 3 && state.state !== 'new') {
+    interval = Math.min(params.maximumInterval, interval + Math.floor(daysLate / 2))
+  }
+  interval = withFuzz(interval, state.cardId)
 
   const dueDate = new Date(now)
   dueDate.setDate(dueDate.getDate() + interval)
@@ -269,13 +318,12 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
 
   const hardMultiplier = settings?.hardInterval ?? 1.2
   const easyBonusAddition = settings?.easyBonus ?? 0.15
-  const lapseIntervalPct = settings?.lapseInterval ?? 10
 
   // rating: 1=Again, 2=Hard, 3=Good, 4=Easy
   if (rating === 1) {
-    // Again — reset interval but keep repetitions so lapsed cards never re-enter new queue
+    // Again — lapsed card resets to 1 day (stability has effectively reset)
     lapses++
-    interval = Math.max(1, Math.round(srs.interval * lapseIntervalPct / 100))
+    interval = 1
     easeFactor = Math.max(MIN_EASE, easeFactor - 0.2)
   } else if (rating === 2) {
     // Hard — small advance
@@ -289,7 +337,13 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
     else if (repetitions === 1) interval = MINUTE * 5
     else if (repetitions === 2) interval = 1
     else if (repetitions === 3) interval = 3
-    else interval = Math.round(interval * easeFactor)
+    else {
+      const daysSinceReview = srs.lastReviewedAt
+        ? (now.getTime() - new Date(srs.lastReviewedAt).getTime()) / 86400000
+        : interval
+      const daysLate = Math.max(0, daysSinceReview - interval)
+      interval = Math.round((interval + daysLate / 2) * easeFactor)
+    }
     repetitions++
   } else {
     // Easy — boost
@@ -299,6 +353,9 @@ export function scheduleCard(srs: SRSData, rating: Difficulty, settings?: SRSSet
     easeFactor = easeFactor + easyBonusAddition
     repetitions++
   }
+
+  // Apply fuzz to day-scale intervals; minute-scale steps (<1 day) are not fuzzed.
+  if (interval >= 1) interval = withFuzz(interval, srs.cardId)
 
   // Add via milliseconds rather than setDate() so fractional-day intervals
   // (the minute-scale early learning steps) land at the correct time.
@@ -349,7 +406,8 @@ export function predictRetention(srs: SRSData): number {
   const daysSinceReview =
     (Date.now() - new Date(srs.lastReviewedAt).getTime()) / (1000 * 60 * 60 * 24)
   const stability = srs.interval * srs.easeFactor
-  return Math.round(Math.exp((-daysSinceReview / stability) * Math.LN2) * 100)
+  if (stability <= 0) return 0
+  return Math.round(Math.pow(1 + daysSinceReview / (9 * stability), -1) * 100)
 }
 
 export function sortByPriority(cards: SRSData[]): SRSData[] {

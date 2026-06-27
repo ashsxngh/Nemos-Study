@@ -69,15 +69,6 @@ function toSnake(obj: unknown): unknown {
   return obj
 }
 
-// ─── Realtime-pending tracker (for insert echo dedup only) ───────────────────
-
-const realtimePending = {
-  folders:    new Set<string>(),
-  decks:      new Set<string>(),
-  cards:      new Set<string>(),
-  reviewLogs: new Set<string>(),
-  notes:      new Set<string>(),
-}
 
 // IDs that existed in localStorage when this session loaded (snapshotted once,
 // before the first pull). An item that is local-only AND in this set was deleted
@@ -424,15 +415,10 @@ async function runPull(
     const f = toCamel(row) as FSRSState
     lastPushedFsrs.set(f.cardId, JSON.stringify(f))
   }
+  if (!incremental) pushedLogIds.clear()
   for (const row of logsRes.data ?? []) {
     pushedLogIds.add((row as { id: string }).id)
   }
-
-  realtimePending.folders.clear()
-  realtimePending.decks.clear()
-  realtimePending.cards.clear()
-  realtimePending.reviewLogs.clear()
-  realtimePending.notes.clear()
 
   // Advance the watermark only after every table above has been applied
   // successfully — using the timestamp captured before the fetches ran avoids
@@ -883,6 +869,7 @@ export function useSync(): SyncStatus {
       const fSet = new Set(deletedFolders)
       const dSet = new Set(deletedDecks)
       const cSet = new Set(deletedCards)
+      applyingRemoteRef.current = true
       useLibraryStore.setState((s) => ({
         folders: s.folders.filter((f) => !fSet.has(f.id)),
         decks:   s.decks.filter((d)   => !dSet.has(d.id)),
@@ -894,6 +881,7 @@ export function useSync(): SyncStatus {
           cards:   s.pendingDeletes.cards.filter((id)   => !cSet.has(id)),
         },
       }))
+      applyingRemoteRef.current = false
     }
     return () => {
       bc.close()
@@ -991,6 +979,7 @@ export function useSync(): SyncStatus {
         if (DEBUG_SYNC) console.log('[SYNC] store change ignored — mountedRef is false (pull not yet complete)')
         return
       }
+      if (applyingRemoteRef.current) return
       if (libraryDebounceRef.current) clearTimeout(libraryDebounceRef.current)
       libraryDebounceRef.current = setTimeout(() => {
         handlePush()
@@ -1060,9 +1049,9 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'folders' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
+        applyingRemoteRef.current = true
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const folder = toCamel(newRow) as Folder
-          if (eventType === 'INSERT') realtimePending.folders.add(folder.id)
           useLibraryStore.setState((state) => {
             // Don't resurrect items that are pending local deletion
             if (state.pendingDeletes.folders.includes(folder.id)) return {}
@@ -1079,6 +1068,7 @@ export function useSync(): SyncStatus {
             folders: state.folders.filter((f) => f.id !== id),
           }))
         }
+        applyingRemoteRef.current = false
       },
     )
 
@@ -1087,9 +1077,9 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'decks' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
+        applyingRemoteRef.current = true
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const deck = toCamel(newRow) as Deck
-          if (eventType === 'INSERT') realtimePending.decks.add(deck.id)
           useLibraryStore.setState((state) => {
             if (state.pendingDeletes.decks.includes(deck.id)) return {}
             const exists = state.decks.some((d) => d.id === deck.id)
@@ -1105,6 +1095,7 @@ export function useSync(): SyncStatus {
             decks: state.decks.filter((d) => d.id !== id),
           }))
         }
+        applyingRemoteRef.current = false
       },
     )
 
@@ -1113,9 +1104,9 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'cards' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
+        applyingRemoteRef.current = true
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const card = toCamel(newRow) as Card
-          if (eventType === 'INSERT') realtimePending.cards.add(card.id)
           useLibraryStore.setState((state) => {
             if (state.pendingDeletes.cards.includes(card.id)) return {}
             const exists = state.cards.some((c) => c.id === card.id)
@@ -1131,6 +1122,7 @@ export function useSync(): SyncStatus {
             cards: state.cards.filter((c) => c.id !== id),
           }))
         }
+        applyingRemoteRef.current = false
       },
     )
 
@@ -1139,9 +1131,9 @@ export function useSync(): SyncStatus {
       { event: '*', schema: 'public', table: 'review_logs' },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload
+        applyingRemoteRef.current = true
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           const log = toCamel(newRow) as ReviewLog
-          if (eventType === 'INSERT') realtimePending.reviewLogs.add(log.id)
           useLibraryStore.setState((state) => {
             const exists = state.reviewLogs.some((l) => l.id === log.id)
             return {
@@ -1156,6 +1148,7 @@ export function useSync(): SyncStatus {
             reviewLogs: state.reviewLogs.filter((l) => l.id !== id),
           }))
         }
+        applyingRemoteRef.current = false
       },
     )
 

@@ -733,11 +733,31 @@ export const useLibraryStore = create<LibraryState>()(
           return isDue(srs)
         })
 
-        // Primary sort: due date ascending (most overdue first), then
-        // weighted round-robin across decks by overdue severity.
+        // Primary sort: relative overdueness (days_late / scheduled_interval) descending.
+        // A card 3d late on a 4d interval (0.75) outranks a card 5d late on a 200d interval
+        // (0.025). Lapses break ties — more lapses first.
         const dueDateOf = (c: Card) =>
           algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
-        const sorted = [...due].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
+        const relativeOverdueness = (c: Card): number => {
+          if (algorithm === 'fsrs') {
+            const fs = fsrsData[c.id]
+            if (!fs || !fs.lastReviewedAt) return 0
+            const msLate = Date.now() - new Date(fs.dueDate).getTime()
+            const scheduled = new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()
+            return scheduled > 0 ? msLate / scheduled : msLate / 86400000
+          }
+          const srs = srsData[c.id]
+          if (!srs) return 0
+          const daysLate = (Date.now() - new Date(srs.dueDate).getTime()) / 86400000
+          return srs.interval > 0 ? daysLate / srs.interval : daysLate
+        }
+        const lapsesOf = (c: Card): number =>
+          algorithm === 'fsrs' ? (fsrsData[c.id]?.lapses ?? 0) : (srsData[c.id]?.lapses ?? 0)
+        const sorted = [...due].sort((a, b) => {
+          const diff = relativeOverdueness(b) - relativeOverdueness(a)
+          if (Math.abs(diff) > 0.001) return diff
+          return lapsesOf(b) - lapsesOf(a)
+        })
         return interleaveByDeck(sorted, (c) => c.deckId, (c) => daysOverdue(dueDateOf(c)))
       },
 
