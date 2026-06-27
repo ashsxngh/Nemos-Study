@@ -28,3 +28,22 @@ The exams and settings subscribers also check this flag. Notes have no Realtime 
 
 - **Web Lock** `'nemos-sync-push'` — serialises pushes across all open tabs. Auto-released when the lock callback resolves.
 - **BroadcastChannel** `'nemos-sync'` — tabs post messages after a push so peers can apply deletions and settings changes immediately rather than waiting for their next pull.
+
+# Deck Study popup (`src/components/library/StudyModePopup.tsx`)
+
+Three modes: `deck-reviews`, `deck-new`, `deck-both`. All are deck-scoped and bypass the daily new-card limit (that limit is inbox-only).
+
+## New-card count input
+
+When the user selects **New Cards** or **Both** and the deck has at least one new card, the popup enters a two-step flow:
+1. Mode button click → selects/highlights the mode and reveals a number input defaulting to `getDeckNewAll(deckId).length`.
+2. **Start** button → navigates to `/study/session?deck=…&mode=…&newCount=N`.
+
+Reviews mode still navigates immediately (no input). Both mode with zero new cards also navigates immediately.
+
+The `?newCount=N` param is read in `session/page.tsx` as `deckNewCount`. In `buildQueue`:
+- `deck-new`: slices `getDeckNewAll` to `deckNewCount`.
+- `deck-both`: replicates the interleave logic inline (reviews unlimited, new cards capped at `deckNewCount`).
+- `deck-reviews`: unaffected — no new-card count applies.
+
+`deckNewCount` is in `buildQueue`'s `useCallback` dep array. Do **not** touch `newCardsPerDay`, `useSettingsStore`, or the daily new-card tracking — this feature is entirely separate from the automatic inbox limit.

@@ -16,7 +16,6 @@ import {
   RefreshCw,
   Focus,
   X,
-  ChevronDown,
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -179,15 +178,7 @@ function SessionContent() {
   // History for ← back navigation
   const [history, setHistory] = useState<number[]>([])
   const [showMoreRatings, setShowMoreRatings] = useState(false)
-  const [showRetentionInfo, setShowRetentionInfo] = useState(false)
-  // "Show card details" — toggled from the bottom-right options menu, persisted
-  // across sessions. Read lazily so SSR/first-paint doesn't flash the panel
-  // before localStorage is checked.
-  const [showCardDetailsEnabled, setShowCardDetailsEnabled] = useState(() => {
-    if (typeof window === 'undefined') return true
-    const stored = window.localStorage.getItem('nemo-show-card-details')
-    return stored === null ? true : stored === 'true'
-  })
+  const [showCardDetailsEnabled, setShowCardDetailsEnabled] = useState(false)
   const [loaded, setLoaded] = useState(false)
   // Cards the user has dismissed the "struggle" prompt for, this session only.
   const [dismissedStruggleIds, setDismissedStruggleIds] = useState<Set<string>>(new Set())
@@ -425,7 +416,6 @@ function SessionContent() {
   useEffect(() => {
     cardShownAtRef.current = Date.now()
     setShowMoreRatings(false)
-    setShowRetentionInfo(false)
   }, [currentIndex])
 
   /* Close options menu on outside click */
@@ -1271,45 +1261,31 @@ function SessionContent() {
                 </div>
               )}
 
-              {/* Retention transparency — collapsed by default */}
+              {/* Retention transparency panel — shown when "Show card details" is on */}
               {showCardDetailsEnabled && retentionInfo && (
                 <div className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <button
-                    onClick={() => setShowRetentionInfo((v) => !v)}
-                    className="w-full flex items-center justify-between px-4 py-1.5 text-[11px] transition-colors hover:bg-[var(--bg-hover)]"
-                    style={{ color: '#6b6b72' }}
-                  >
-                    <span>Card details</span>
-                    <ChevronDown
-                      size={11}
-                      className="transition-transform"
-                      style={{ transform: showRetentionInfo ? 'rotate(180deg)' : 'none' }}
-                    />
-                  </button>
-                  {showRetentionInfo && (
-                    <div className="grid grid-cols-4 gap-2 px-4 pb-2.5 animate-fade-in">
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Stability' : 'Interval'}</p>
-                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Retrievability' : 'Mastery'}</p>
-                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>
-                          {retentionInfo.daysDiff <= 0 ? 'Overdue' : 'Due in'}
-                        </p>
-                        <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>
-                          {retentionInfo.daysDiff === 0 ? 'Today' : `${Math.abs(retentionInfo.daysDiff)}d`}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>State</p>
-                        <p className="text-xs font-medium capitalize" style={{ color: '#a0a0b0' }}>{retentionInfo.state}</p>
-                      </div>
+                  <div className="grid grid-cols-4 gap-2 px-4 py-2.5">
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Stability' : 'Interval'}</p>
+                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
                     </div>
-                  )}
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Retrievability' : 'Mastery'}</p>
+                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>
+                        {retentionInfo.daysDiff <= 0 ? 'Overdue' : 'Due in'}
+                      </p>
+                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>
+                        {retentionInfo.daysDiff === 0 ? 'Today' : `${Math.abs(retentionInfo.daysDiff)}d`}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>State</p>
+                      <p className="text-xs font-medium capitalize" style={{ color: '#a0a0b0' }}>{retentionInfo.state}</p>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1500,11 +1476,7 @@ function SessionContent() {
                   type="button"
                   role="switch"
                   aria-checked={showCardDetailsEnabled}
-                  onClick={() => {
-                    const next = !showCardDetailsEnabled
-                    setShowCardDetailsEnabled(next)
-                    window.localStorage.setItem('nemo-show-card-details', String(next))
-                  }}
+                  onClick={() => setShowCardDetailsEnabled((v) => !v)}
                   className="w-8 h-[18px] rounded-full relative transition-colors duration-150 shrink-0"
                   style={{ background: showCardDetailsEnabled ? '#818cf8' : '#3a3a42' }}
                 >
