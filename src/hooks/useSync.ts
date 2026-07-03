@@ -536,13 +536,13 @@ async function pushToSupabase(
 
   if (DEBUG_SYNC) {
     console.log('[SYNC] pushToSupabase: upserting to Supabase as user', userId, {
-      folders: folders.length,
-      decks: decks.length,
-      cards: cards.length,
-      srsData: Object.keys(srsData).length,
-      fsrsData: Object.keys(fsrsData).length,
-      sessions: sessions.length,
-      reviewLogs: reviewLogs.length,
+      folders: (folders ?? []).length,
+      decks: (decks ?? []).length,
+      cards: (cards ?? []).length,
+      srsData: Object.keys(srsData ?? {}).length,
+      fsrsData: Object.keys(fsrsData ?? {}).length,
+      sessions: (sessions ?? []).length,
+      reviewLogs: (reviewLogs ?? []).length,
     })
   }
 
