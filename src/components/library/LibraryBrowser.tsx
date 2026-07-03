@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
@@ -29,6 +30,7 @@ import { StudyModePopup } from '@/components/library/StudyModePopup'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { FolderColor, Folder as FolderType, Deck as DeckType } from '@/lib/types'
 
@@ -56,12 +58,12 @@ function getRecursiveCardCount(
   folderId: string,
   folders: FolderType[],
   decks: DeckType[],
-  getDeckCards: (id: string) => { length: number },
+  cardCountByDeck: Map<string, number>,
 ): number {
   const directDecks = decks.filter((d) => d.folderId === folderId)
-  const directCount = directDecks.reduce((sum, d) => sum + getDeckCards(d.id).length, 0)
+  const directCount = directDecks.reduce((sum, d) => sum + (cardCountByDeck.get(d.id) ?? 0), 0)
   const childFolders = folders.filter((f) => f.parentId === folderId)
-  return directCount + childFolders.reduce((sum, f) => sum + getRecursiveCardCount(f.id, folders, decks, getDeckCards), 0)
+  return directCount + childFolders.reduce((sum, f) => sum + getRecursiveCardCount(f.id, folders, decks, cardCountByDeck), 0)
 }
 
 // ── Confirm hard-delete dialog ────────────────────────────────────────────────
@@ -175,10 +177,49 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
 export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: LibraryBrowserProps) {
   const router = useRouter()
   const {
-    folders, decks, getDeckCards, getDeckMastery, getDueCards,
+    folders, decks, cards, srsData, fsrsData,
+    getDeckCards, getDeckMastery, getDueCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
-  } = useLibraryStore()
+  } = useLibraryStore(
+    useShallow((s) => ({
+      folders: s.folders,
+      decks: s.decks,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDeckCards: s.getDeckCards,
+      getDeckMastery: s.getDeckMastery,
+      getDueCards: s.getDueCards,
+      updateFolder: s.updateFolder,
+      deleteFolder: s.deleteFolder,
+      updateDeck: s.updateDeck,
+      deleteDeck: s.deleteDeck,
+    }))
+  )
   const sessions = useHistoryStore((s) => s.sessions)
+  const { algorithm } = useSettingsStore(useShallow((s) => ({ algorithm: s.algorithm })))
+
+  // The due/new/mastery queries are the most expensive in the app — memoize
+  // per-deck results keyed by deck id instead of recomputing (and re-scanning
+  // all cards) once per deck on every render, both in the filter/sort passes
+  // below and in each deck card's render.
+  const cardCountByDeck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const d of decks) map.set(d.id, getDeckCards(d.id).length)
+    return map
+  }, [decks, cards, getDeckCards])
+
+  const dueCountByDeck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const d of decks) map.set(d.id, getDueCards(d.id).length)
+    return map
+  }, [decks, cards, srsData, fsrsData, algorithm, getDueCards])
+
+  const masteryByDeck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const d of decks) map.set(d.id, getDeckMastery(d.id))
+    return map
+  }, [decks, cards, srsData, fsrsData, algorithm, getDeckMastery])
 
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
@@ -261,14 +302,14 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const sortedDecks = [...visibleDecks]
     .filter((d) => activeTags.length === 0 || activeTags.every((t) => d.tags.includes(t)))
     .filter((d) => !filterStarred || d.isStarred)
-    .filter((d) => !filterHasDue || getDueCards(d.id).length > 0)
+    .filter((d) => !filterHasDue || (dueCountByDeck.get(d.id) ?? 0) > 0)
     .sort((a, b) => {
       if (sortBy === 'name-desc') return b.name.localeCompare(a.name)
       if (sortBy === 'created') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       if (sortBy === 'modified') return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      if (sortBy === 'cardCount') return getDeckCards(b.id).length - getDeckCards(a.id).length
-      if (sortBy === 'due') return getDueCards(b.id).length - getDueCards(a.id).length
-      if (sortBy === 'mastery') return getDeckMastery(a.id) - getDeckMastery(b.id)
+      if (sortBy === 'cardCount') return (cardCountByDeck.get(b.id) ?? 0) - (cardCountByDeck.get(a.id) ?? 0)
+      if (sortBy === 'due') return (dueCountByDeck.get(b.id) ?? 0) - (dueCountByDeck.get(a.id) ?? 0)
+      if (sortBy === 'mastery') return (masteryByDeck.get(a.id) ?? 0) - (masteryByDeck.get(b.id) ?? 0)
       if (sortBy === 'recent') {
         const lastA = sessions
           .filter((s) => s.deckId === a.id && s.endedAt)
@@ -626,12 +667,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                         type: 'folder',
                         id: folder.id,
                         name: folder.name,
-                        cardCount: getRecursiveCardCount(folder.id, folders, decks, getDeckCards),
+                        cardCount: getRecursiveCardCount(folder.id, folders, decks, cardCountByDeck),
                       })
                     },
                   },
                 ]
-                const totalCards = getRecursiveCardCount(folder.id, folders, decks, getDeckCards)
+                const totalCards = getRecursiveCardCount(folder.id, folders, decks, cardCountByDeck)
                 const childCount = folders.filter((f) => f.parentId === folder.id).length
                 return view === 'grid' ? (
                   <FolderCardGrid
@@ -685,8 +726,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               )}
             >
               {sortedDecks.map((deck) => {
-                const cardCount = getDeckCards(deck.id).length
-                const mastery = getDeckMastery(deck.id)
+                const cardCount = cardCountByDeck.get(deck.id) ?? 0
+                const mastery = masteryByDeck.get(deck.id) ?? 0
                 const deckMenuItems: DropdownItem[] = [
                   {
                     label: deck.isStarred ? 'Unstar' : 'Star',
@@ -825,9 +866,27 @@ function LibraryTreeTable({
   onStudyClick: (deck: DeckType) => void
 }) {
   const {
-    folders, decks, getDeckCards, getNewCards,
+    folders, decks, cards, srsData, fsrsData, getDeckCards, getNewCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
-  } = useLibraryStore()
+  } = useLibraryStore(
+    useShallow((s) => ({
+      folders: s.folders,
+      decks: s.decks,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDeckCards: s.getDeckCards,
+      getNewCards: s.getNewCards,
+      updateFolder: s.updateFolder,
+      deleteFolder: s.deleteFolder,
+      updateDeck: s.updateDeck,
+      deleteDeck: s.deleteDeck,
+    }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
@@ -841,10 +900,19 @@ function LibraryTreeTable({
       return next
     })
 
-  const deckCounts = (deckId: string): DeckCounts => ({
-    newCount: getNewCards(deckId).length,
-    total: getDeckCards(deckId).length,
-  })
+  // getNewCards is one of the most expensive queries in the app — memoize
+  // per-deck counts keyed by deck id instead of recomputing on every render
+  // (this table recurses over the whole folder tree calling it once per deck).
+  const deckCountsByDeck = useMemo(() => {
+    const map = new Map<string, DeckCounts>()
+    for (const d of decks) {
+      map.set(d.id, { newCount: getNewCards(d.id).length, total: getDeckCards(d.id).length })
+    }
+    return map
+  }, [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getDeckCards])
+
+  const deckCounts = (deckId: string): DeckCounts =>
+    deckCountsByDeck.get(deckId) ?? { newCount: 0, total: 0 }
 
   const folderCounts = (folderId: string): DeckCounts => {
     const direct = decks

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Upload, X, FileText, Folder as FolderIcon } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
+import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
 import { FolderTreePicker, buildFolderTree, type FolderNode } from '@/components/library/FolderTreePicker'
@@ -203,8 +204,10 @@ function ImportContent() {
   const searchParams = useSearchParams()
   const targetDeckId = searchParams.get('deckId')
 
-  const { decks, folders, createDeck, importCards } = useLibraryStore()
-  const { addToast } = useAppStore()
+  const { decks, folders, createDeck, importCards } = useLibraryStore(
+    useShallow((s) => ({ decks: s.decks, folders: s.folders, createDeck: s.createDeck, importCards: s.importCards }))
+  )
+  const addToast = useAppStore((s) => s.addToast)
 
   const targetDeck = targetDeckId ? decks.find((d) => d.id === targetDeckId) : null
 

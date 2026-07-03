@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Calendar, AlertTriangle, ArrowRight } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Progress } from '@/components/ui/Progress'
 import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
@@ -27,7 +28,9 @@ function retentionColor(r: number) {
 }
 
 function ExamRow({ exam }: { exam: Exam }) {
-  const { decks, folders, cards, fsrsData } = useLibraryStore()
+  const { decks, folders, cards, fsrsData } = useLibraryStore(
+    useShallow((s) => ({ decks: s.decks, folders: s.folders, cards: s.cards, fsrsData: s.fsrsData }))
+  )
 
   const days = daysUntil(exam.date)
   const examCards = getExamCards(exam, decks, cards, folders)
@@ -89,7 +92,7 @@ function ExamRow({ exam }: { exam: Exam }) {
 }
 
 export function ExamCountdowns() {
-  const { exams } = useExamStore()
+  const exams = useExamStore((s) => s.exams)
 
   const sorted = [...exams]
     .filter((e) => daysUntil(e.date) >= 0)

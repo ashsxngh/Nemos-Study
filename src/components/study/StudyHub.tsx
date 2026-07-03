@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Zap, RotateCcw, Shuffle, Play, Search, ChevronRight,
   Inbox, Sparkles, RefreshCw, Target, Flame, BookOpen,
@@ -15,9 +16,23 @@ import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn } from '@/lib/utils'
 
 export function StudyHub() {
-  const { decks, cards, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore()
-  const { reviewLogs, sessions } = useHistoryStore()
-  const { newCardsPerDay } = useSettingsStore()
+  const { decks, cards, srsData, fsrsData, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+      getDeckMastery: s.getDeckMastery,
+    }))
+  )
+  const { reviewLogs, sessions } = useHistoryStore(
+    useShallow((s) => ({ reviewLogs: s.reviewLogs, sessions: s.sessions }))
+  )
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
   const [search, setSearch] = useState('')
   const [goalTargets, setGoalTargets] = useState({ cards: 50, minutes: 30, accuracy: 85 })
   const [editingGoals, setEditingGoals] = useState(false)
@@ -41,20 +56,30 @@ export function StudyHub() {
     ? Math.round((todayReviewLogs.filter((l) => l.rating >= 3).length / todayReviewLogs.length) * 100)
     : 0
 
-  const allNewCards = getNewCards()
-  const allReviews = getReviewsDue()
+  const allNewCards = useMemo(
+    () => getNewCards(),
+    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+  )
+  const allReviews = useMemo(
+    () => getReviewsDue(),
+    [cards, decks, srsData, fsrsData, algorithm, getReviewsDue]
+  )
   const inboxTotal = allNewCards.length + allReviews.length
 
-  const deckData = decks
-    .filter((d) => !d.isArchived)
-    .map((deck) => ({
-      deck,
-      newCount: getNewCards(deck.id).length,
-      reviewCount: getReviewsDue(deck.id).length,
-      totalCards: cards.filter((c) => c.deckId === deck.id).length,
-      mastery: getDeckMastery(deck.id),
-    }))
-    .filter((d) => d.totalCards > 0)
+  const deckData = useMemo(
+    () =>
+      decks
+        .filter((d) => !d.isArchived)
+        .map((deck) => ({
+          deck,
+          newCount: getNewCards(deck.id).length,
+          reviewCount: getReviewsDue(deck.id).length,
+          totalCards: cards.filter((c) => c.deckId === deck.id).length,
+          mastery: getDeckMastery(deck.id),
+        }))
+        .filter((d) => d.totalCards > 0),
+    [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getReviewsDue, getDeckMastery]
+  )
 
   const filtered = deckData.filter((d) =>
     d.deck.name.toLowerCase().includes(search.toLowerCase())

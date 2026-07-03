@@ -6,7 +6,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { formatRelativeTime } from '@/lib/utils'
 
 export function RecentActivity() {
-  const { decks } = useLibraryStore()
+  const decks = useLibraryStore((s) => s.decks)
   const sessions = useHistoryStore((s) => s.sessions)
 
   const recentSessions = [...sessions]

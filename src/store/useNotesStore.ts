@@ -5,6 +5,11 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Note } from '@/lib/types'
 import { useTrashStore } from '@/store/useTrashStore'
 import { generateId } from '@/lib/utils'
+import { NOTE_CONTENT_MAX_LENGTH, NAME_MAX_LENGTH } from '@/lib/limits'
+
+function clamp(str: string, max: number): string {
+  return str.length > max ? str.slice(0, max) : str
+}
 
 const USER_ID = 'local-user'
 
@@ -45,9 +50,12 @@ export const useNotesStore = create<NoteState>()(
       },
 
       updateNote: (id, updates) => {
+        const clamped = { ...updates }
+        if (clamped.title !== undefined) clamped.title = clamp(clamped.title, NAME_MAX_LENGTH)
+        if (clamped.content !== undefined) clamped.content = clamp(clamped.content, NOTE_CONTENT_MAX_LENGTH)
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n
+            n.id === id ? { ...n, ...clamped, updatedAt: new Date().toISOString() } : n
           ),
         }))
       },

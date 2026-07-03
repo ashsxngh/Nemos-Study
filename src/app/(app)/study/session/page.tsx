@@ -17,6 +17,7 @@ import {
   Focus,
   X,
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
@@ -126,13 +127,37 @@ function SessionContent() {
     deleteCard,
     resetCardSRS,
     cards: allCards,
-  } = useLibraryStore()
+  } = useLibraryStore(
+    useShallow((s) => ({
+      getDueCards: s.getDueCards,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+      getDeckReviewsAll: s.getDeckReviewsAll,
+      getDeckNewAll: s.getDeckNewAll,
+      getDeckBoth: s.getDeckBoth,
+      reviewCard: s.reviewCard,
+      decks: s.decks,
+      fsrsData: s.fsrsData,
+      srsData: s.srsData,
+      deleteCard: s.deleteCard,
+      resetCardSRS: s.resetCardSRS,
+      cards: s.cards,
+    }))
+  )
 
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
 
-  const { exams } = useExamStore()
+  const exams = useExamStore((s) => s.exams)
 
-  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore()
+  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore(
+    useShallow((s) => ({
+      studyShortcuts: s.studyShortcuts,
+      algorithm: s.algorithm,
+      showSessionProgress: s.showSessionProgress,
+      dailyCardTarget: s.dailyCardTarget,
+      sessionLength: s.sessionLength,
+    }))
+  )
 
   const cardShownAtRef = useRef<number>(Date.now())
   // Tracks the persisted ReviewSession record (useHistoryStore.sessions) for

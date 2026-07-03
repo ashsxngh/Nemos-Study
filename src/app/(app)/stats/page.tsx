@@ -4,12 +4,15 @@ import { Header } from '@/components/layout/Header'
 import { StatsPage } from '@/components/stats/StatsPage'
 import { Button } from '@/components/ui/Button'
 import { Download } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { exportAsJSON } from '@/lib/export'
 
 export default function StatsRoute() {
-  const { folders, decks, cards, srsData } = useLibraryStore()
+  const { folders, decks, cards, srsData } = useLibraryStore(
+    useShallow((s) => ({ folders: s.folders, decks: s.decks, cards: s.cards, srsData: s.srsData }))
+  )
   const sessions = useHistoryStore((s) => s.sessions)
 
   function handleExport() {

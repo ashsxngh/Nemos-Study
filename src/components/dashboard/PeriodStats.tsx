@@ -6,7 +6,7 @@ import { getPeriodRange, logsInRange, type Period } from '@/lib/periods'
 interface PeriodStatsProps { period: Period }
 
 export function PeriodStats({ period }: PeriodStatsProps) {
-  const { reviewLogs } = useHistoryStore()
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const { start, end, prevStart, prevEnd, label } = getPeriodRange(period)
 
   const curLogs  = logsInRange(reviewLogs, start, end)

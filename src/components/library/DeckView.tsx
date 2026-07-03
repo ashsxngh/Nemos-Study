@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import { Plus, BookOpen, Pencil, Trash2, GripVertical, RotateCcw, Download, Eye } from 'lucide-react'
 import {
   DndContext,
@@ -83,7 +84,7 @@ function fmtInterval(days: number): string {
 
 function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onPreview, onClick, checked, onToggleCheck }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
-  const { cardFields } = useSettingsStore()
+  const cardFields = useSettingsStore((s) => s.cardFields)
   const {
     attributes,
     listeners,
@@ -244,11 +245,30 @@ interface DeckViewProps {
 
 export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const router = useRouter()
-  const { decks, getDeckCards, getDeckMastery, deleteCard, updateCard, resetCardSRS } = useLibraryStore()
+  const {
+    decks, allCards, srsData, fsrsData,
+    getDeckCards, getDeckMastery, deleteCard, deleteCardsBatch, updateCardsBatch, resetCardSRS,
+  } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      allCards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDeckCards: s.getDeckCards,
+      getDeckMastery: s.getDeckMastery,
+      deleteCard: s.deleteCard,
+      deleteCardsBatch: s.deleteCardsBatch,
+      updateCardsBatch: s.updateCardsBatch,
+      resetCardSRS: s.resetCardSRS,
+    }))
+  )
+  const algorithm = useSettingsStore((s) => s.algorithm)
   const deck = decks.find((d) => d.id === deckId)
-  const cards = getDeckCards(deckId)
-  const mastery = getDeckMastery(deckId)
-  const srsData = useLibraryStore((s) => s.srsData)
+  const cards = useMemo(() => getDeckCards(deckId), [allCards, deckId, getDeckCards])
+  const mastery = useMemo(
+    () => getDeckMastery(deckId),
+    [allCards, srsData, fsrsData, algorithm, deckId, getDeckMastery]
+  )
 
   const [addingCard, setAddingCard] = useState(false)
   const [editingCard, setEditingCard] = useState<Card | null>(null)
@@ -301,7 +321,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
 
   function handleBulkMove() {
     if (!bulkMoveTarget) return
-    selectedIds.forEach((id) => updateCard(id, { deckId: bulkMoveTarget }))
+    updateCardsBatch(Array.from(selectedIds).map((id) => ({ id, updates: { deckId: bulkMoveTarget } })))
     setSelectedIds(new Set())
     setShowBulkMove(false)
     setBulkMoveTarget('')
@@ -310,10 +330,11 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   function handleBulkTag() {
     const tag = bulkTagInput.trim().toLowerCase()
     if (!tag) return
-    selectedIds.forEach((id) => {
-      const card = cards.find((c) => c.id === id)
-      if (card && !card.tags.includes(tag)) updateCard(id, { tags: [...card.tags, tag] })
-    })
+    const updates = Array.from(selectedIds)
+      .map((id) => cards.find((c) => c.id === id))
+      .filter((card): card is Card => !!card && !card.tags.includes(tag))
+      .map((card) => ({ id: card.id, updates: { tags: [...card.tags, tag] } }))
+    updateCardsBatch(updates)
     setSelectedIds(new Set())
     setShowBulkTag(false)
     setBulkTagInput('')
@@ -321,7 +342,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
 
   function handleBulkDelete() {
     const ids = Array.from(selectedIds)
-    ids.forEach((id) => deleteCard(id))
+    deleteCardsBatch(ids)
     trackDeleteForUndo(ids)
     setSelectedIds(new Set())
     setShowBulkDelete(false)
@@ -341,9 +362,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
     if (oldIndex === -1 || newIndex === -1) return
 
     const reordered = arrayMove(cards, oldIndex, newIndex)
-    reordered.forEach((card, index) => {
-      updateCard(card.id, { order: index * 10 })
-    })
+    updateCardsBatch(reordered.map((card, index) => ({ id: card.id, updates: { order: index * 10 } })))
   }
 
   const anyDialogOpen = addingCard || !!editingCard || !!confirmDeleteId || !!previewCard

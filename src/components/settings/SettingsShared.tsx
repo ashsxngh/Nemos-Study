@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { Sun, Moon, Monitor, Download, Upload, Trash2 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Dialog } from '@/components/ui/Dialog'
@@ -115,7 +116,9 @@ export function NumberField({ value, onChange, bounds, className }: NumberFieldP
 // ── Algorithm picker ──────────────────────────────────────────────────────────
 
 export function AlgorithmPicker() {
-  const { algorithm, updateSettings } = useSettingsStore()
+  const { algorithm, updateSettings } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, updateSettings: s.updateSettings }))
+  )
   return (
     <div>
       <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">Algorithm</label>
@@ -150,7 +153,9 @@ export function AlgorithmPicker() {
 // ── FSRS weights grid + reset ─────────────────────────────────────────────────
 
 export function FSRSWeightsGrid() {
-  const { fsrsWeights, updateSettings } = useSettingsStore()
+  const { fsrsWeights, updateSettings } = useSettingsStore(
+    useShallow((s) => ({ fsrsWeights: s.fsrsWeights, updateSettings: s.updateSettings }))
+  )
   return (
     <div className="grid grid-cols-4 gap-1.5">
       {fsrsWeights.map((w, i) => (
@@ -173,7 +178,7 @@ export function FSRSWeightsGrid() {
 }
 
 export function ResetFSRSDefaultsButton() {
-  const { updateSettings } = useSettingsStore()
+  const updateSettings = useSettingsStore((s) => s.updateSettings)
   return (
     <Button
       variant="ghost"
@@ -196,22 +201,30 @@ export function ResetFSRSDefaultsButton() {
 // CLAUDE.md session log) — kept in one place now so that bug can't reappear.
 
 export function BurnoutThresholdToggles() {
-  const settings = useSettingsStore()
-  const { updateSettings } = settings
+  const { burnoutWarningEnabled, burnoutThresholdCards, burnoutTimeWarningEnabled, burnoutThresholdMinutes, updateSettings } =
+    useSettingsStore(
+      useShallow((s) => ({
+        burnoutWarningEnabled: s.burnoutWarningEnabled,
+        burnoutThresholdCards: s.burnoutThresholdCards,
+        burnoutTimeWarningEnabled: s.burnoutTimeWarningEnabled,
+        burnoutThresholdMinutes: s.burnoutThresholdMinutes,
+        updateSettings: s.updateSettings,
+      }))
+    )
   return (
     <>
       <div className="px-4 py-3 space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-sm text-[var(--text-primary)]">Warn when daily queue exceeds</p>
           <Toggle
-            checked={settings.burnoutWarningEnabled}
+            checked={burnoutWarningEnabled}
             onChange={(v) => updateSettings({ burnoutWarningEnabled: v })}
           />
         </div>
-        {settings.burnoutWarningEnabled && (
+        {burnoutWarningEnabled && (
           <div className="flex items-center gap-2 pl-1">
             <NumberField
-              value={settings.burnoutThresholdCards}
+              value={burnoutThresholdCards}
               onChange={(v) => updateSettings({ burnoutThresholdCards: v })}
             />
             <span className="text-xs text-[var(--text-muted)]">cards</span>
@@ -223,14 +236,14 @@ export function BurnoutThresholdToggles() {
         <div className="flex items-center justify-between">
           <p className="text-sm text-[var(--text-primary)]">Warn when projected study time exceeds</p>
           <Toggle
-            checked={settings.burnoutTimeWarningEnabled}
+            checked={burnoutTimeWarningEnabled}
             onChange={(v) => updateSettings({ burnoutTimeWarningEnabled: v })}
           />
         </div>
-        {settings.burnoutTimeWarningEnabled && (
+        {burnoutTimeWarningEnabled && (
           <div className="flex items-center gap-2 pl-1">
             <NumberField
-              value={settings.burnoutThresholdMinutes}
+              value={burnoutThresholdMinutes}
               onChange={(v) => updateSettings({ burnoutThresholdMinutes: v })}
             />
             <span className="text-xs text-[var(--text-muted)]">minutes</span>
@@ -296,9 +309,17 @@ function ImportCSVDialog({ cards, decks, onConfirm, onCancel }: ImportCSVDialogP
 // drop this in under their own section header.
 
 export function DataBackupSection() {
-  const { decks, cards, folders, srsData, createCard } = useLibraryStore()
+  const { decks, cards, folders, srsData, createCard } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      cards: s.cards,
+      folders: s.folders,
+      srsData: s.srsData,
+      createCard: s.createCard,
+    }))
+  )
   const sessions = useHistoryStore((s) => s.sessions)
-  const { addToast } = useAppStore()
+  const addToast = useAppStore((s) => s.addToast)
 
   const csvInputRef = useRef<HTMLInputElement>(null)
   const jsonInputRef = useRef<HTMLInputElement>(null)

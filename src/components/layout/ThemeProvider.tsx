@@ -2,13 +2,16 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import { CommandPalette } from './CommandPalette'
 import { ToastContainer } from '@/components/ui/Toast'
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { theme, openCommandPalette, toggleSidebar } = useAppStore()
+  const { theme, openCommandPalette, toggleSidebar } = useAppStore(
+    useShallow((s) => ({ theme: s.theme, openCommandPalette: s.openCommandPalette, toggleSidebar: s.toggleSidebar }))
+  )
   const router = useRouter()
   const [pendingG, setPendingG] = useState(false)
   const pendingGTimer = useRef<ReturnType<typeof setTimeout> | null>(null)

@@ -1,14 +1,30 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, RotateCcw, Play, CheckCircle2 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function ReviewsPage() {
-  const { getReviewsDue } = useLibraryStore()
-  const reviews = getReviewsDue()
+  const { cards, decks, folders, srsData, fsrsData, getReviewsDue } = useLibraryStore(
+    useShallow((s) => ({
+      cards: s.cards,
+      decks: s.decks,
+      folders: s.folders,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getReviewsDue: s.getReviewsDue,
+    }))
+  )
+  const algorithm = useSettingsStore((s) => s.algorithm)
+  const reviews = useMemo(
+    () => getReviewsDue(),
+    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+  )
 
   const isEmpty = reviews.length === 0
 

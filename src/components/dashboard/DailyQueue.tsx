@@ -1,25 +1,52 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { Play, Sparkles, RefreshCw } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 
 export function DailyQueue() {
-  const { decks, getNewCards, getReviewsDue } = useLibraryStore()
+  const { decks, cards, srsData, fsrsData, getNewCards, getReviewsDue } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+    }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
 
-  const totalNew = getNewCards().length
-  const totalReviews = getReviewsDue().length
+  const totalNew = useMemo(
+    () => getNewCards().length,
+    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+  )
+  const totalReviews = useMemo(
+    () => getReviewsDue().length,
+    [cards, decks, srsData, fsrsData, algorithm, getReviewsDue]
+  )
   const total = totalNew + totalReviews
 
-  const decksWithDue = decks
-    .filter((d) => !d.isArchived)
-    .map((deck) => ({
-      deck,
-      newCount: getNewCards(deck.id).length,
-      reviewCount: getReviewsDue(deck.id).length,
-    }))
-    .filter((d) => d.newCount + d.reviewCount > 0)
+  const decksWithDue = useMemo(
+    () =>
+      decks
+        .filter((d) => !d.isArchived)
+        .map((deck) => ({
+          deck,
+          newCount: getNewCards(deck.id).length,
+          reviewCount: getReviewsDue(deck.id).length,
+        }))
+        .filter((d) => d.newCount + d.reviewCount > 0),
+    [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getReviewsDue]
+  )
 
   if (total === 0) return null
 

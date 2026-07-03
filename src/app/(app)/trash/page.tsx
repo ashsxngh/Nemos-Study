@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Trash2, RotateCcw, X, BookOpen, FileText, CreditCard, AlertTriangle } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -9,7 +10,7 @@ import { useTrashStore, type TrashEntry } from '@/store/useTrashStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useAppStore } from '@/store/useAppStore'
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
+import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
 import { cn, formatDate } from '@/lib/utils'
 
 const TRASH_TTL_DAYS = 14
@@ -110,7 +111,9 @@ function TrashItemRow({ entry, onRestore, onDelete }: TrashItemRowProps) {
 }
 
 export default function TrashPage() {
-  const { items, remove, purgeExpired, clear } = useTrashStore()
+  const { items, remove, purgeExpired, clear } = useTrashStore(
+    useShallow((s) => ({ items: s.items, remove: s.remove, purgeExpired: s.purgeExpired, clear: s.clear }))
+  )
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmEntry, setConfirmEntry] = useState<TrashEntry | null>(null)
   const [clearingAll, setClearingAll] = useState(false)
@@ -125,8 +128,8 @@ export default function TrashPage() {
   async function deleteFromSupabase(entry: TrashEntry): Promise<void> {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    const userId = await getCachedUserId(supabase)
+    if (!userId) return
     try {
       if (entry.type === 'card' && entry.card) {
         const delSrs = await supabase.from('srs_data').delete().eq('card_id', entry.card.id)

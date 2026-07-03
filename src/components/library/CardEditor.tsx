@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { cn } from '@/lib/utils'
+import { CARD_TEXT_MAX_LENGTH } from '@/lib/limits'
 import type { Card, CardType } from '@/lib/types'
 import { ReviewCard } from '@/components/study/ReviewCard'
 
@@ -23,7 +24,8 @@ interface CardEditorProps {
 }
 
 export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
-  const { createCard, updateCard } = useLibraryStore()
+  const createCard = useLibraryStore((s) => s.createCard)
+  const updateCard = useLibraryStore((s) => s.updateCard)
 
   const [front, setFront] = useState(card?.front ?? '')
   const [back, setBack] = useState(card?.back ?? '')
@@ -249,6 +251,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
         <textarea
           ref={frontRef}
           rows={3}
+          maxLength={CARD_TEXT_MAX_LENGTH}
           placeholder={type === 'cloze' ? 'The {{c1::mitochondria}} is the powerhouse of the cell.' : 'Question or prompt…'}
           value={front}
           onChange={(e) => {
@@ -368,6 +371,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
           <textarea
             ref={backRef}
             rows={3}
+            maxLength={CARD_TEXT_MAX_LENGTH}
             placeholder="Answer or explanation…"
             value={back}
             onChange={(e) => {

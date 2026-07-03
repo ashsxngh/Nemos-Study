@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { cn } from '@/lib/utils'
+import { NAME_MAX_LENGTH } from '@/lib/limits'
 import type { FolderColor } from '@/lib/types'
 
 const COLORS: { value: FolderColor; label: string; bg: string; ring: string }[] = [
@@ -27,7 +29,9 @@ interface CreateFolderDialogProps {
 }
 
 export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFolderDialogProps) {
-  const { folders, createFolder } = useLibraryStore()
+  const { folders, createFolder } = useLibraryStore(
+    useShallow((s) => ({ folders: s.folders, createFolder: s.createFolder }))
+  )
   const [name, setName] = useState('')
   const [color, setColor] = useState<FolderColor>('default')
   const [parentId, setParentId] = useState<string | null>(defaultParentId ?? null)
@@ -78,6 +82,7 @@ export function CreateFolderDialog({ open, onClose, defaultParentId }: CreateFol
             autoFocus
             placeholder="e.g. A-Level Sciences"
             value={name}
+            maxLength={NAME_MAX_LENGTH}
             onChange={(e) => {
               setName(e.target.value)
               if (error) setError('')

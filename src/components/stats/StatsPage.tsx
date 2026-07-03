@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import { Progress } from '@/components/ui/Progress'
 import { Badge } from '@/components/ui/Badge'
+import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
@@ -135,11 +136,28 @@ export function StatsPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const router = useRouter()
 
-  const { cards, decks, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore()
-  const { sessions, reviewLogs } = useHistoryStore()
-  const srsData = useLibraryStore((s) => s.srsData)
-  const fsrsData = useLibraryStore((s) => s.fsrsData)
-  const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold, algorithm } = useSettingsStore()
+  const { cards, decks, srsData, fsrsData, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore(
+    useShallow((s) => ({
+      cards: s.cards,
+      decks: s.decks,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDeckMastery: s.getDeckMastery,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+    }))
+  )
+  const { sessions, reviewLogs } = useHistoryStore(
+    useShallow((s) => ({ sessions: s.sessions, reviewLogs: s.reviewLogs }))
+  )
+  const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold, algorithm } = useSettingsStore(
+    useShallow((s) => ({
+      burnoutWarningEnabled: s.burnoutWarningEnabled,
+      burnoutThresholdCards: s.burnoutThresholdCards,
+      leechThreshold: s.leechThreshold,
+      algorithm: s.algorithm,
+    }))
+  )
 
   // ── Core aggregates ──────────────────────────────────────────────────────
   const totalCards = cards.length

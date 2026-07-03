@@ -4,9 +4,11 @@ import { useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { cn } from '@/lib/utils'
+import { NAME_MAX_LENGTH } from '@/lib/limits'
 
 interface CreateDeckDialogProps {
   open: boolean
@@ -15,7 +17,9 @@ interface CreateDeckDialogProps {
 }
 
 export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckDialogProps) {
-  const { folders, createDeck } = useLibraryStore()
+  const { folders, createDeck } = useLibraryStore(
+    useShallow((s) => ({ folders: s.folders, createDeck: s.createDeck }))
+  )
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [folderId, setFolderId] = useState<string | null>(defaultFolderId ?? null)
@@ -68,6 +72,7 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
             autoFocus
             placeholder="e.g. Cell Biology"
             value={name}
+            maxLength={NAME_MAX_LENGTH}
             onChange={(e) => {
               setName(e.target.value)
               if (nameError) setNameError('')

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { X, Sun, Brain, Bell, Keyboard, Database, AlertTriangle, Activity } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
@@ -114,7 +115,7 @@ function SectionHeading({ icon: Icon, label }: SectionHeadingProps) {
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
-  const { theme, setTheme } = useAppStore()
+  const { theme, setTheme } = useAppStore(useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme })))
   const settings = useSettingsStore()
   const { updateSettings } = settings
 

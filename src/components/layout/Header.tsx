@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Bell, Sun, Moon, User, WifiOff, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -17,7 +18,9 @@ interface HeaderProps {
 }
 
 export function Header({ title, actions, breadcrumbs }: HeaderProps) {
-  const { theme, setTheme, syncError, manualSync } = useAppStore()
+  const { theme, setTheme, syncError, manualSync } = useAppStore(
+    useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme, syncError: s.syncError, manualSync: s.manualSync }))
+  )
   const isDark = theme === 'dark'
   const router = useRouter()
 

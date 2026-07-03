@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import {
   LayoutDashboard,
   Library,
@@ -27,6 +28,8 @@ import { CreateDeckDialog } from '@/components/library/CreateDeckDialog'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 import { Tooltip } from '@/components/ui/Tooltip'
 
 const NAV_ITEMS = [
@@ -45,15 +48,51 @@ const STUDY_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync } = useAppStore()
-  const { decks, folders, cards, getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
+  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync } = useAppStore(
+    useShallow((s) => ({
+      sidebarCollapsed: s.sidebarCollapsed,
+      toggleSidebar: s.toggleSidebar,
+      openCommandPalette: s.openCommandPalette,
+      syncError: s.syncError,
+      manualSync: s.manualSync,
+    }))
+  )
+  const { decks, folders, cards, srsData, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      folders: s.folders,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDueCards: s.getDueCards,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+    }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showNewDeckForm, setShowNewDeckForm] = useState(false)
 
-  const newCards = getNewCards()
-  const reviewsDue = getReviewsDue()
-  const dueCards = getDueCards()
+  // getNewCards/getReviewsDue/getDueCards are the most expensive queries in
+  // the app (O(cards) scans with sorting/interleaving) — memoized so a
+  // rating echo during a study session (which changes srsData/fsrsData but
+  // not cards/decks/folders) only recomputes what actually changed.
+  const newCards = useMemo(
+    () => getNewCards(),
+    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+  )
+  const reviewsDue = useMemo(
+    () => getReviewsDue(),
+    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+  )
+  const dueCards = useMemo(
+    () => getDueCards(),
+    [cards, decks, folders, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getDueCards]
+  )
 
   // Don't surface sync errors during an active study session — they're a
   // distraction mid-review and the icon will still show as soon as the user leaves.

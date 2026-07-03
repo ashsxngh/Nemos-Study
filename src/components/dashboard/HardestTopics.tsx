@@ -1,17 +1,31 @@
 'use client'
 
+import { useMemo } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Progress } from '@/components/ui/Progress'
 import { useLibraryStore } from '@/store/useLibraryStore'
 
 export function HardestTopics() {
-  const { decks, getDeckMastery } = useLibraryStore()
+  const { decks, cards, srsData, fsrsData, getDeckMastery } = useLibraryStore(
+    useShallow((s) => ({
+      decks: s.decks,
+      cards: s.cards,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDeckMastery: s.getDeckMastery,
+    }))
+  )
 
-  const ranked = decks
-    .filter((d) => !d.isArchived)
-    .map((deck) => ({ deck, mastery: getDeckMastery(deck.id) }))
-    .sort((a, b) => a.mastery - b.mastery)
-    .slice(0, 5)
+  const ranked = useMemo(
+    () =>
+      decks
+        .filter((d) => !d.isArchived)
+        .map((deck) => ({ deck, mastery: getDeckMastery(deck.id) }))
+        .sort((a, b) => a.mastery - b.mastery)
+        .slice(0, 5),
+    [decks, cards, srsData, fsrsData, getDeckMastery]
+  )
 
   return (
     <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">

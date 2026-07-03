@@ -648,19 +648,26 @@ async function pushToSupabase(
   // Each delete is batched: .in() with hundreds of IDs exceeds PostgREST's URL
   // length limit and returns "Bad Request".
   if (pendingDeletes) {
-    if (pendingDeletes.sessions.length) {
-      for (let i = 0; i < pendingDeletes.sessions.length; i += BATCH) {
-        const chunk = pendingDeletes.sessions.slice(i, i + BATCH)
-        const delSessions = await supabase.from('review_sessions').delete().in('id', chunk)
-        if (delSessions.error) {
-          console.error('[SYNC] pushToSupabase: review_sessions delete error', formatPgError(delSessions.error))
-          throw new Error(`review_sessions delete: ${delSessions.error.message} (code ${delSessions.error.code})`)
+    // pendingDeletes may come from state persisted before `sessions`/`reviewLogs`
+    // were added to PendingDeletes, so those keys can be missing on old state.
+    const delFolders    = pendingDeletes.folders ?? []
+    const delDecks      = pendingDeletes.decks ?? []
+    const delCards      = pendingDeletes.cards ?? []
+    const delSessions   = pendingDeletes.sessions ?? []
+    const delReviewLogs = pendingDeletes.reviewLogs ?? []
+    if (delSessions.length) {
+      for (let i = 0; i < delSessions.length; i += BATCH) {
+        const chunk = delSessions.slice(i, i + BATCH)
+        const delSessionsRes = await supabase.from('review_sessions').delete().in('id', chunk)
+        if (delSessionsRes.error) {
+          console.error('[SYNC] pushToSupabase: review_sessions delete error', formatPgError(delSessionsRes.error))
+          throw new Error(`review_sessions delete: ${delSessionsRes.error.message} (code ${delSessionsRes.error.code})`)
         }
       }
     }
-    if (pendingDeletes.reviewLogs.length) {
-      for (let i = 0; i < pendingDeletes.reviewLogs.length; i += BATCH) {
-        const chunk = pendingDeletes.reviewLogs.slice(i, i + BATCH)
+    if (delReviewLogs.length) {
+      for (let i = 0; i < delReviewLogs.length; i += BATCH) {
+        const chunk = delReviewLogs.slice(i, i + BATCH)
         const delLogs = await supabase.from('review_logs').delete().in('id', chunk)
         if (delLogs.error) {
           console.error('[SYNC] pushToSupabase: review_logs delete error', formatPgError(delLogs.error))
@@ -668,13 +675,13 @@ async function pushToSupabase(
         }
       }
     }
-    if (pendingDeletes.cards.length) {
-      for (let i = 0; i < pendingDeletes.cards.length; i += BATCH) {
-        const chunk = pendingDeletes.cards.slice(i, i + BATCH)
-        const delCards = await supabase.from('cards').delete().in('id', chunk)
-        if (delCards.error) {
-          console.error('[SYNC] pushToSupabase: cards delete error', formatPgError(delCards.error))
-          throw new Error(`cards delete: ${delCards.error.message} (code ${delCards.error.code})`)
+    if (delCards.length) {
+      for (let i = 0; i < delCards.length; i += BATCH) {
+        const chunk = delCards.slice(i, i + BATCH)
+        const delCardsRes = await supabase.from('cards').delete().in('id', chunk)
+        if (delCardsRes.error) {
+          console.error('[SYNC] pushToSupabase: cards delete error', formatPgError(delCardsRes.error))
+          throw new Error(`cards delete: ${delCardsRes.error.message} (code ${delCardsRes.error.code})`)
         }
         const delSrs = await supabase.from('srs_data').delete().in('card_id', chunk)
         if (delSrs.error) {
@@ -683,28 +690,27 @@ async function pushToSupabase(
         }
       }
     }
-    if (pendingDeletes.decks.length) {
-      for (let i = 0; i < pendingDeletes.decks.length; i += BATCH) {
-        const chunk = pendingDeletes.decks.slice(i, i + BATCH)
-        const delDecks = await supabase.from('decks').delete().in('id', chunk)
-        if (delDecks.error) {
-          console.error('[SYNC] pushToSupabase: decks delete error', formatPgError(delDecks.error))
-          throw new Error(`decks delete: ${delDecks.error.message} (code ${delDecks.error.code})`)
+    if (delDecks.length) {
+      for (let i = 0; i < delDecks.length; i += BATCH) {
+        const chunk = delDecks.slice(i, i + BATCH)
+        const delDecksRes = await supabase.from('decks').delete().in('id', chunk)
+        if (delDecksRes.error) {
+          console.error('[SYNC] pushToSupabase: decks delete error', formatPgError(delDecksRes.error))
+          throw new Error(`decks delete: ${delDecksRes.error.message} (code ${delDecksRes.error.code})`)
         }
       }
     }
-    if (pendingDeletes.folders.length) {
-      for (let i = 0; i < pendingDeletes.folders.length; i += BATCH) {
-        const chunk = pendingDeletes.folders.slice(i, i + BATCH)
-        const delFolders = await supabase.from('folders').delete().in('id', chunk)
-        if (delFolders.error) {
-          console.error('[SYNC] pushToSupabase: folders delete error', formatPgError(delFolders.error))
-          throw new Error(`folders delete: ${delFolders.error.message} (code ${delFolders.error.code})`)
+    if (delFolders.length) {
+      for (let i = 0; i < delFolders.length; i += BATCH) {
+        const chunk = delFolders.slice(i, i + BATCH)
+        const delFoldersRes = await supabase.from('folders').delete().in('id', chunk)
+        if (delFoldersRes.error) {
+          console.error('[SYNC] pushToSupabase: folders delete error', formatPgError(delFoldersRes.error))
+          throw new Error(`folders delete: ${delFoldersRes.error.message} (code ${delFoldersRes.error.code})`)
         }
       }
     }
-    if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length ||
-        pendingDeletes.sessions.length || pendingDeletes.reviewLogs.length) {
+    if (delFolders.length || delDecks.length || delCards.length || delSessions.length || delReviewLogs.length) {
       if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: deletes complete')
     }
   }
@@ -845,18 +851,30 @@ export function useSync(): SyncStatus {
         await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.fsrsData, h.sessions, h.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
-        if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length ||
-            s.pendingDeletes.sessions.length || s.pendingDeletes.reviewLogs.length) {
-          useLibraryStore.getState().clearPendingDeletes(s.pendingDeletes)
+        // pendingDeletes may come from state persisted before `sessions`/`reviewLogs`
+        // were added to PendingDeletes, so those keys can be missing on old state.
+        const pdFolders    = s.pendingDeletes.folders ?? []
+        const pdDecks      = s.pendingDeletes.decks ?? []
+        const pdCards      = s.pendingDeletes.cards ?? []
+        const pdSessions   = s.pendingDeletes.sessions ?? []
+        const pdReviewLogs = s.pendingDeletes.reviewLogs ?? []
+        if (pdFolders.length || pdDecks.length || pdCards.length || pdSessions.length || pdReviewLogs.length) {
+          useLibraryStore.getState().clearPendingDeletes({
+            folders: pdFolders,
+            decks: pdDecks,
+            cards: pdCards,
+            sessions: pdSessions,
+            reviewLogs: pdReviewLogs,
+          })
           // Immediately tell other tabs which items were deleted so they strip
           // them from their local state before their own push acquires the lock.
           syncChannel.current?.postMessage({
             type: 'push-complete',
-            deletedFolders: s.pendingDeletes.folders,
-            deletedDecks:   s.pendingDeletes.decks,
-            deletedCards:   s.pendingDeletes.cards,
-            deletedSessions:   s.pendingDeletes.sessions,
-            deletedReviewLogs: s.pendingDeletes.reviewLogs,
+            deletedFolders: pdFolders,
+            deletedDecks:   pdDecks,
+            deletedCards:   pdCards,
+            deletedSessions:   pdSessions,
+            deletedReviewLogs: pdReviewLogs,
           })
         }
       }

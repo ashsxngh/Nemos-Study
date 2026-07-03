@@ -1,16 +1,44 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Inbox, Play, CheckCircle2, Sparkles, RotateCcw } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
+import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function InboxPage() {
-  const { getDueCards, getNewCards, getReviewsDue } = useLibraryStore()
-  const dueCards = getDueCards()
-  const newCards = getNewCards()
-  const reviews = getReviewsDue()
+  const { cards, decks, folders, srsData, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
+    useShallow((s) => ({
+      cards: s.cards,
+      decks: s.decks,
+      folders: s.folders,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getDueCards: s.getDueCards,
+      getNewCards: s.getNewCards,
+      getReviewsDue: s.getReviewsDue,
+    }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
+  const dueCards = useMemo(
+    () => getDueCards(),
+    [cards, decks, folders, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getDueCards]
+  )
+  const newCards = useMemo(
+    () => getNewCards(),
+    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+  )
+  const reviews = useMemo(
+    () => getReviewsDue(),
+    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+  )
 
   const isEmpty = dueCards.length === 0
 

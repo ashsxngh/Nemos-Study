@@ -1,16 +1,33 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Sparkles, Play, CheckCircle2 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function NewCardsPage() {
-  const { getNewCards } = useLibraryStore()
-  const { newCardsPerDay } = useSettingsStore()
-  const newCards = getNewCards()
+  const { cards, decks, srsData, fsrsData, getNewCards } = useLibraryStore(
+    useShallow((s) => ({
+      cards: s.cards,
+      decks: s.decks,
+      srsData: s.srsData,
+      fsrsData: s.fsrsData,
+      getNewCards: s.getNewCards,
+    }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const { algorithm, newCardsPerDay } = useSettingsStore(
+    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
+  )
+  const newCards = useMemo(
+    () => getNewCards(),
+    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+  )
 
   const isEmpty = newCards.length === 0
 

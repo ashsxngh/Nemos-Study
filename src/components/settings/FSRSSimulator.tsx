@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Check, X, Ban, ArrowRight } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useSettingsStore } from '@/store/useSettingsStore'
@@ -31,7 +32,13 @@ function fmtInterval(days: number): string {
 }
 
 export function FSRSSimulator() {
-  const { fsrsWeights, fsrsTargetRetention, fsrsMaxInterval } = useSettingsStore()
+  const { fsrsWeights, fsrsTargetRetention, fsrsMaxInterval } = useSettingsStore(
+    useShallow((s) => ({
+      fsrsWeights: s.fsrsWeights,
+      fsrsTargetRetention: s.fsrsTargetRetention,
+      fsrsMaxInterval: s.fsrsMaxInterval,
+    }))
+  )
   const params = {
     ...DEFAULT_FSRS_PARAMS,
     weights: fsrsWeights,

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { getPeriodRange, logsInRange, type Period } from '@/lib/periods'
 
@@ -23,7 +24,9 @@ function useCountUp(target: number, duration = 800): number {
 interface StatsOverviewProps { period: Period }
 
 export function StatsOverview({ period }: StatsOverviewProps) {
-  const { reviewLogs, sessions } = useHistoryStore()
+  const { reviewLogs, sessions } = useHistoryStore(
+    useShallow((s) => ({ reviewLogs: s.reviewLogs, sessions: s.sessions }))
+  )
   const { start, end } = getPeriodRange(period)
 
   const periodLogs = logsInRange(reviewLogs, start, end)

@@ -20,6 +20,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { getExamDeckIds, getPulledForwardCardIds, computeCardUrgencies } from '@/lib/examScheduler'
 import { generateId } from '@/lib/utils'
 import { createIDBStorage } from '@/lib/idbStorage'
+import { CARD_TEXT_MAX_LENGTH, NAME_MAX_LENGTH } from '@/lib/limits'
 
 const USER_ID = 'local-user'
 
@@ -53,7 +54,14 @@ interface LibraryState {
   createCard: (deckId: string, front: string, back: string, type?: CardType, tags?: string[]) => Card
   importCards: (deckId: string, cards: Array<{ front: string; back: string; type?: CardType; tags?: string[] }>) => void
   updateCard: (id: string, updates: Partial<Pick<Card, 'front' | 'back' | 'type' | 'hint' | 'tags' | 'isPinned' | 'isArchived' | 'order' | 'deckId'>>) => void
+  // Applies many card updates in a single setState/persist write — used for
+  // bulk operations (drag-reorder, bulk move/tag/delete) where updating one
+  // card at a time would clone the full cards array N times.
+  updateCardsBatch: (updates: Array<{ id: string; updates: Partial<Pick<Card, 'front' | 'back' | 'type' | 'hint' | 'tags' | 'isPinned' | 'isArchived' | 'order' | 'deckId'>> }>) => void
   deleteCard: (id: string) => void
+  // Same as calling deleteCard per id, but a single setState/persist write —
+  // used by bulk-delete in the deck view instead of N individual deletes.
+  deleteCardsBatch: (ids: string[]) => void
 
   // SRS actions
   initCardSRS: (cardId: string) => void
@@ -75,6 +83,10 @@ interface LibraryState {
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
   getDeckMastery: (deckId: string) => number
+}
+
+function clamp(str: string, max: number): string {
+  return str.length > max ? str.slice(0, max) : str
 }
 
 function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] {
@@ -160,7 +172,7 @@ export const useLibraryStore = create<LibraryState>()(
           id: generateId(),
           userId: USER_ID,
           parentId: parentId ?? null,
-          name,
+          name: clamp(name, NAME_MAX_LENGTH),
           color,
           isStarred: false,
           isArchived: false,
@@ -173,9 +185,10 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       updateFolder: (id, updates) => {
+        const clamped = updates.name !== undefined ? { ...updates, name: clamp(updates.name, NAME_MAX_LENGTH) } : updates
         set((s) => ({
           folders: s.folders.map((f) =>
-            f.id === id ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
+            f.id === id ? { ...f, ...clamped, updatedAt: new Date().toISOString() } : f
           ),
         }))
       },
@@ -218,7 +231,7 @@ export const useLibraryStore = create<LibraryState>()(
           id: generateId(),
           userId: USER_ID,
           folderId: folderId ?? null,
-          name,
+          name: clamp(name, NAME_MAX_LENGTH),
           description,
           isStarred: false,
           isArchived: false,
@@ -232,9 +245,10 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       updateDeck: (id, updates) => {
+        const clamped = updates.name !== undefined ? { ...updates, name: clamp(updates.name, NAME_MAX_LENGTH) } : updates
         set((s) => ({
           decks: s.decks.map((d) =>
-            d.id === id ? { ...d, ...updates, updatedAt: new Date().toISOString() } : d
+            d.id === id ? { ...d, ...clamped, updatedAt: new Date().toISOString() } : d
           ),
         }))
       },
@@ -301,8 +315,8 @@ export const useLibraryStore = create<LibraryState>()(
           deckId,
           userId: USER_ID,
           type,
-          front,
-          back,
+          front: clamp(front, CARD_TEXT_MAX_LENGTH),
+          back: clamp(back, CARD_TEXT_MAX_LENGTH),
           hint: '',
           tags: tags ?? [],
           isPinned: false,
@@ -339,8 +353,8 @@ export const useLibraryStore = create<LibraryState>()(
             deckId,
             userId: USER_ID,
             type: raw.type ?? 'basic',
-            front: raw.front,
-            back: raw.back,
+            front: clamp(raw.front, CARD_TEXT_MAX_LENGTH),
+            back: clamp(raw.back, CARD_TEXT_MAX_LENGTH),
             hint: '',
             tags: raw.tags ?? [],
             isPinned: false,
@@ -363,11 +377,31 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       updateCard: (id, updates) => {
+        const clamped = { ...updates }
+        if (clamped.front !== undefined) clamped.front = clamp(clamped.front, CARD_TEXT_MAX_LENGTH)
+        if (clamped.back !== undefined) clamped.back = clamp(clamped.back, CARD_TEXT_MAX_LENGTH)
         set((s) => ({
           cards: s.cards.map((c) =>
-            c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
+            c.id === id ? { ...c, ...clamped, updatedAt: new Date().toISOString() } : c
           ),
         }))
+      },
+
+      updateCardsBatch: (updates) => {
+        set((s) => {
+          const now = new Date().toISOString()
+          const updateMap = new Map(updates.map((u) => [u.id, u.updates]))
+          return {
+            cards: s.cards.map((c) => {
+              const u = updateMap.get(c.id)
+              if (!u) return c
+              const clamped = { ...u }
+              if (clamped.front !== undefined) clamped.front = clamp(clamped.front, CARD_TEXT_MAX_LENGTH)
+              if (clamped.back !== undefined) clamped.back = clamp(clamped.back, CARD_TEXT_MAX_LENGTH)
+              return { ...c, ...clamped, updatedAt: now }
+            }),
+          }
+        })
       },
 
       deleteCard: (id) => {
@@ -401,6 +435,47 @@ export const useLibraryStore = create<LibraryState>()(
           pendingDeletes: {
             ...s.pendingDeletes,
             cards: [...s.pendingDeletes.cards, id],
+          },
+        }))
+      },
+
+      deleteCardsBatch: (ids) => {
+        if (!ids.length) return
+        const { cards, decks, srsData, fsrsData } = get()
+        const idSet = new Set(ids)
+        const newSrsData = { ...srsData }
+        const newFsrsData = { ...fsrsData }
+        ids.forEach((id) => {
+          delete newSrsData[id]
+          delete newFsrsData[id]
+        })
+
+        // Save each to trash before removing (trash's own list is small —
+        // this loop isn't the O(n²) hazard the cards/srsData/fsrsData clones are).
+        ids.forEach((id) => {
+          const card = cards.find((c) => c.id === id)
+          if (!card) return
+          const deckName = decks.find((d) => d.id === card.deckId)?.name
+          useTrashStore.getState().add({
+            id: card.id,
+            type: 'card',
+            deletedAt: new Date().toISOString(),
+            name: card.front,
+            parentName: deckName,
+            snippet: card.back?.slice(0, 120),
+            card,
+            cardSRS: srsData[id],
+            cardFSRS: fsrsData[id],
+          })
+        })
+
+        set((s) => ({
+          cards: s.cards.filter((c) => !idSet.has(c.id)),
+          srsData: newSrsData,
+          fsrsData: newFsrsData,
+          pendingDeletes: {
+            ...s.pendingDeletes,
+            cards: [...s.pendingDeletes.cards, ...ids],
           },
         }))
       },
@@ -593,9 +668,13 @@ export const useLibraryStore = create<LibraryState>()(
 
         // Count new cards introduced today using wasNew-flagged logs (Issue 7).
         // This correctly excludes lapsed graduated cards regardless of algorithm.
-        const studiedNewToday = pool.filter((c) =>
-          reviewLogs.some((l) => l.cardId === c.id && l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr)
-        ).length
+        // Precompute the set of cards touched by a wasNew log today in one pass
+        // over reviewLogs (O(logs)) instead of scanning all logs per card (O(cards×logs)).
+        const wasNewTodayCardIds = new Set<string>()
+        for (const l of reviewLogs) {
+          if (l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr) wasNewTodayCardIds.add(l.cardId)
+        }
+        const studiedNewToday = pool.filter((c) => wasNewTodayCardIds.has(c.id)).length
 
         const remaining = Math.max(0, newCardsPerDay - studiedNewToday)
         if (remaining === 0) return []

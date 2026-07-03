@@ -8,9 +8,11 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { FileText, Search, X, Hash, Eye, Edit2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
+import { useShallow } from 'zustand/react/shallow'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useAppStore } from '@/store/useAppStore'
+import { NOTE_CONTENT_MAX_LENGTH, NAME_MAX_LENGTH } from '@/lib/limits'
 
 interface NotesLayoutProps {
   onCreateNote?: () => void
@@ -18,7 +20,9 @@ interface NotesLayoutProps {
 }
 
 export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
-  const { notes, updateNote, deleteNote } = useNotesStore()
+  const { notes, updateNote, deleteNote } = useNotesStore(
+    useShallow((s) => ({ notes: s.notes, updateNote: s.updateNote, deleteNote: s.deleteNote }))
+  )
 
   const [activeNoteId, setActiveNoteId] = useState<string | null>(initialNoteId ?? null)
   const [search, setSearch] = useState('')
@@ -195,6 +199,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
               <input
                 type="text"
                 value={title}
+                maxLength={NAME_MAX_LENGTH}
                 onChange={(e) => handleTitleChange(e.target.value)}
                 placeholder="Untitled"
                 className={cn(
@@ -278,6 +283,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
                 <textarea
                   ref={textareaRef}
                   value={content}
+                  maxLength={NOTE_CONTENT_MAX_LENGTH}
                   onChange={(e) => handleContentChange(e.target.value)}
                   placeholder="Start writing… (Markdown supported)"
                   className={cn(

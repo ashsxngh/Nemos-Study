@@ -8,7 +8,7 @@ import { Plus } from 'lucide-react'
 import { useNotesStore } from '@/store/useNotesStore'
 
 export default function NotesPage() {
-  const { createNote } = useNotesStore()
+  const createNote = useNotesStore((s) => s.createNote)
   const [pendingNoteId, setPendingNoteId] = useState<string | null>(null)
 
   const handleNewNote = () => {

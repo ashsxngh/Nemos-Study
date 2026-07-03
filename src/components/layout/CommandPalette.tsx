@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Search, LayoutDashboard, Library, BookOpen, FileText,
   BarChart3, Calendar, Settings, Plus, Flame, Star, Moon, Sun,
@@ -24,10 +25,17 @@ interface CommandItem {
 }
 
 export function CommandPalette() {
-  const { commandPaletteOpen, closeCommandPalette, theme, setTheme } = useAppStore()
-  const { decks, cards } = useLibraryStore()
-  const { notes } = useNotesStore()
-  const { recentDeckIds } = useRecentStore()
+  const { commandPaletteOpen, closeCommandPalette, theme, setTheme } = useAppStore(
+    useShallow((s) => ({
+      commandPaletteOpen: s.commandPaletteOpen,
+      closeCommandPalette: s.closeCommandPalette,
+      theme: s.theme,
+      setTheme: s.setTheme,
+    }))
+  )
+  const { decks, cards } = useLibraryStore(useShallow((s) => ({ decks: s.decks, cards: s.cards })))
+  const notes = useNotesStore((s) => s.notes)
+  const recentDeckIds = useRecentStore((s) => s.recentDeckIds)
   const router = useRouter()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)

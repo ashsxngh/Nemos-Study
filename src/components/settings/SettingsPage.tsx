@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Sun, Brain, Bell, Keyboard, Database, AlertTriangle, Sparkles, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
@@ -46,8 +47,10 @@ const shortcuts = [
 
 export function SettingsPage() {
   const [activeSection, setActiveSection] = useState('appearance')
-  const { theme, setTheme, addToast } = useAppStore()
-  const { reviewLogs } = useHistoryStore()
+  const { theme, setTheme, addToast } = useAppStore(
+    useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme, addToast: s.addToast }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const settings = useSettingsStore()
   const { updateSettings, resetSettings } = settings
 

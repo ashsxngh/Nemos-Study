@@ -76,7 +76,7 @@ function getMonthPositions(weeks: DayCell[][]): { label: string; col: number }[]
 }
 
 export function StreakHeatmap() {
-  const { reviewLogs } = useHistoryStore()
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const year = new Date().getFullYear()
   const weeks = buildYearData(reviewLogs, year)
   const monthPositions = getMonthPositions(weeks)

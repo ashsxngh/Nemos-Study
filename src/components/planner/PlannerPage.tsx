@@ -7,6 +7,7 @@ import {
   Plus, X, BookOpen, Folder, AlertTriangle, Target, Settings, Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { useShallow } from 'zustand/react/shallow'
 import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -190,8 +191,17 @@ function ExamEditPanel({ exam, onClose }: { exam: Exam; onClose: () => void }) {
   const {
     deleteExam, addDeckToExam, removeDeckFromExam,
     addFolderToExam, removeFolderFromExam, setTargetRetention,
-  } = useExamStore()
-  const { decks, folders } = useLibraryStore()
+  } = useExamStore(
+    useShallow((s) => ({
+      deleteExam: s.deleteExam,
+      addDeckToExam: s.addDeckToExam,
+      removeDeckFromExam: s.removeDeckFromExam,
+      addFolderToExam: s.addFolderToExam,
+      removeFolderFromExam: s.removeFolderFromExam,
+      setTargetRetention: s.setTargetRetention,
+    }))
+  )
+  const { decks, folders } = useLibraryStore(useShallow((s) => ({ decks: s.decks, folders: s.folders })))
 
   const examDeckIds = getExamDeckIds(exam, decks, folders)
   // Individually-linked decks (not covered via a folder)
@@ -316,8 +326,10 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
   onToggleEdit: () => void
 }) {
   const router = useRouter()
-  const { decks, folders, cards, fsrsData } = useLibraryStore()
-  const { rateExam } = useExamStore()
+  const { decks, folders, cards, fsrsData } = useLibraryStore(
+    useShallow((s) => ({ decks: s.decks, folders: s.folders, cards: s.cards, fsrsData: s.fsrsData }))
+  )
+  const rateExam = useExamStore((s) => s.rateExam)
 
   const days = daysUntil(exam.date)
   const isPast = days < 0
@@ -542,8 +554,8 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
 // ── Main planner ──────────────────────────────────────────────────────────────
 
 export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProps) {
-  const { exams, addExam } = useExamStore()
-  const { folders } = useLibraryStore()
+  const { exams, addExam } = useExamStore(useShallow((s) => ({ exams: s.exams, addExam: s.addExam })))
+  const folders = useLibraryStore((s) => s.folders)
 
   const [showExamForm, setShowExamForm] = useState(false)
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null)
@@ -568,7 +580,13 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
   const [pomodoroRunning, setPomodoroRunning] = useState(false)
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60)
   const [pomodoroMode, setPomodoroMode] = useState<'work' | 'break'>('work')
-  const { plannerTasks: tasks, addPlannerTask, togglePlannerTask } = useAppStore()
+  const { plannerTasks: tasks, addPlannerTask, togglePlannerTask } = useAppStore(
+    useShallow((s) => ({
+      plannerTasks: s.plannerTasks,
+      addPlannerTask: s.addPlannerTask,
+      togglePlannerTask: s.togglePlannerTask,
+    }))
+  )
   const [newTask, setNewTask] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
