@@ -16,6 +16,15 @@ interface Shortcut {
 export function useKeyboard(shortcuts: Shortcut[]) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Must be checked before preventDefault: a plain keypress ('/', '[' …)
+      // inside a field is the user typing that character — swallowing it here
+      // would block it from ever reaching the input. Modifier combos
+      // (Ctrl+K etc.) are still allowed through while typing.
+      const target = e.target as HTMLElement
+      const inEditable =
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      const plainKeypress = !e.ctrlKey && !e.metaKey && !e.altKey
+
       for (const shortcut of shortcuts) {
         const metaMatch = shortcut.meta ? (e.metaKey || e.ctrlKey) : true
         const ctrlMatch = shortcut.ctrl ? e.ctrlKey : true
@@ -25,6 +34,7 @@ export function useKeyboard(shortcuts: Shortcut[]) {
         const keyMatch = e.key.toLowerCase() === shortcut.key.toLowerCase()
 
         if (keyMatch && metaMatch && ctrlMatch && shiftMatch && altMatch) {
+          if (inEditable && plainKeypress) continue
           e.preventDefault()
           shortcut.handler(e)
           break

@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 import type { Card, ReviewLog, SRSData } from '@/lib/types'
 import type { FSRSState } from '@/lib/srs'
+import { generateId } from '@/lib/utils'
 
 interface UndoEntry {
   cardId: string
@@ -64,7 +65,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       showAnswer: false,
       logs: [],
       startedAt: new Date(),
-      sessionId: Math.random().toString(36).slice(2),
+      sessionId: generateId(),
       undoStack: [],
       redoStack: [],
     }),

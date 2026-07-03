@@ -5,13 +5,13 @@ import { ChevronRight, Folder as FolderIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Folder } from '@/lib/types'
 
-interface FolderNode {
+export interface FolderNode {
   folder: Folder
   depth: number
   children: FolderNode[]
 }
 
-function buildFolderTree(folders: Folder[]): FolderNode[] {
+export function buildFolderTree(folders: Folder[]): FolderNode[] {
   const nodeMap = new Map<string, FolderNode>()
   for (const f of folders) {
     nodeMap.set(f.id, { folder: f, depth: 0, children: [] })

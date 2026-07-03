@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bell, Sun, Moon, User, WifiOff, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/store/useAppStore'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { AnchoredMenu } from '@/components/ui/Menu'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
@@ -20,11 +21,7 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
   const isDark = theme === 'dark'
   const router = useRouter()
 
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [notifOpen, setNotifOpen] = useState(false)
   const [userEmail, setUserEmail] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const notifRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return
@@ -32,16 +29,6 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUserEmail(session?.user?.email ?? null)
     })
-  }, [])
-
-  // Close dropdowns on outside click
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false)
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
-    }
-    document.addEventListener('mousedown', handleOutside)
-    return () => document.removeEventListener('mousedown', handleOutside)
   }, [])
 
   async function handleSignOut() {
@@ -84,21 +71,23 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
         </Tooltip>
 
         {/* Notifications */}
-        <div className="relative" ref={notifRef}>
-          <Tooltip content="Notifications">
-            <button
-              onClick={() => setNotifOpen((v) => !v)}
-              className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors relative"
-            >
-              <Bell size={14} />
-              {notifications.length > 0 && (
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[var(--accent)] rounded-full" />
-              )}
-            </button>
-          </Tooltip>
-
-          {notifOpen && (
-            <div className="absolute right-0 top-9 w-72 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-xl z-50 overflow-hidden animate-scale-in">
+        <AnchoredMenu
+          panelClassName="w-72 rounded-[var(--radius-lg)] shadow-xl"
+          trigger={({ onClick }) => (
+            <Tooltip content="Notifications">
+              <button
+                onClick={onClick}
+                className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors relative"
+              >
+                <Bell size={14} />
+                {notifications.length > 0 && (
+                  <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[var(--accent)] rounded-full" />
+                )}
+              </button>
+            </Tooltip>
+          )}
+          panel={() => (
+            <>
               <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border)]">
                 <span className="text-xs font-semibold text-[var(--text-primary)]">Notifications</span>
                 {notifications.length > 0 && (
@@ -122,22 +111,24 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
                   ))}
                 </div>
               )}
-            </div>
+            </>
           )}
-        </div>
+        />
 
         {/* Account */}
-        <div className="relative" ref={dropdownRef}>
-          <button
-            onClick={() => setDropdownOpen((prev) => !prev)}
-            className="w-6 h-6 rounded-full bg-[var(--bg-active)] flex items-center justify-center hover:bg-[var(--border)] transition-colors"
-            aria-label="Account menu"
-          >
-            <User size={12} className="text-[var(--text-secondary)]" />
-          </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 top-8 w-52 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-lg z-50 overflow-hidden animate-scale-in">
+        <AnchoredMenu
+          panelClassName="w-52 rounded-[var(--radius-lg)]"
+          trigger={({ onClick }) => (
+            <button
+              onClick={onClick}
+              className="w-6 h-6 rounded-full bg-[var(--bg-active)] flex items-center justify-center hover:bg-[var(--border)] transition-colors"
+              aria-label="Account menu"
+            >
+              <User size={12} className="text-[var(--text-secondary)]" />
+            </button>
+          )}
+          panel={() => (
+            <>
               {userEmail && (
                 <div className="px-3 py-2 border-b border-[var(--border)]">
                   <p className="text-xs text-[var(--text-muted)] truncate">{userEmail}</p>
@@ -152,9 +143,9 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
               >
                 Sign out
               </button>
-            </div>
+            </>
           )}
-        </div>
+        />
       </div>
     </header>
   )

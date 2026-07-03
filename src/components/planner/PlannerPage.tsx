@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useAppStore } from '@/store/useAppStore'
 import {
   computeExamRetentionStats,
   computePerTopicBreakdown,
@@ -567,10 +568,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
   const [pomodoroRunning, setPomodoroRunning] = useState(false)
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60)
   const [pomodoroMode, setPomodoroMode] = useState<'work' | 'break'>('work')
-  const [tasks, setTasks] = useState([
-    { id: '1', label: 'Review flashcards', done: false },
-    { id: '2', label: 'Read notes', done: false },
-  ])
+  const { plannerTasks: tasks, addPlannerTask, togglePlannerTask } = useAppStore()
   const [newTask, setNewTask] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -593,11 +591,9 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [pomodoroRunning, pomodoroMode])
 
-  const toggleTask = (id: string) =>
-    setTasks((ts) => ts.map((t) => t.id === id ? { ...t, done: !t.done } : t))
   const addTask = () => {
     if (!newTask.trim()) return
-    setTasks((ts) => [...ts, { id: Date.now().toString(), label: newTask.trim(), done: false }])
+    addPlannerTask(newTask.trim())
     setNewTask('')
   }
 
@@ -784,7 +780,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
             </div>
             <div className="divide-y divide-[var(--border)]">
               {tasks.map((task) => (
-                <button key={task.id} onClick={() => toggleTask(task.id)}
+                <button key={task.id} onClick={() => togglePlannerTask(task.id)}
                   className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--bg-hover)] transition-colors text-left">
                   <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0',
                     task.done ? 'bg-[var(--success)] border-[var(--success)]' : 'border-[var(--border-strong)]')}>

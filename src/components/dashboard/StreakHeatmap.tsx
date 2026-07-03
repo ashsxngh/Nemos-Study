@@ -1,7 +1,7 @@
 'use client'
 
 import { cn, formatDate } from '@/lib/utils'
-import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
@@ -76,7 +76,7 @@ function getMonthPositions(weeks: DayCell[][]): { label: string; col: number }[]
 }
 
 export function StreakHeatmap() {
-  const { reviewLogs } = useLibraryStore()
+  const { reviewLogs } = useHistoryStore()
   const year = new Date().getFullYear()
   const weeks = buildYearData(reviewLogs, year)
   const monthPositions = getMonthPositions(weeks)

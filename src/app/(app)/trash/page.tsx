@@ -113,6 +113,7 @@ export default function TrashPage() {
   const { items, remove, purgeExpired, clear } = useTrashStore()
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmEntry, setConfirmEntry] = useState<TrashEntry | null>(null)
+  const [clearingAll, setClearingAll] = useState(false)
 
   // Purge expired items on mount
   useEffect(() => {
@@ -130,6 +131,8 @@ export default function TrashPage() {
       if (entry.type === 'card' && entry.card) {
         const delSrs = await supabase.from('srs_data').delete().eq('card_id', entry.card.id)
         if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
+        const delFsrs = await supabase.from('fsrs_data').delete().eq('card_id', entry.card.id)
+        if (delFsrs.error) throw new Error(`fsrs_data: ${delFsrs.error.message}`)
         const delCard = await supabase.from('cards').delete().eq('id', entry.card.id)
         if (delCard.error) throw new Error(`cards: ${delCard.error.message}`)
       } else if (entry.type === 'deck' && entry.deck) {
@@ -137,6 +140,8 @@ export default function TrashPage() {
         if (cardIds.length) {
           const delSrs = await supabase.from('srs_data').delete().in('card_id', cardIds)
           if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
+          const delFsrs = await supabase.from('fsrs_data').delete().in('card_id', cardIds)
+          if (delFsrs.error) throw new Error(`fsrs_data: ${delFsrs.error.message}`)
           const delCards = await supabase.from('cards').delete().in('id', cardIds)
           if (delCards.error) throw new Error(`cards: ${delCards.error.message}`)
         }
@@ -233,10 +238,14 @@ export default function TrashPage() {
                 <Button
                   variant="danger"
                   size="sm"
-                  onClick={() => {
-                    items.forEach((entry) => deleteFromSupabase(entry))
+                  loading={clearingAll}
+                  onClick={async () => {
+                    setClearingAll(true)
+                    await Promise.all(items.map((entry) => deleteFromSupabase(entry)))
                     clear()
                     setConfirmClear(false)
+                    setClearingAll(false)
+                    useAppStore.getState().addToast({ type: 'success', message: 'Trash cleared.' })
                   }}
                 >
                   Yes, clear all

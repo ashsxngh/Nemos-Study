@@ -91,7 +91,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
     if (card) {
       updateCard(card.id, { front: front.trim(), back, type, tags })
     } else {
-      createCard(deckId, front.trim(), back, type)
+      createCard(deckId, front.trim(), back, type, tags)
       setFront(''); setBack(''); setTags([]); setTagInput(''); setImagePreview(null)
     }
     onDone?.()
@@ -163,7 +163,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
     if (card) {
       updateCard(card.id, { front: front.trim(), back, type, tags })
     } else {
-      createCard(deckId, front.trim(), back, type)
+      createCard(deckId, front.trim(), back, type, tags)
       // Reset for next card
       setFront('')
       setBack('')
@@ -282,7 +282,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
                 if (card) {
                   updateCard(card.id, { front: front.trim(), back, type, tags })
                 } else {
-                  createCard(deckId, front.trim(), back, type)
+                  createCard(deckId, front.trim(), back, type, tags)
                   setFront('')
                   setBack('')
                   setTags([])

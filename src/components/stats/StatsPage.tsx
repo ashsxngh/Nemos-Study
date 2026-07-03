@@ -12,6 +12,7 @@ import {
 import { Progress } from '@/components/ui/Progress'
 import { Badge } from '@/components/ui/Badge'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, formatDate } from '@/lib/utils'
 
@@ -134,7 +135,8 @@ export function StatsPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const router = useRouter()
 
-  const { cards, decks, sessions, reviewLogs, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore()
+  const { cards, decks, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore()
+  const { sessions, reviewLogs } = useHistoryStore()
   const srsData = useLibraryStore((s) => s.srsData)
   const fsrsData = useLibraryStore((s) => s.fsrsData)
   const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold, algorithm } = useSettingsStore()

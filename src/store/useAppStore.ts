@@ -3,6 +3,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Theme, ToastData } from '@/lib/types'
+import { generateId } from '@/lib/utils'
+
+export interface PlannerTask {
+  id: string
+  label: string
+  done: boolean
+}
 
 interface AppState {
   theme: Theme
@@ -17,6 +24,7 @@ interface AppState {
   syncOffline: boolean
   manualSync: (() => Promise<void>) | null
   lastBurnoutNudgeAt: string | null
+  plannerTasks: PlannerTask[]
 
   setTheme: (theme: Theme) => void
   toggleSidebar: () => void
@@ -34,6 +42,8 @@ interface AppState {
   setSyncOffline: (v: boolean) => void
   setManualSync: (fn: (() => Promise<void>) | null) => void
   setLastBurnoutNudgeAt: (iso: string) => void
+  addPlannerTask: (label: string) => void
+  togglePlannerTask: (id: string) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -51,6 +61,10 @@ export const useAppStore = create<AppState>()(
       syncOffline: false,
       manualSync: null,
       lastBurnoutNudgeAt: null,
+      plannerTasks: [
+        { id: generateId(), label: 'Review flashcards', done: false },
+        { id: generateId(), label: 'Read notes', done: false },
+      ],
 
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -63,7 +77,7 @@ export const useAppStore = create<AppState>()(
         set((s) => ({
           toasts: [
             ...s.toasts,
-            { ...toast, id: Math.random().toString(36).slice(2) },
+            { ...toast, id: generateId() },
           ],
         })),
       removeToast: (id) =>
@@ -75,6 +89,14 @@ export const useAppStore = create<AppState>()(
       setSyncOffline: (v) => set({ syncOffline: v }),
       setManualSync: (fn) => set({ manualSync: fn }),
       setLastBurnoutNudgeAt: (iso) => set({ lastBurnoutNudgeAt: iso }),
+      addPlannerTask: (label) =>
+        set((s) => ({
+          plannerTasks: [...s.plannerTasks, { id: generateId(), label, done: false }],
+        })),
+      togglePlannerTask: (id) =>
+        set((s) => ({
+          plannerTasks: s.plannerTasks.map((t) => t.id === id ? { ...t, done: !t.done } : t),
+        })),
     }),
     {
       name: 'nemos-app',
@@ -84,6 +106,7 @@ export const useAppStore = create<AppState>()(
         lastOpenDeckId: s.lastOpenDeckId,
         lastOpenNoteId: s.lastOpenNoteId,
         lastBurnoutNudgeAt: s.lastBurnoutNudgeAt,
+        plannerTasks: s.plannerTasks,
       }),
     }
   )

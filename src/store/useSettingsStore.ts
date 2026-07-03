@@ -24,6 +24,7 @@ interface SettingsData {
   // Burnout / workload
   burnoutWarningEnabled: boolean
   burnoutThresholdCards: number
+  burnoutTimeWarningEnabled: boolean
   burnoutThresholdMinutes: number
 
   // Review behaviour
@@ -85,6 +86,7 @@ const defaults: SettingsData = {
 
   burnoutWarningEnabled: true,
   burnoutThresholdCards: 150,
+  burnoutTimeWarningEnabled: true,
   burnoutThresholdMinutes: 90,
 
   showAnswerTimer: false,

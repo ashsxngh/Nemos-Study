@@ -2,10 +2,12 @@
 
 import { BookOpen, Clock } from 'lucide-react'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { formatRelativeTime } from '@/lib/utils'
 
 export function RecentActivity() {
-  const { sessions, decks } = useLibraryStore()
+  const { decks } = useLibraryStore()
+  const sessions = useHistoryStore((s) => s.sessions)
 
   const recentSessions = [...sessions]
     .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())

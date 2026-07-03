@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useExamStore } from '@/store/useExamStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
@@ -69,6 +70,43 @@ function toSnake(obj: unknown): unknown {
   return obj
 }
 
+// Structural equality, key-order insensitive — used to drop realtime echo
+// events (our own writes broadcast back to us) without a setState call.
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((v, i) => deepEqual(v, b[i]))
+  }
+  const ka = Object.keys(a as PlainObject)
+  const kb = Object.keys(b as PlainObject)
+  if (ka.length !== kb.length) return false
+  return ka.every((k) => deepEqual((a as PlainObject)[k], (b as PlainObject)[k]))
+}
+
+// One-time migration: reviewLogs/sessions used to live inside the persisted
+// library store ('nemos-library'). They now have their own store — persist's
+// default shallow merge keeps the old blob's stray keys on the rehydrated
+// state, so lift them into the history store and blank them out of the
+// library state (undefined values are dropped by JSON.stringify on the
+// library store's next persist write). Runs after rehydrate, before the
+// pre-existing-IDs snapshot and first pull.
+function migrateHistoryToOwnStore(): void {
+  const lib = useLibraryStore.getState() as unknown as Record<string, unknown>
+  const strayLogs = Array.isArray(lib.reviewLogs) ? (lib.reviewLogs as ReviewLog[]) : []
+  const straySessions = Array.isArray(lib.sessions) ? (lib.sessions as ReviewSession[]) : []
+  if (!strayLogs.length && !straySessions.length) return
+  const hist = useHistoryStore.getState()
+  useHistoryStore.setState({
+    // If the history store already has data (migration already ran), keep it —
+    // the stray keys are then just leftovers to strip below.
+    reviewLogs: hist.reviewLogs.length ? hist.reviewLogs : strayLogs,
+    sessions: hist.sessions.length ? hist.sessions : straySessions,
+  })
+  useLibraryStore.setState({ reviewLogs: undefined, sessions: undefined } as unknown as Parameters<typeof useLibraryStore.setState>[0])
+  if (DEBUG_SYNC) console.log(`[SYNC] migrateHistoryToOwnStore: moved ${strayLogs.length} log(s) / ${straySessions.length} session(s) into nemos-history`)
+}
 
 // IDs that existed in localStorage when this session loaded (snapshotted once,
 // before the first pull). An item that is local-only AND in this set was deleted
@@ -87,12 +125,13 @@ let preExistingSnapshotTaken = false
 function snapshotPreExistingIds(): void {
   if (preExistingSnapshotTaken) return
   const s  = useLibraryStore.getState()
+  const hs = useHistoryStore.getState()
   const ns = useNotesStore.getState()
   const es = useExamStore.getState()
   s.folders.forEach((f) => preExistingIds.folders.add(f.id))
   s.decks.forEach((d)   => preExistingIds.decks.add(d.id))
   s.cards.forEach((c)   => preExistingIds.cards.add(c.id))
-  s.reviewLogs.forEach((l) => preExistingIds.reviewLogs.add(l.id))
+  hs.reviewLogs.forEach((l) => preExistingIds.reviewLogs.add(l.id))
   ns.notes.forEach((n)  => preExistingIds.notes.add(n.id))
   es.exams.forEach((e)  => preExistingIds.exams.add(e.id))
   preExistingSnapshotTaken = true
@@ -252,14 +291,15 @@ async function runPull(
   if (examsRes.error)    console.error('[SYNC] pullFromSupabase: exams error', formatPgError(examsRes.error))
   if (settingsRes.error) console.error('[SYNC] pullFromSupabase: user_settings error', formatPgError(settingsRes.error))
 
-  // An incremental pull that errored on any table can't be trusted to have a
-  // complete picture — bail out and let the caller retry as a full pull.
-  if (incremental) {
-    const anyError = foldersRes.error || decksRes.error || cardsRes.error || srsRes.error ||
-      fsrsRes.error || sessionsRes.error || logsRes.error || notesRes.error || examsRes.error || settingsRes.error
-    if (anyError) {
-      throw new Error('incremental pull: one or more tables errored')
-    }
+  // Tracked across both full and incremental pulls: an incremental pull that
+  // errored on any table can't be trusted to have a complete picture (bail out
+  // and let the caller retry as a full pull); a full pull that errored on any
+  // table must not advance the watermark, or the rows missed during the error
+  // window would never be fetched again until a new tab starts a fresh full pull.
+  const anyError = !!(foldersRes.error || decksRes.error || cardsRes.error || srsRes.error ||
+    fsrsRes.error || sessionsRes.error || logsRes.error || notesRes.error || examsRes.error || settingsRes.error)
+  if (incremental && anyError) {
+    throw new Error('incremental pull: one or more tables errored')
   }
 
   // Filter out anything locally queued for deletion so a pull never resurrects
@@ -267,9 +307,11 @@ async function runPull(
   const { pendingDeletes } = useLibraryStore.getState()
   const { pendingDeletedNotes } = useNotesStore.getState()
   const { pendingDeletedExams } = useExamStore.getState()
-  const pendingFolderSet = new Set(pendingDeletes.folders)
-  const pendingDeckSet   = new Set(pendingDeletes.decks)
-  const pendingCardSet   = new Set(pendingDeletes.cards)
+  const pendingFolderSet  = new Set(pendingDeletes.folders)
+  const pendingDeckSet    = new Set(pendingDeletes.decks)
+  const pendingCardSet    = new Set(pendingDeletes.cards)
+  const pendingSessionSet = new Set(pendingDeletes.sessions)
+  const pendingLogSet     = new Set(pendingDeletes.reviewLogs)
   const pendingNoteSet   = new Set(pendingDeletedNotes)
   const pendingExamSet   = new Set(pendingDeletedExams)
 
@@ -281,9 +323,9 @@ async function runPull(
   const cards = cardsRes.error ? null :
     (cardsRes.data ?? []).map((r) => toCamel(r) as Card).filter((c) => !pendingCardSet.has(c.id))
   const sessions = sessionsRes.error ? null :
-    (sessionsRes.data ?? []).map((r) => toCamel(r) as ReviewSession)
+    (sessionsRes.data ?? []).map((r) => toCamel(r) as ReviewSession).filter((s) => !pendingSessionSet.has(s.id))
   const reviewLogs = logsRes.error ? null :
-    (logsRes.data ?? []).map((r) => toCamel(r) as ReviewLog)
+    (logsRes.data ?? []).map((r) => toCamel(r) as ReviewLog).filter((l) => !pendingLogSet.has(l.id))
   const notes = notesRes.error ? null :
     (notesRes.data ?? []).map((r) => toCamel(r) as Note).filter((n) => !pendingNoteSet.has(n.id))
   const exams = examsRes.error ? null :
@@ -369,8 +411,6 @@ async function runPull(
       cards: mergedCards,
       srsData: mergedSrsData,
       fsrsData: mergedFsrsData,
-      ...(sessions !== null ? { sessions } : {}),
-      ...(reviewLogs !== null ? { reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs) } : {}),
       ...(newOrphanIds.length > 0 ? {
         pendingDeletes: {
           ...current.pendingDeletes,
@@ -379,6 +419,13 @@ async function runPull(
       } : {}),
     }
   })
+
+  if (sessions !== null || reviewLogs !== null) {
+    useHistoryStore.setState((current) => ({
+      ...(sessions !== null ? { sessions } : {}),
+      ...(reviewLogs !== null ? { reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs) } : {}),
+    }))
+  }
 
   if (notes !== null) {
     useNotesStore.setState((current) => ({
@@ -406,7 +453,9 @@ async function runPull(
   }
 
   // Seed dirty-tracking with what the server already has, so the next push
-  // doesn't immediately re-upload rows we just pulled unchanged.
+  // doesn't immediately re-upload rows we just pulled unchanged. The store
+  // rows for server-fetched items are the exact toCamel(row) objects applied
+  // above, so their JSON matches what the push-side dirty filter serializes.
   for (const row of srsRes.data ?? []) {
     const s = toCamel(row) as SRSData
     lastPushedSrs.set(s.cardId, JSON.stringify(s))
@@ -415,6 +464,10 @@ async function runPull(
     const f = toCamel(row) as FSRSState
     lastPushedFsrs.set(f.cardId, JSON.stringify(f))
   }
+  for (const f of folders ?? [])  lastPushedFolders.set(f.id, JSON.stringify(f))
+  for (const d of decks ?? [])    lastPushedDecks.set(d.id, JSON.stringify(d))
+  for (const c of cards ?? [])    lastPushedCards.set(c.id, JSON.stringify(c))
+  for (const s of sessions ?? []) lastPushedSessions.set(s.id, JSON.stringify(s))
   if (!incremental) pushedLogIds.clear()
   for (const row of logsRes.data ?? []) {
     pushedLogIds.add((row as { id: string }).id)
@@ -422,8 +475,15 @@ async function runPull(
 
   // Advance the watermark only after every table above has been applied
   // successfully — using the timestamp captured before the fetches ran avoids
-  // missing rows that changed mid-fetch.
-  setLastPullAt(pullStartedAt)
+  // missing rows that changed mid-fetch. If any table errored (full pull —
+  // incremental pulls already threw above), skip it so the next pull retries
+  // as a full pull instead of an incremental one that would skip the rows
+  // missed during this error window.
+  if (!anyError) {
+    setLastPullAt(pullStartedAt)
+  } else {
+    console.error('[SYNC] runPull: one or more tables errored during full pull — watermark not advanced')
+  }
 }
 
 // ─── Push helpers ─────────────────────────────────────────────────────────────
@@ -435,10 +495,16 @@ async function runPull(
 // repeated 400ms-debounced pushes skip rows that haven't changed, instead of
 // re-upserting the entire table every cycle (181+ fsrs_data rows, an
 // ever-growing review_logs array, etc.) — this was the dominant source of
-// excess Supabase request volume.
-const lastPushedFsrs = new Map<string, string>()
-const lastPushedSrs  = new Map<string, string>()
-const pushedLogIds   = new Set<string>()
+// excess Supabase request volume. folders/decks/cards/review_sessions use the
+// same JSON-snapshot-per-id pattern so a single card rating no longer
+// re-uploads every row of those tables.
+const lastPushedFsrs     = new Map<string, string>()
+const lastPushedSrs      = new Map<string, string>()
+const lastPushedFolders  = new Map<string, string>()
+const lastPushedDecks    = new Map<string, string>()
+const lastPushedCards    = new Map<string, string>()
+const lastPushedSessions = new Map<string, string>()
+const pushedLogIds       = new Set<string>()
 
 async function pushToSupabase(
   folders: Folder[],
@@ -448,7 +514,7 @@ async function pushToSupabase(
   fsrsData: Record<string, FSRSState>,
   sessions: ReviewSession[],
   reviewLogs: ReviewLog[],
-  pendingDeletes?: { folders: string[], decks: string[], cards: string[] },
+  pendingDeletes?: { folders: string[], decks: string[], cards: string[], sessions: string[], reviewLogs: string[] },
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
     console.warn('[SYNC] pushToSupabase: Supabase not configured, skipping push')
@@ -488,14 +554,28 @@ async function pushToSupabase(
   const activeCardSet  = new Set(cards.map((c) => c.id))
   const cardDeleteSet  = new Set(pendingDeletes?.cards ?? [])
 
-  // Clean up tracking maps for deleted cards so they don't grow unbounded.
+  // Clean up tracking maps for deleted rows so they don't grow unbounded.
   for (const id of cardDeleteSet) {
     lastPushedSrs.delete(id)
     lastPushedFsrs.delete(id)
+    lastPushedCards.delete(id)
   }
+  for (const id of pendingDeletes?.decks ?? [])   lastPushedDecks.delete(id)
+  for (const id of pendingDeletes?.folders ?? []) lastPushedFolders.delete(id)
+  for (const id of pendingDeletes?.sessions ?? [])   lastPushedSessions.delete(id)
+  for (const id of pendingDeletes?.reviewLogs ?? []) pushedLogIds.delete(id)
+
+  // Same deadlock avoidance as cards above: never upsert a session/log that's
+  // also queued for deletion in this same push cycle.
+  const sessionDeleteSet = new Set(pendingDeletes?.sessions ?? [])
+  const logDeleteSet     = new Set(pendingDeletes?.reviewLogs ?? [])
 
   // Dirty filter: only upsert a row if its serialized contents differ from
   // what we last successfully pushed for that id.
+  const foldersToUpsert = folders.filter((f) => lastPushedFolders.get(f.id) !== JSON.stringify(f))
+  const decksToUpsert   = decks.filter((d) => lastPushedDecks.get(d.id) !== JSON.stringify(d))
+  const cardsToUpsert   = cards.filter((c) => lastPushedCards.get(c.id) !== JSON.stringify(c))
+  const sessionsToUpsert = sessions.filter((s) => !sessionDeleteSet.has(s.id) && lastPushedSessions.get(s.id) !== JSON.stringify(s))
   const srsToUpsert = Object.values(srsData).filter((s) => {
     if (!activeCardSet.has(s.cardId) || cardDeleteSet.has(s.cardId)) return false
     const serialized = JSON.stringify(s)
@@ -506,7 +586,7 @@ async function pushToSupabase(
     const serialized = JSON.stringify(f)
     return lastPushedFsrs.get(f.cardId) !== serialized
   })
-  const reviewLogsToUpsert = reviewLogs.filter((l) => !pushedLogIds.has(l.id))
+  const reviewLogsToUpsert = reviewLogs.filter((l) => !logDeleteSet.has(l.id) && !pushedLogIds.has(l.id))
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
@@ -525,16 +605,16 @@ async function pushToSupabase(
   }
 
   await Promise.all([
-    folders.length
-      ? upsertBatched('folders', folders.map(withUserId), upsertOpts)
+    foldersToUpsert.length
+      ? upsertBatched('folders', foldersToUpsert.map(withUserId), upsertOpts)
       : null,
-    decks.length
-      ? upsertBatched('decks', decks.map(withUserId), upsertOpts)
+    decksToUpsert.length
+      ? upsertBatched('decks', decksToUpsert.map(withUserId), upsertOpts)
       : null,
-    cards.length
+    cardsToUpsert.length
       ? upsertBatched(
           'cards',
-          cards.map((c) => withUserId({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' })),
+          cardsToUpsert.map((c) => withUserId({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' })),
           upsertOpts,
         )
       : null,
@@ -544,8 +624,8 @@ async function pushToSupabase(
     fsrsToUpsert.length
       ? upsertBatched('fsrs_data', fsrsToUpsert.map(withUserId), { onConflict: 'card_id' })
       : null,
-    sessions.length
-      ? upsertBatched('review_sessions', sessions.map(withUserId), upsertOpts)
+    sessionsToUpsert.length
+      ? upsertBatched('review_sessions', sessionsToUpsert.map(withUserId), upsertOpts)
       : null,
     reviewLogsToUpsert.length
       ? upsertBatched('review_logs', reviewLogsToUpsert.map(withUserId), upsertOpts)
@@ -553,6 +633,10 @@ async function pushToSupabase(
   ])
 
   // Record what we just pushed so the next cycle can skip unchanged rows.
+  for (const f of foldersToUpsert)  lastPushedFolders.set(f.id, JSON.stringify(f))
+  for (const d of decksToUpsert)    lastPushedDecks.set(d.id, JSON.stringify(d))
+  for (const c of cardsToUpsert)    lastPushedCards.set(c.id, JSON.stringify(c))
+  for (const s of sessionsToUpsert) lastPushedSessions.set(s.id, JSON.stringify(s))
   for (const s of srsToUpsert)  lastPushedSrs.set(s.cardId, JSON.stringify(s))
   for (const f of fsrsToUpsert) lastPushedFsrs.set(f.cardId, JSON.stringify(f))
   for (const l of reviewLogsToUpsert) pushedLogIds.add(l.id)
@@ -564,6 +648,26 @@ async function pushToSupabase(
   // Each delete is batched: .in() with hundreds of IDs exceeds PostgREST's URL
   // length limit and returns "Bad Request".
   if (pendingDeletes) {
+    if (pendingDeletes.sessions.length) {
+      for (let i = 0; i < pendingDeletes.sessions.length; i += BATCH) {
+        const chunk = pendingDeletes.sessions.slice(i, i + BATCH)
+        const delSessions = await supabase.from('review_sessions').delete().in('id', chunk)
+        if (delSessions.error) {
+          console.error('[SYNC] pushToSupabase: review_sessions delete error', formatPgError(delSessions.error))
+          throw new Error(`review_sessions delete: ${delSessions.error.message} (code ${delSessions.error.code})`)
+        }
+      }
+    }
+    if (pendingDeletes.reviewLogs.length) {
+      for (let i = 0; i < pendingDeletes.reviewLogs.length; i += BATCH) {
+        const chunk = pendingDeletes.reviewLogs.slice(i, i + BATCH)
+        const delLogs = await supabase.from('review_logs').delete().in('id', chunk)
+        if (delLogs.error) {
+          console.error('[SYNC] pushToSupabase: review_logs delete error', formatPgError(delLogs.error))
+          throw new Error(`review_logs delete: ${delLogs.error.message} (code ${delLogs.error.code})`)
+        }
+      }
+    }
     if (pendingDeletes.cards.length) {
       for (let i = 0; i < pendingDeletes.cards.length; i += BATCH) {
         const chunk = pendingDeletes.cards.slice(i, i + BATCH)
@@ -599,7 +703,8 @@ async function pushToSupabase(
         }
       }
     }
-    if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length) {
+    if (pendingDeletes.folders.length || pendingDeletes.decks.length || pendingDeletes.cards.length ||
+        pendingDeletes.sessions.length || pendingDeletes.reviewLogs.length) {
       if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: deletes complete')
     }
   }
@@ -698,6 +803,7 @@ export function useSync(): SyncStatus {
   const [offline, setOffline] = useState(false)
 
   const libraryDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const historyDebounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const notesDebounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const examsDebounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settingsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -734,11 +840,13 @@ export function useSync(): SyncStatus {
         // push to finish, realtime events + BroadcastChannel messages will have
         // already corrected our local state by the time we get here.
         const s = useLibraryStore.getState()
+        const h = useHistoryStore.getState()
         if (DEBUG_SYNC) console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
-        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.fsrsData, s.sessions, s.reviewLogs, s.pendingDeletes)
+        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.fsrsData, h.sessions, h.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
-        if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length) {
+        if (s.pendingDeletes.folders.length || s.pendingDeletes.decks.length || s.pendingDeletes.cards.length ||
+            s.pendingDeletes.sessions.length || s.pendingDeletes.reviewLogs.length) {
           useLibraryStore.getState().clearPendingDeletes(s.pendingDeletes)
           // Immediately tell other tabs which items were deleted so they strip
           // them from their local state before their own push acquires the lock.
@@ -747,6 +855,8 @@ export function useSync(): SyncStatus {
             deletedFolders: s.pendingDeletes.folders,
             deletedDecks:   s.pendingDeletes.decks,
             deletedCards:   s.pendingDeletes.cards,
+            deletedSessions:   s.pendingDeletes.sessions,
+            deletedReviewLogs: s.pendingDeletes.reviewLogs,
           })
         }
       }
@@ -864,11 +974,15 @@ export function useSync(): SyncStatus {
       const deletedFolders: string[] = e.data.deletedFolders ?? []
       const deletedDecks: string[]   = e.data.deletedDecks   ?? []
       const deletedCards: string[]   = e.data.deletedCards   ?? []
-      if (!deletedFolders.length && !deletedDecks.length && !deletedCards.length) return
-      if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab deleted items, applying locally', { deletedFolders, deletedDecks, deletedCards })
+      const deletedSessions: string[]   = e.data.deletedSessions   ?? []
+      const deletedReviewLogs: string[] = e.data.deletedReviewLogs ?? []
+      if (!deletedFolders.length && !deletedDecks.length && !deletedCards.length && !deletedSessions.length && !deletedReviewLogs.length) return
+      if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab deleted items, applying locally', { deletedFolders, deletedDecks, deletedCards, deletedSessions, deletedReviewLogs })
       const fSet = new Set(deletedFolders)
       const dSet = new Set(deletedDecks)
       const cSet = new Set(deletedCards)
+      const sSet = new Set(deletedSessions)
+      const lSet = new Set(deletedReviewLogs)
       applyingRemoteRef.current = true
       useLibraryStore.setState((s) => ({
         folders: s.folders.filter((f) => !fSet.has(f.id)),
@@ -876,11 +990,19 @@ export function useSync(): SyncStatus {
         cards:   s.cards.filter((c)   => !cSet.has(c.id)),
         srsData: Object.fromEntries(Object.entries(s.srsData).filter(([id]) => !cSet.has(id))),
         pendingDeletes: {
-          folders: s.pendingDeletes.folders.filter((id) => !fSet.has(id)),
-          decks:   s.pendingDeletes.decks.filter((id)   => !dSet.has(id)),
-          cards:   s.pendingDeletes.cards.filter((id)   => !cSet.has(id)),
+          folders:    s.pendingDeletes.folders.filter((id) => !fSet.has(id)),
+          decks:      s.pendingDeletes.decks.filter((id)   => !dSet.has(id)),
+          cards:      s.pendingDeletes.cards.filter((id)   => !cSet.has(id)),
+          sessions:   s.pendingDeletes.sessions.filter((id) => !sSet.has(id)),
+          reviewLogs: s.pendingDeletes.reviewLogs.filter((id) => !lSet.has(id)),
         },
       }))
+      if (deletedSessions.length || deletedReviewLogs.length) {
+        useHistoryStore.setState((s) => ({
+          sessions:   s.sessions.filter((sess) => !sSet.has(sess.id)),
+          reviewLogs: s.reviewLogs.filter((l) => !lSet.has(l.id)),
+        }))
+      }
       applyingRemoteRef.current = false
     }
     return () => {
@@ -899,9 +1021,13 @@ export function useSync(): SyncStatus {
     // absent from the server were deleted elsewhere and are dropped).
     const init = async () => {
       await useLibraryStore.persist.rehydrate()
+      await useHistoryStore.persist.rehydrate()
       await useNotesStore.persist.rehydrate()
       await useExamStore.persist.rehydrate()
       await useSettingsStore.persist.rehydrate()
+      // Lift reviewLogs/sessions out of an old-format library blob into the
+      // history store. No-op once migrated.
+      migrateHistoryToOwnStore()
       // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
       // don't fail Supabase's uuid columns. No-op when nothing is legacy.
       migrateLegacyIds()
@@ -922,7 +1048,7 @@ export function useSync(): SyncStatus {
           mountedRef.current = true
           // Push any local changes that existed before pull completed (e.g. cards created during load)
           const state = useLibraryStore.getState()
-          if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length) {
+          if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length || state.pendingDeletes.sessions.length || state.pendingDeletes.reviewLogs.length) {
             handlePush()
           }
           // Seed exams/settings to Supabase even if nothing changes after
@@ -991,6 +1117,24 @@ export function useSync(): SyncStatus {
     }
   }, [handlePush])
 
+  // Subscribe to history store changes with a 400ms debounce — review logs
+  // and sessions live in their own persisted store, but push through the
+  // same pipeline (and dirty tracking keeps repeat pushes cheap).
+  useEffect(() => {
+    const unsub = useHistoryStore.subscribe(() => {
+      if (!mountedRef.current) return
+      if (applyingRemoteRef.current) return
+      if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current)
+      historyDebounceRef.current = setTimeout(() => {
+        handlePush()
+      }, 400)
+    })
+    return () => {
+      unsub()
+      if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current)
+    }
+  }, [handlePush])
+
   // Subscribe to notes store changes with a 400ms debounce
   useEffect(() => {
     const unsub = useNotesStore.subscribe((state) => {
@@ -1037,130 +1181,179 @@ export function useSync(): SyncStatus {
     }
   }, [handleSettingsPush])
 
-  // Supabase Realtime subscriptions — merge individual rows instead of full pull
+  // Supabase Realtime subscriptions — merge individual rows instead of full pull.
+  // Subscriptions are filtered to this user's rows (without the filter, every
+  // table broadcast — including other users' writes under permissive publication
+  // configs — reaches every client), and each handler drops echo events (our own
+  // writes broadcast back) by deep-comparing the incoming row to local state
+  // before touching the store.
   useEffect(() => {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let cancelled = false
 
-    const channel = supabase.channel(`nemos-realtime-${Math.random().toString(36).slice(2)}`)
+    const setup = async () => {
+      let userId: string | null = null
+      try {
+        userId = await getCachedUserId(supabase)
+      } catch (err) {
+        console.error('[SYNC] realtime setup: failed to resolve user id', err)
+        return
+      }
+      if (!userId || cancelled) return
+      const userFilter = `user_id=eq.${userId}`
 
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'folders' },
-      (payload) => {
-        const { eventType, new: newRow, old: oldRow } = payload
-        applyingRemoteRef.current = true
-        if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const folder = toCamel(newRow) as Folder
-          useLibraryStore.setState((state) => {
-            // Don't resurrect items that are pending local deletion
-            if (state.pendingDeletes.folders.includes(folder.id)) return {}
-            const exists = state.folders.some((f) => f.id === folder.id)
-            return {
-              folders: exists
-                ? state.folders.map((f) => f.id === folder.id ? folder : f)
-                : [...state.folders, folder],
-            }
-          })
-        } else if (eventType === 'DELETE') {
-          const id = (oldRow as { id: string }).id
-          useLibraryStore.setState((state) => ({
-            folders: state.folders.filter((f) => f.id !== id),
-          }))
-        }
-        applyingRemoteRef.current = false
-      },
-    )
+      channel = supabase.channel(`nemos-realtime-${Math.random().toString(36).slice(2)}`)
 
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'decks' },
-      (payload) => {
-        const { eventType, new: newRow, old: oldRow } = payload
-        applyingRemoteRef.current = true
-        if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const deck = toCamel(newRow) as Deck
-          useLibraryStore.setState((state) => {
-            if (state.pendingDeletes.decks.includes(deck.id)) return {}
-            const exists = state.decks.some((d) => d.id === deck.id)
-            return {
-              decks: exists
-                ? state.decks.map((d) => d.id === deck.id ? deck : d)
-                : [...state.decks, deck],
-            }
-          })
-        } else if (eventType === 'DELETE') {
-          const id = (oldRow as { id: string }).id
-          useLibraryStore.setState((state) => ({
-            decks: state.decks.filter((d) => d.id !== id),
-          }))
-        }
-        applyingRemoteRef.current = false
-      },
-    )
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'folders', filter: userFilter },
+        (payload) => {
+          const { eventType, new: newRow, old: oldRow } = payload
+          if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            const folder = toCamel(newRow) as Folder
+            // Echo of our own push — local state already matches, skip the
+            // setState so the store subscriber never fires.
+            const existing = useLibraryStore.getState().folders.find((f) => f.id === folder.id)
+            if (existing && deepEqual(existing, folder)) return
+            lastPushedFolders.set(folder.id, JSON.stringify(folder))
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => {
+              // Don't resurrect items that are pending local deletion
+              if (state.pendingDeletes.folders.includes(folder.id)) return {}
+              const exists = state.folders.some((f) => f.id === folder.id)
+              return {
+                folders: exists
+                  ? state.folders.map((f) => f.id === folder.id ? folder : f)
+                  : [...state.folders, folder],
+              }
+            })
+            applyingRemoteRef.current = false
+          } else if (eventType === 'DELETE') {
+            const id = (oldRow as { id: string }).id
+            lastPushedFolders.delete(id)
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => ({
+              folders: state.folders.filter((f) => f.id !== id),
+            }))
+            applyingRemoteRef.current = false
+          }
+        },
+      )
 
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'cards' },
-      (payload) => {
-        const { eventType, new: newRow, old: oldRow } = payload
-        applyingRemoteRef.current = true
-        if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const card = toCamel(newRow) as Card
-          useLibraryStore.setState((state) => {
-            if (state.pendingDeletes.cards.includes(card.id)) return {}
-            const exists = state.cards.some((c) => c.id === card.id)
-            return {
-              cards: exists
-                ? state.cards.map((c) => c.id === card.id ? card : c)
-                : [...state.cards, card],
-            }
-          })
-        } else if (eventType === 'DELETE') {
-          const id = (oldRow as { id: string }).id
-          useLibraryStore.setState((state) => ({
-            cards: state.cards.filter((c) => c.id !== id),
-          }))
-        }
-        applyingRemoteRef.current = false
-      },
-    )
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'decks', filter: userFilter },
+        (payload) => {
+          const { eventType, new: newRow, old: oldRow } = payload
+          if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            const deck = toCamel(newRow) as Deck
+            const existing = useLibraryStore.getState().decks.find((d) => d.id === deck.id)
+            if (existing && deepEqual(existing, deck)) return
+            lastPushedDecks.set(deck.id, JSON.stringify(deck))
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => {
+              if (state.pendingDeletes.decks.includes(deck.id)) return {}
+              const exists = state.decks.some((d) => d.id === deck.id)
+              return {
+                decks: exists
+                  ? state.decks.map((d) => d.id === deck.id ? deck : d)
+                  : [...state.decks, deck],
+              }
+            })
+            applyingRemoteRef.current = false
+          } else if (eventType === 'DELETE') {
+            const id = (oldRow as { id: string }).id
+            lastPushedDecks.delete(id)
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => ({
+              decks: state.decks.filter((d) => d.id !== id),
+            }))
+            applyingRemoteRef.current = false
+          }
+        },
+      )
 
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'review_logs' },
-      (payload) => {
-        const { eventType, new: newRow, old: oldRow } = payload
-        applyingRemoteRef.current = true
-        if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const log = toCamel(newRow) as ReviewLog
-          useLibraryStore.setState((state) => {
-            const exists = state.reviewLogs.some((l) => l.id === log.id)
-            return {
-              reviewLogs: exists
-                ? state.reviewLogs.map((l) => l.id === log.id ? log : l)
-                : [...state.reviewLogs, log],
-            }
-          })
-        } else if (eventType === 'DELETE') {
-          const id = (oldRow as { id: string }).id
-          useLibraryStore.setState((state) => ({
-            reviewLogs: state.reviewLogs.filter((l) => l.id !== id),
-          }))
-        }
-        applyingRemoteRef.current = false
-      },
-    )
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cards', filter: userFilter },
+        (payload) => {
+          const { eventType, new: newRow, old: oldRow } = payload
+          if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            const card = toCamel(newRow) as Card
+            const existing = useLibraryStore.getState().cards.find((c) => c.id === card.id)
+            if (existing && deepEqual(existing, card)) return
+            lastPushedCards.set(card.id, JSON.stringify(card))
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => {
+              if (state.pendingDeletes.cards.includes(card.id)) return {}
+              const exists = state.cards.some((c) => c.id === card.id)
+              return {
+                cards: exists
+                  ? state.cards.map((c) => c.id === card.id ? card : c)
+                  : [...state.cards, card],
+              }
+            })
+            applyingRemoteRef.current = false
+          } else if (eventType === 'DELETE') {
+            const id = (oldRow as { id: string }).id
+            lastPushedCards.delete(id)
+            applyingRemoteRef.current = true
+            useLibraryStore.setState((state) => ({
+              cards: state.cards.filter((c) => c.id !== id),
+            }))
+            applyingRemoteRef.current = false
+          }
+        },
+      )
 
-    const channelName = channel.topic
-    if (DEBUG_SYNC) console.log('[SYNC] realtime channel subscribing:', channelName)
-    channel.subscribe((status) => {
-      if (DEBUG_SYNC) console.log('[SYNC] realtime channel status:', channelName, status)
-    })
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'review_logs', filter: userFilter },
+        (payload) => {
+          const { eventType, new: newRow, old: oldRow } = payload
+          if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            const log = toCamel(newRow) as ReviewLog
+            const existing = useHistoryStore.getState().reviewLogs.find((l) => l.id === log.id)
+            if (existing && deepEqual(existing, log)) return
+            pushedLogIds.add(log.id)
+            applyingRemoteRef.current = true
+            useHistoryStore.setState((state) => {
+              const exists = state.reviewLogs.some((l) => l.id === log.id)
+              return {
+                reviewLogs: exists
+                  ? state.reviewLogs.map((l) => l.id === log.id ? log : l)
+                  : [...state.reviewLogs, log],
+              }
+            })
+            applyingRemoteRef.current = false
+          } else if (eventType === 'DELETE') {
+            const id = (oldRow as { id: string }).id
+            applyingRemoteRef.current = true
+            useHistoryStore.setState((state) => ({
+              reviewLogs: state.reviewLogs.filter((l) => l.id !== id),
+            }))
+            applyingRemoteRef.current = false
+          }
+        },
+      )
+
+      const channelName = channel.topic
+      if (DEBUG_SYNC) console.log('[SYNC] realtime channel subscribing:', channelName)
+      channel.subscribe((status) => {
+        if (DEBUG_SYNC) console.log('[SYNC] realtime channel status:', channelName, status)
+      })
+    }
+
+    setup()
 
     return () => {
-      if (DEBUG_SYNC) console.log('[SYNC] realtime channel unsubscribing:', channelName)
-      supabase.removeChannel(channel)
+      cancelled = true
+      if (channel) {
+        if (DEBUG_SYNC) console.log('[SYNC] realtime channel unsubscribing:', channel.topic)
+        supabase.removeChannel(channel)
+      }
     }
   }, [])
 

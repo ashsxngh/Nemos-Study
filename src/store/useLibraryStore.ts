@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Folder, Deck, Card, SRSData, ReviewLog, ReviewSession, FolderColor, CardType } from '@/lib/types'
+import type { Folder, Deck, Card, SRSData, ReviewLog, FolderColor, CardType } from '@/lib/types'
 import {
   createInitialSRSData,
   scheduleCard,
@@ -16,92 +16,19 @@ import type { FSRSState } from '@/lib/srs'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useTrashStore } from '@/store/useTrashStore'
 import { useExamStore } from '@/store/useExamStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { getExamDeckIds, getPulledForwardCardIds, computeCardUrgencies } from '@/lib/examScheduler'
 import { generateId } from '@/lib/utils'
+import { createIDBStorage } from '@/lib/idbStorage'
 
 const USER_ID = 'local-user'
-
-// ── IndexedDB storage ──────────────────────────────────────────────────────────
-// localStorage caps at ~5MB — enough for a few hundred cards but not 20k+.
-// IDB has no practical limit (bounded only by device storage).
-// We also auto-migrate any existing localStorage data on first read.
-function createIDBStorage() {
-  const DB_NAME = 'nemos-idb'
-  const STORE = 'kv'
-  let _db: IDBDatabase | null = null
-  // Caches the in-flight open request, not just the resolved db — without
-  // this, two near-simultaneous callers (e.g. React Strict Mode's mount /
-  // unmount / remount cycle firing rehydrate() twice in quick succession)
-  // each see _db as null and issue their own indexedDB.open() call. On a
-  // fresh profile where the database doesn't exist yet, both requests race
-  // to create the same object store; the second can get stuck behind the
-  // first's still-open upgrade transaction with no onsuccess/onerror ever
-  // firing — a silent, permanent hang.
-  let _openPromise: Promise<IDBDatabase> | null = null
-
-  function open(): Promise<IDBDatabase> {
-    if (_db) return Promise.resolve(_db)
-    if (_openPromise) return _openPromise
-    _openPromise = new Promise((res, rej) => {
-      const req = indexedDB.open(DB_NAME, 1)
-      req.onupgradeneeded = () => req.result.createObjectStore(STORE)
-      req.onsuccess = () => { _db = req.result; _openPromise = null; res(_db) }
-      req.onerror = () => { _openPromise = null; rej(req.error) }
-      req.onblocked = () => { _openPromise = null; rej(new Error('indexedDB open blocked by another connection')) }
-    })
-    return _openPromise
-  }
-
-  function idbGet(key: string): Promise<string | null> {
-    return open().then((db) => new Promise((res, rej) => {
-      const req = db.transaction(STORE).objectStore(STORE).get(key)
-      req.onsuccess = () => res((req.result as string) ?? null)
-      req.onerror = () => rej(req.error)
-    }))
-  }
-
-  function idbPut(key: string, value: string): Promise<void> {
-    return open().then((db) => new Promise<void>((res, rej) => {
-      const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).put(value, key)
-      tx.oncomplete = () => res()
-      tx.onerror = () => rej(tx.error)
-    }))
-  }
-
-  function idbDel(key: string): Promise<void> {
-    return open().then((db) => new Promise<void>((res, rej) => {
-      const tx = db.transaction(STORE, 'readwrite')
-      tx.objectStore(STORE).delete(key)
-      tx.oncomplete = () => res()
-      tx.onerror = () => rej(tx.error)
-    }))
-  }
-
-  return {
-    async getItem(key: string): Promise<string | null> {
-      const val = await idbGet(key)
-      if (val !== null) return val
-      // One-time migration: if data exists in localStorage, move it to IDB.
-      try {
-        const lsVal = localStorage.getItem(key)
-        if (lsVal !== null) {
-          await idbPut(key, lsVal)
-          localStorage.removeItem(key)
-          return lsVal
-        }
-      } catch { /* localStorage may not be available in all contexts */ }
-      return null
-    },
-    setItem: idbPut,
-    removeItem: idbDel,
-  }
-}
 
 interface PendingDeletes {
   folders: string[]
   decks: string[]
   cards: string[]
+  sessions: string[]
+  reviewLogs: string[]
 }
 
 interface LibraryState {
@@ -110,8 +37,6 @@ interface LibraryState {
   cards: Card[]
   srsData: Record<string, SRSData>
   fsrsData: Record<string, FSRSState>
-  reviewLogs: ReviewLog[]
-  sessions: ReviewSession[]
   pendingDeletes: PendingDeletes
 
   // Folder actions
@@ -135,9 +60,8 @@ interface LibraryState {
   reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4) => void
   setSRSData: (cardId: string, srs: SRSData) => void
   setFSRSData: (cardId: string, fsrs: FSRSState) => void
-  removeLastLog: () => void
   resetCardSRS: (cardId: string) => void
-  clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[] }) => void
+  clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[], sessions: string[], reviewLogs: string[] }) => void
 
   // Query helpers
   getNewCards: (deckId?: string) => Card[]
@@ -151,10 +75,6 @@ interface LibraryState {
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
   getDeckMastery: (deckId: string) => number
-
-  // Session
-  startSession: (deckId?: string, mode?: ReviewSession['mode']) => ReviewSession
-  endSession: (sessionId: string, cardsReviewed: number, correct: number) => void
 }
 
 function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] {
@@ -231,9 +151,7 @@ export const useLibraryStore = create<LibraryState>()(
       cards: [],
       srsData: {},
       fsrsData: {},
-      reviewLogs: [],
-      sessions: [],
-      pendingDeletes: { folders: [], decks: [], cards: [] },
+      pendingDeletes: { folders: [], decks: [], cards: [], sessions: [], reviewLogs: [] },
 
       // ── Folder actions ──────────────────────────────────────────────────────
       createFolder: (name, parentId = null, color = 'default') => {
@@ -263,7 +181,7 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteFolder: (id) => {
-        const { folders, decks, cards, srsData, fsrsData, reviewLogs, sessions, pendingDeletes } = get()
+        const { folders, decks, cards, srsData, fsrsData, pendingDeletes } = get()
         const descendantIds = getAllDescendantFolderIds(folders, id)
         const allFolderIds = [id, ...descendantIds]
         const deckIdsToDelete = decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id)
@@ -276,18 +194,19 @@ export const useLibraryStore = create<LibraryState>()(
           delete newSrsData[cid]
           delete newFsrsData[cid]
         })
+        const { sessionIds, logIds } = useHistoryStore.getState().pruneHistory(cardIdSet, deckIdSet)
         set({
           folders: folders.filter((f) => !allFolderIds.includes(f.id)),
           decks: decks.filter((d) => !deckIdsToDelete.includes(d.id)),
           cards: cards.filter((c) => !cardIdsToDelete.includes(c.id)),
           srsData: newSrsData,
           fsrsData: newFsrsData,
-          reviewLogs: reviewLogs.filter((l) => !cardIdSet.has(l.cardId)),
-          sessions: sessions.filter((s) => !deckIdSet.has(s.deckId ?? '')),
           pendingDeletes: {
             folders: [...pendingDeletes.folders, ...allFolderIds],
             decks: [...pendingDeletes.decks, ...deckIdsToDelete],
             cards: [...pendingDeletes.cards, ...cardIdsToDelete],
+            sessions: [...pendingDeletes.sessions, ...sessionIds],
+            reviewLogs: [...pendingDeletes.reviewLogs, ...logIds],
           },
         })
       },
@@ -358,17 +277,18 @@ export const useLibraryStore = create<LibraryState>()(
           })
         }
 
+        const { sessionIds, logIds } = useHistoryStore.getState().pruneHistory(cardIdSet, new Set([id]))
         set((s) => ({
           decks: s.decks.filter((d) => d.id !== id),
           cards: s.cards.filter((c) => c.deckId !== id),
           srsData: newSrsData,
           fsrsData: newFsrsData,
-          reviewLogs: s.reviewLogs.filter((l) => !cardIdSet.has(l.cardId)),
-          sessions: s.sessions.filter((sess) => sess.deckId !== id),
           pendingDeletes: {
             ...s.pendingDeletes,
             decks: [...s.pendingDeletes.decks, id],
             cards: [...s.pendingDeletes.cards, ...cardIdsToDelete],
+            sessions: [...s.pendingDeletes.sessions, ...sessionIds],
+            reviewLogs: [...s.pendingDeletes.reviewLogs, ...logIds],
           },
         }))
       },
@@ -504,10 +424,6 @@ export const useLibraryStore = create<LibraryState>()(
         set((s) => ({ fsrsData: { ...s.fsrsData, [cardId]: fsrs } }))
       },
 
-      removeLastLog: () => {
-        set((s) => ({ reviewLogs: s.reviewLogs.slice(0, -1) }))
-      },
-
       resetCardSRS: (cardId) => {
         const newSrsData = { ...get().srsData }
         const newFsrsData = { ...get().fsrsData }
@@ -607,9 +523,9 @@ export const useLibraryStore = create<LibraryState>()(
           set((s) => ({
             fsrsData: { ...s.fsrsData, [cardId]: updated },
             srsData: { ...s.srsData, [cardId]: mirroredSrs },
-            reviewLogs: [...s.reviewLogs, log],
             cards: suspendIfLeech(s.cards, updated.lapses),
           }))
+          useHistoryStore.getState().addReviewLog(log)
         } else {
           // Self-heal a missing entry instead of silently dropping the review
           // (mirrors the fsrs branch's `?? fsrsInitCard(...)` fallback above).
@@ -642,28 +558,33 @@ export const useLibraryStore = create<LibraryState>()(
           }
           set((s) => ({
             srsData: { ...s.srsData, [cardId]: updated },
-            reviewLogs: [...s.reviewLogs, log],
             cards: suspendIfLeech(s.cards, updated.lapses),
           }))
+          useHistoryStore.getState().addReviewLog(log)
         }
       },
 
       clearPendingDeletes: (processed) => {
-        const folderSet = new Set(processed.folders)
-        const deckSet   = new Set(processed.decks)
-        const cardSet   = new Set(processed.cards)
+        const folderSet  = new Set(processed.folders)
+        const deckSet    = new Set(processed.decks)
+        const cardSet    = new Set(processed.cards)
+        const sessionSet = new Set(processed.sessions)
+        const logSet     = new Set(processed.reviewLogs)
         set((s) => ({
           pendingDeletes: {
-            folders: s.pendingDeletes.folders.filter((id) => !folderSet.has(id)),
-            decks:   s.pendingDeletes.decks.filter((id) => !deckSet.has(id)),
-            cards:   s.pendingDeletes.cards.filter((id) => !cardSet.has(id)),
+            folders:    s.pendingDeletes.folders.filter((id) => !folderSet.has(id)),
+            decks:      s.pendingDeletes.decks.filter((id) => !deckSet.has(id)),
+            cards:      s.pendingDeletes.cards.filter((id) => !cardSet.has(id)),
+            sessions:   s.pendingDeletes.sessions.filter((id) => !sessionSet.has(id)),
+            reviewLogs: s.pendingDeletes.reviewLogs.filter((id) => !logSet.has(id)),
           },
         }))
       },
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData, decks, reviewLogs } = get()
+        const { cards, fsrsData, srsData, decks } = get()
+        const { reviewLogs } = useHistoryStore.getState()
         const { algorithm, newCardsPerDay } = useSettingsStore.getState()
         const todayStr = new Date().toISOString().slice(0, 10)
         const deckSet = new Set(decks.map((d) => d.id))
@@ -862,39 +783,6 @@ export const useLibraryStore = create<LibraryState>()(
         }).length
 
         return Math.round((learned / deckCards.length) * 100)
-      },
-
-      // ── Session ──────────────────────────────────────────────────────────────
-      startSession: (deckId, mode = 'standard') => {
-        const session: ReviewSession = {
-          id: generateId(),
-          userId: USER_ID,
-          deckId,
-          startedAt: new Date().toISOString(),
-          cardsReviewed: 0,
-          cardsCorrect: 0,
-          cardsIncorrect: 0,
-          averageResponseMs: 0,
-          mode,
-        }
-        set((s) => ({ sessions: [...s.sessions, session] }))
-        return session
-      },
-
-      endSession: (sessionId, cardsReviewed, correct) => {
-        set((s) => ({
-          sessions: s.sessions.map((sess) =>
-            sess.id === sessionId
-              ? {
-                  ...sess,
-                  endedAt: new Date().toISOString(),
-                  cardsReviewed,
-                  cardsCorrect: correct,
-                  cardsIncorrect: cardsReviewed - correct,
-                }
-              : sess
-          ),
-        }))
       },
     }),
     {

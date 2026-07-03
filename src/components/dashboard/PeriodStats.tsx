@@ -1,12 +1,12 @@
 'use client'
 
-import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { getPeriodRange, logsInRange, type Period } from '@/lib/periods'
 
 interface PeriodStatsProps { period: Period }
 
 export function PeriodStats({ period }: PeriodStatsProps) {
-  const { reviewLogs } = useLibraryStore()
+  const { reviewLogs } = useHistoryStore()
   const { start, end, prevStart, prevEnd, label } = getPeriodRange(period)
 
   const curLogs  = logsInRange(reviewLogs, start, end)
@@ -28,13 +28,15 @@ export function PeriodStats({ period }: PeriodStatsProps) {
   const curRet  = retentionOf(curLogs)
   const prevRet = retentionOf(prevLogs)
 
+  const uniqueCardCount = (logs: typeof reviewLogs) => new Set(logs.map((l) => l.cardId)).size
+
   const prevLabel = period === 'all' ? '' : `prev. ${label.toLowerCase()}`
 
   const stats = [
     {
       label: 'Cards reviewed',
-      value: curLogs.length,
-      prev: prevLogs.length,
+      value: uniqueCardCount(curLogs),
+      prev: uniqueCardCount(prevLogs),
     },
     {
       label: 'Cumulative reviews',

@@ -29,9 +29,9 @@ import { ReviewCard } from '@/components/study/ReviewCard'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
-import { useTrashStore } from '@/store/useTrashStore'
 import { cn, truncate, formatDate } from '@/lib/utils'
 import { isDue } from '@/lib/srs'
+import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
 import type { Card, SRSData } from '@/lib/types'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -275,45 +275,11 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   }
 
   // Tracks the most recent trash-via-delete (single or bulk) so Ctrl+Z can
-  // restore the card(s) to their original deck within the 5s undo window.
-  const lastDeletedRef = useRef<{ ids: string[] } | null>(null)
-  const undoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function restoreDeletedCards(ids: string[]) {
-    const trash = useTrashStore.getState()
-    useLibraryStore.setState((s) => {
-      const newCards = [...s.cards]
-      const newSrsData = { ...s.srsData }
-      const newFsrsData = { ...s.fsrsData }
-      const restoredIds = new Set<string>()
-      for (const id of ids) {
-        const entry = trash.items.find((i) => i.id === id && i.type === 'card')
-        if (!entry?.card) continue
-        newCards.push(entry.card)
-        if (entry.cardSRS) newSrsData[id] = entry.cardSRS
-        if (entry.cardFSRS) newFsrsData[id] = entry.cardFSRS
-        restoredIds.add(id)
-      }
-      return {
-        cards: newCards,
-        srsData: newSrsData,
-        fsrsData: newFsrsData,
-        pendingDeletes: {
-          ...s.pendingDeletes,
-          cards: s.pendingDeletes.cards.filter((id) => !restoredIds.has(id)),
-        },
-      }
-    })
-    ids.forEach((id) => {
-      const entry = trash.items.find((i) => i.id === id && i.type === 'card')
-      if (entry) trash.remove(entry.id)
-    })
-  }
+  // restore the card(s) to their original deck within the undo window.
+  const undoTrackerRef = useRef(createUndoTracker<string[]>())
 
   function trackDeleteForUndo(ids: string[]) {
-    lastDeletedRef.current = { ids }
-    if (undoClearTimerRef.current) clearTimeout(undoClearTimerRef.current)
-    undoClearTimerRef.current = setTimeout(() => { lastDeletedRef.current = null }, 5000)
+    undoTrackerRef.current.track(ids)
     useAppStore.getState().addToast({
       type: 'info',
       message: ids.length === 1 ? 'Card deleted — Undo?' : `${ids.length} cards deleted — Undo?`,
@@ -323,14 +289,12 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   }
 
   function handleUndoDelete() {
-    const pending = lastDeletedRef.current
-    if (!pending) return
-    restoreDeletedCards(pending.ids)
-    lastDeletedRef.current = null
-    if (undoClearTimerRef.current) clearTimeout(undoClearTimerRef.current)
+    const ids = undoTrackerRef.current.consume()
+    if (!ids) return
+    restoreCardsFromTrash(ids)
     useAppStore.getState().addToast({
       type: 'info',
-      message: pending.ids.length === 1 ? 'Card restored' : 'Cards restored',
+      message: ids.length === 1 ? 'Card restored' : 'Cards restored',
       duration: 2000,
     })
   }

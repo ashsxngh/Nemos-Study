@@ -8,7 +8,7 @@ import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useAppStore } from '@/store/useAppStore'
-import { FolderTreePicker } from '@/components/library/FolderTreePicker'
+import { FolderTreePicker, buildFolderTree, type FolderNode } from '@/components/library/FolderTreePicker'
 import { cn, truncate } from '@/lib/utils'
 import type { CardType, Folder, Deck } from '@/lib/types'
 import {
@@ -106,35 +106,10 @@ function parseFile(
   }
 }
 
-// ── Folder/Deck tree helpers ──────────────────────────────────────────────────
-
-interface FolderNode {
-  folder: Folder
-  depth: number
-  children: FolderNode[]
-}
-
-function buildFolderTree(folders: Folder[]): FolderNode[] {
-  const nodeMap = new Map<string, FolderNode>()
-  for (const f of folders) {
-    nodeMap.set(f.id, { folder: f, depth: 0, children: [] })
-  }
-  const roots: FolderNode[] = []
-  for (const f of folders) {
-    const node = nodeMap.get(f.id)!
-    if (f.parentId && nodeMap.has(f.parentId)) {
-      nodeMap.get(f.parentId)!.children.push(node)
-    } else {
-      roots.push(node)
-    }
-  }
-  function setDepth(node: FolderNode, d: number) {
-    node.depth = d
-    for (const c of node.children) setDepth(c, d + 1)
-  }
-  roots.forEach((n) => setDepth(n, 0))
-  return roots
-}
+// ── Deck tree helper ──────────────────────────────────────────────────────────
+// buildFolderTree/FolderNode live in FolderTreePicker.tsx (shared with the
+// folder-location picker); this file only adds the flatten step it needs to
+// render folders as flat section headers instead of a nested tree.
 
 function flattenFolderTree(nodes: FolderNode[]): FolderNode[] {
   const out: FolderNode[] = []

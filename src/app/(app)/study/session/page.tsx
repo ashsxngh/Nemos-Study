@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useStudyStore } from '@/store/useStudyStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
-import { useTrashStore } from '@/store/useTrashStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useExamStore } from '@/store/useExamStore'
 import { useAppStore } from '@/store/useAppStore'
 import { getWeakestCards } from '@/lib/examScheduler'
@@ -30,7 +30,8 @@ import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
 import { fsrsRetrievability, daysUntilDue } from '@/lib/srs'
-import { cn, formatDuration, formatDate } from '@/lib/utils'
+import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
+import { cn, formatDuration, formatDate, generateId } from '@/lib/utils'
 import type { Card, Difficulty } from '@/lib/types'
 
 // ── Session abandonment recovery ──────────────────────────────────────────────
@@ -122,18 +123,19 @@ function SessionContent() {
     decks,
     fsrsData,
     srsData,
-    reviewLogs,
     deleteCard,
     resetCardSRS,
     cards: allCards,
   } = useLibraryStore()
+
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
 
   const { exams } = useExamStore()
 
   const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore()
 
   const cardShownAtRef = useRef<number>(Date.now())
-  // Tracks the persisted ReviewSession record (useLibraryStore.sessions) for
+  // Tracks the persisted ReviewSession record (useHistoryStore.sessions) for
   // this study session — separate from useStudyStore's local sessionId.
   const librarySessionIdRef = useRef<string | null>(null)
 
@@ -157,7 +159,7 @@ function SessionContent() {
   })()
 
   const startLibrarySession = useCallback(() => {
-    const session = useLibraryStore.getState().startSession(deckId, resolvedMode)
+    const session = useHistoryStore.getState().startSession(deckId, resolvedMode)
     librarySessionIdRef.current = session.id
   }, [deckId, resolvedMode])
 
@@ -167,13 +169,12 @@ function SessionContent() {
     const sessionLogs = useStudyStore.getState().logs
     const cardsReviewed = sessionLogs.length
     const cardsCorrect = sessionLogs.filter((l) => l.rating >= 3).length
-    useLibraryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
+    useHistoryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
     librarySessionIdRef.current = null
   }, [])
 
   // Tracks the most recent "D" quick-delete so Ctrl+Z/Ctrl+D can restore it from trash
-  const lastQuickDeletedRef = useRef<{ card: Card; index: number } | null>(null)
-  const quickDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const quickDeleteTrackerRef = useRef(createUndoTracker<{ card: Card; index: number }>())
 
   // History for ← back navigation
   const [history, setHistory] = useState<number[]>([])
@@ -297,7 +298,7 @@ function SessionContent() {
     if (lastBurnoutNudgeAt && Date.now() - new Date(lastBurnoutNudgeAt).getTime() < 7 * 86400000) {
       return
     }
-    const { reviewLogs: logs } = useLibraryStore.getState()
+    const { reviewLogs: logs } = useHistoryStore.getState()
     const now = Date.now()
     const real = logs.filter((l) => !l.wasNew)
     const recent = real.filter((l) => now - new Date(l.reviewedAt).getTime() <= 3 * 86400000)
@@ -547,7 +548,7 @@ function SessionContent() {
       const prevSRS = libState.srsData[card.id]
       const prevFSRS = libState.fsrsData[card.id]
 
-      const logId = Math.random().toString(36).slice(2)
+      const logId = generateId()
       addLog({
         cardId: card.id,
         userId: card.userId,
@@ -593,7 +594,7 @@ function SessionContent() {
     const lib = useLibraryStore.getState()
     lib.setSRSData(entry.cardId, entry.prevSRS)
     if (entry.prevFSRS) lib.setFSRSData(entry.cardId, entry.prevFSRS)
-    lib.removeLastLog()
+    useHistoryStore.getState().removeLastLog()
     decrementIndex()
     if (entry.isNew) {
       setNewCardReviewedCount((c) => Math.max(0, c - 1))
@@ -655,9 +656,7 @@ function SessionContent() {
   function handleQuickDelete() {
     const card = queue[currentIndex]
     if (!card || animatingOut) return
-    lastQuickDeletedRef.current = { card, index: currentIndex }
-    if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
-    quickDeleteTimerRef.current = setTimeout(() => { lastQuickDeletedRef.current = null }, 5000)
+    quickDeleteTrackerRef.current.track({ card, index: currentIndex })
     setAnimatingOut('delete')
     setTimeout(() => {
       setAnimatingOut(null)
@@ -674,30 +673,18 @@ function SessionContent() {
 
   /* ── Ctrl+Z/Ctrl+D: restore the last "D"-trashed card from trash, back into the queue ── */
   function handleUndoQuickDelete() {
-    const pending = lastQuickDeletedRef.current
+    const pending = quickDeleteTrackerRef.current.consume()
     if (!pending) {
       useAppStore.getState().addToast({ type: 'info', message: 'Nothing to undo', duration: 2000 })
       return
     }
-    if (quickDeleteTimerRef.current) clearTimeout(quickDeleteTimerRef.current)
-    const entry = useTrashStore.getState().items.find((i) => i.id === pending.card.id && i.type === 'card')
-    useLibraryStore.setState((s) => ({
-      cards: [...s.cards, entry?.card ?? pending.card],
-      srsData: entry?.cardSRS ? { ...s.srsData, [pending.card.id]: entry.cardSRS } : s.srsData,
-      fsrsData: entry?.cardFSRS ? { ...s.fsrsData, [pending.card.id]: entry.cardFSRS } : s.fsrsData,
-      pendingDeletes: {
-        ...s.pendingDeletes,
-        cards: s.pendingDeletes.cards.filter((id) => id !== pending.card.id),
-      },
-    }))
-    if (entry) useTrashStore.getState().remove(entry.id)
+    restoreCardsFromTrash([pending.card.id], new Map([[pending.card.id, pending.card]]))
 
     const newQueue = [...queue]
     const insertAt = Math.min(pending.index, newQueue.length)
     newQueue.splice(insertAt, 0, pending.card)
     reorderQueue(newQueue, insertAt)
 
-    lastQuickDeletedRef.current = null
     useAppStore.getState().addToast({ type: 'info', message: 'Card restored', duration: 2000 })
   }
 
@@ -725,7 +712,7 @@ function SessionContent() {
       // rating. Mirrors clicking the toast's own Undo button.
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault()
-        if (lastQuickDeletedRef.current) handleUndoQuickDelete()
+        if (quickDeleteTrackerRef.current.peek()) handleUndoQuickDelete()
         else handleUndo()
         return
       }

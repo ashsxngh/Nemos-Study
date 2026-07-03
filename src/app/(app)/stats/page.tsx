@@ -5,10 +5,12 @@ import { StatsPage } from '@/components/stats/StatsPage'
 import { Button } from '@/components/ui/Button'
 import { Download } from 'lucide-react'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { exportAsJSON } from '@/lib/export'
 
 export default function StatsRoute() {
-  const { folders, decks, cards, srsData, sessions } = useLibraryStore()
+  const { folders, decks, cards, srsData } = useLibraryStore()
+  const sessions = useHistoryStore((s) => s.sessions)
 
   function handleExport() {
     exportAsJSON({ folders, decks, cards, srsData, sessions })

@@ -24,19 +24,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useKeyboard([
     { key: 'k', meta: true, handler: openCommandPalette },
-    { key: '/', handler: (e) => {
-      // only if not in an input
-      const target = e.target as HTMLElement
-      if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
-        openCommandPalette()
-      }
-    }},
-    { key: '[', handler: (e) => {
-      const target = e.target as HTMLElement
-      if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
-        toggleSidebar()
-      }
-    }},
+    // Input-field guarding happens inside useKeyboard's matcher, before
+    // preventDefault — plain keypresses in a field are never intercepted.
+    { key: '/', handler: () => openCommandPalette() },
+    { key: '[', handler: () => toggleSidebar() },
   ])
 
   // Additional keyboard shortcuts: Cmd+Shift+L, Alt+←, and G-then-X vim jumps

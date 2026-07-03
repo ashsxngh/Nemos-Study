@@ -1,4 +1,5 @@
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useExamStore } from '@/store/useExamStore'
 import { useTrashStore } from '@/store/useTrashStore'
@@ -22,6 +23,7 @@ export function isUuid(id: string): boolean {
  */
 export function migrateLegacyIds(): void {
   const lib = useLibraryStore.getState()
+  const hist = useHistoryStore.getState()
   const notes = useNotesStore.getState().notes
   const exams = useExamStore.getState().exams
 
@@ -34,8 +36,8 @@ export function migrateLegacyIds(): void {
   lib.folders.forEach((f) => collect(f.id))
   lib.decks.forEach((d) => collect(d.id))
   lib.cards.forEach((c) => collect(c.id))
-  lib.sessions.forEach((s) => collect(s.id))
-  lib.reviewLogs.forEach((l) => { collect(l.id); collect(l.sessionId) })
+  hist.sessions.forEach((s) => collect(s.id))
+  hist.reviewLogs.forEach((l) => { collect(l.id); collect(l.sessionId) })
   notes.forEach((n) => collect(n.id))
   exams.forEach((e) => collect(e.id))
 
@@ -91,24 +93,29 @@ export function migrateLegacyIds(): void {
     cards: lib.cards.map(mapCard),
     srsData: mapSrsRecord(lib.srsData),
     fsrsData: mapSrsRecord(lib.fsrsData),
-    sessions: lib.sessions.map((s) => ({
-      ...s,
-      id: mapId(s.id) as string,
-      deckId: s.deckId ? (idMap.get(s.deckId) ?? s.deckId) : s.deckId,
-    })),
-    reviewLogs: lib.reviewLogs.map((l) => ({
-      ...l,
-      id: mapId(l.id) as string,
-      cardId: mapId(l.cardId) as string,
-      sessionId: mapId(l.sessionId) as string,
-    })),
     // Legacy ids were never accepted by the server, so there is nothing to
     // delete remotely — keep only valid UUIDs.
     pendingDeletes: {
       folders: lib.pendingDeletes.folders.filter(isUuid),
       decks: lib.pendingDeletes.decks.filter(isUuid),
       cards: lib.pendingDeletes.cards.filter(isUuid),
+      sessions: lib.pendingDeletes.sessions.filter(isUuid),
+      reviewLogs: lib.pendingDeletes.reviewLogs.filter(isUuid),
     },
+  })
+
+  useHistoryStore.setState({
+    sessions: hist.sessions.map((s) => ({
+      ...s,
+      id: mapId(s.id) as string,
+      deckId: s.deckId ? (idMap.get(s.deckId) ?? s.deckId) : s.deckId,
+    })),
+    reviewLogs: hist.reviewLogs.map((l) => ({
+      ...l,
+      id: mapId(l.id) as string,
+      cardId: mapId(l.cardId) as string,
+      sessionId: mapId(l.sessionId) as string,
+    })),
   })
 
   useNotesStore.setState({ notes: notes.map(mapNote) })

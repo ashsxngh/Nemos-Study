@@ -10,11 +10,13 @@ import { Progress } from '@/components/ui/Progress'
 import { Input } from '@/components/ui/Input'
 import Link from 'next/link'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn } from '@/lib/utils'
 
 export function StudyHub() {
-  const { decks, cards, getNewCards, getReviewsDue, getDeckMastery, reviewLogs, sessions } = useLibraryStore()
+  const { decks, cards, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore()
+  const { reviewLogs, sessions } = useHistoryStore()
   const { newCardsPerDay } = useSettingsStore()
   const [search, setSearch] = useState('')
   const [goalTargets, setGoalTargets] = useState({ cards: 50, minutes: 30, accuracy: 85 })

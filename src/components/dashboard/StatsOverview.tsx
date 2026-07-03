@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { getPeriodRange, logsInRange, type Period } from '@/lib/periods'
 
 function useCountUp(target: number, duration = 800): number {
@@ -23,7 +23,7 @@ function useCountUp(target: number, duration = 800): number {
 interface StatsOverviewProps { period: Period }
 
 export function StatsOverview({ period }: StatsOverviewProps) {
-  const { reviewLogs, sessions } = useLibraryStore()
+  const { reviewLogs, sessions } = useHistoryStore()
   const { start, end } = getPeriodRange(period)
 
   const periodLogs = logsInRange(reviewLogs, start, end)

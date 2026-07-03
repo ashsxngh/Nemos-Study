@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
@@ -23,10 +23,12 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
+import { AnchoredMenu, MenuItemRow, type MenuItem } from '@/components/ui/Menu'
 import { DeckView } from '@/components/library/DeckView'
 import { StudyModePopup } from '@/components/library/StudyModePopup'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { FolderColor, Folder as FolderType, Deck as DeckType } from '@/lib/types'
 
@@ -108,64 +110,35 @@ function ConfirmDeleteDialog({
 }
 
 // ── Dropdown menu ─────────────────────────────────────────────────────────────
-
-interface DropdownItem {
-  label: string
-  icon: React.ReactNode
-  onClick: () => void
-  danger?: boolean
-}
+// DropdownItem is an alias of the shared MenuItem type — kept for readability
+// at call sites throughout this file.
+type DropdownItem = MenuItem
 
 function ItemDropdown({ items }: { items: DropdownItem[] }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  const close = useCallback(() => setOpen(false), [])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        close()
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open, close])
-
   return (
-    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
-      <button
-        onMouseDown={(e) => {
-          e.stopPropagation()
-          setOpen((v) => !v)
-        }}
-        className="w-6 h-6 flex items-center justify-center rounded hover:bg-[var(--bg-active)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-        aria-label="More options"
-      >
-        <MoreHorizontal size={13} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] shadow-lg py-0.5 overflow-hidden">
-          {items.map((item, i) => (
-            <button
-              key={i}
-              onMouseDown={(e) => {
-                e.stopPropagation()
-                item.onClick()
-                setOpen(false)
-              }}
-              className={cn(
-                'w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)] transition-colors text-left',
-                item.danger ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'
-              )}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div onClick={(e) => e.stopPropagation()}>
+      <AnchoredMenu
+        panelClassName="min-w-[140px] rounded-[var(--radius-sm)] py-0.5"
+        trigger={({ onClick }) => (
+          <button
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              onClick()
+            }}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-[var(--bg-active)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            aria-label="More options"
+          >
+            <MoreHorizontal size={13} />
+          </button>
+        )}
+        panel={(close) => (
+          <>
+            {items.map((item, i) => (
+              <MenuItemRow key={i} item={item} onDone={close} dense />
+            ))}
+          </>
+        )}
+      />
     </div>
   )
 }
@@ -202,9 +175,10 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
 export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: LibraryBrowserProps) {
   const router = useRouter()
   const {
-    folders, decks, getDeckCards, getDeckMastery, getDueCards, sessions,
+    folders, decks, getDeckCards, getDeckMastery, getDueCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore()
+  const sessions = useHistoryStore((s) => s.sessions)
 
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
