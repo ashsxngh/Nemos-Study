@@ -13,7 +13,6 @@ import {
   Toggle,
   SettingRow,
   NumberField,
-  AlgorithmPicker,
   FSRSWeightsGrid,
   ResetFSRSDefaultsButton,
   BurnoutThresholdToggles,
@@ -209,53 +208,7 @@ export function SettingsPage() {
             <section>
               <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">SRS Algorithm</h2>
 
-              <div className="mb-4">
-                <AlgorithmPicker />
-              </div>
-
-              {settings.algorithm === 'sm2' && (
-                <>
-                  <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
-                    <SettingRow label="New cards per day" description="Maximum new cards introduced per day — new cards that have never been reviewed">
-                      <NumberField value={settings.newCardsPerDay} onChange={(v) => updateSettings({ newCardsPerDay: v })} />
-                    </SettingRow>
-                    <SettingRow label="Max reviews per day" description="Cap on review cards (previously seen cards due for repetition) per day">
-                      <NumberField value={settings.maxReviewsPerDay} onChange={(v) => updateSettings({ maxReviewsPerDay: v })} />
-                    </SettingRow>
-                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
-                      <NumberField value={settings.sessionLength} onChange={(v) => updateSettings({ sessionLength: v })} bounds={{ min: 5, max: 100 }} />
-                    </SettingRow>
-                    <SettingRow label="Starting ease factor" description="Initial ease multiplier assigned to new cards (SM-2 default: 2.5)">
-                      <NumberField value={settings.startingEase} onChange={(v) => updateSettings({ startingEase: v })} />
-                    </SettingRow>
-                    <SettingRow label="Easy bonus" description="Added to ease factor when you rate a card Easy — higher means larger future intervals (default: 0.15)">
-                      <NumberField value={settings.easyBonus} onChange={(v) => updateSettings({ easyBonus: v })} />
-                    </SettingRow>
-                    <SettingRow label="Hard interval multiplier" description="Interval is multiplied by this when you rate Hard — keeps the card close but not immediate (default: 1.2)">
-                      <NumberField value={settings.hardInterval} onChange={(v) => updateSettings({ hardInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Graduating interval (days)" description="Interval after the second Good rating — how many days before the card is reviewed again (default: 4)">
-                      <NumberField value={settings.graduatingInterval} onChange={(v) => updateSettings({ graduatingInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Lapse interval (%)" description="After forgetting a card, the new interval is this % of the previous interval (default: 10%)">
-                      <NumberField value={settings.lapseInterval} onChange={(v) => updateSettings({ lapseInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Leech threshold (lapses)" description="Flag a card as a leech after this many lapses so you can rewrite or suspend it">
-                      <NumberField value={settings.leechThreshold} onChange={(v) => updateSettings({ leechThreshold: v })} />
-                    </SettingRow>
-                    <SettingRow label="Show answer timer" description="Display response time while reviewing">
-                      <Toggle checked={settings.showAnswerTimer} onChange={(v) => updateSettings({ showAnswerTimer: v })} />
-                    </SettingRow>
-                  </div>
-
-                  <div className="mt-3 flex justify-end">
-                    <Button variant="ghost" size="sm" onClick={resetSettings}>Reset to SM-2 defaults</Button>
-                  </div>
-                </>
-              )}
-
-              {settings.algorithm === 'fsrs' && (
-                <>
+              <>
                   <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
                     <SettingRow label="New cards per day" description="Maximum new cards introduced per day — new cards that have never been reviewed">
                       <NumberField value={settings.newCardsPerDay} onChange={(v) => updateSettings({ newCardsPerDay: v })} />
@@ -327,8 +280,7 @@ export function SettingsPage() {
                   <div className="mt-3 flex justify-end">
                     <ResetFSRSDefaultsButton />
                   </div>
-                </>
-              )}
+              </>
             </section>
           )}
 

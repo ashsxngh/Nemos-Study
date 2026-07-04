@@ -1,4 +1,5 @@
-import type { Folder, Deck, Card, SRSData, ReviewSession } from '@/lib/types'
+import type { Folder, Deck, Card, ReviewSession } from '@/lib/types'
+import type { FSRSState } from '@/lib/srs'
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -22,7 +23,7 @@ export function exportAsJSON(state: {
   folders: Folder[]
   decks: Deck[]
   cards: Card[]
-  srsData: Record<string, SRSData>
+  fsrsData: Record<string, FSRSState>
   sessions: ReviewSession[]
 }) {
   const json = JSON.stringify(state, null, 2)

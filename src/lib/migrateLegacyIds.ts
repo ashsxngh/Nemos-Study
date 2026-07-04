@@ -91,7 +91,6 @@ export function migrateLegacyIds(): void {
       folderId: mapId(d.folderId) ?? null,
     })),
     cards: lib.cards.map(mapCard),
-    srsData: mapSrsRecord(lib.srsData),
     fsrsData: mapSrsRecord(lib.fsrsData),
     // Legacy ids were never accepted by the server, so there is nothing to
     // delete remotely — keep only valid UUIDs.
@@ -134,9 +133,6 @@ export function migrateLegacyIds(): void {
       ...t,
       id: mapId(t.id) as string,
       card: t.card ? mapCard(t.card) : t.card,
-      cardSRS: t.cardSRS
-        ? { ...t.cardSRS, cardId: mapId(t.cardSRS.cardId) as string }
-        : t.cardSRS,
       cardFSRS: t.cardFSRS
         ? { ...t.cardFSRS, cardId: mapId(t.cardFSRS.cardId) as string }
         : t.cardFSRS,
@@ -144,7 +140,6 @@ export function migrateLegacyIds(): void {
         ? { ...t.deck, id: mapId(t.deck.id) as string, folderId: (mapId(t.deck.folderId) ?? null) as string | null }
         : t.deck,
       deckCards: t.deckCards ? t.deckCards.map(mapCard) : t.deckCards,
-      deckSRS: t.deckSRS ? mapSrsRecord(t.deckSRS) : t.deckSRS,
       deckFSRS: t.deckFSRS ? mapSrsRecord(t.deckFSRS) : t.deckFSRS,
       note: t.note ? mapNote(t.note) : t.note,
     })),

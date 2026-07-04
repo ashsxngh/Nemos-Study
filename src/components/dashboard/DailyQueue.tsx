@@ -10,28 +10,25 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 
 export function DailyQueue() {
-  const { decks, cards, srsData, fsrsData, getNewCards, getReviewsDue } = useLibraryStore(
+  const { decks, cards, fsrsData, getNewCards, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
       getReviewsDue: s.getReviewsDue,
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
   const totalNew = useMemo(
     () => getNewCards().length,
-    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+    [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
   const totalReviews = useMemo(
     () => getReviewsDue().length,
-    [cards, decks, srsData, fsrsData, algorithm, getReviewsDue]
+    [cards, decks, fsrsData, getReviewsDue]
   )
   const total = totalNew + totalReviews
 
@@ -45,7 +42,7 @@ export function DailyQueue() {
           reviewCount: getReviewsDue(deck.id).length,
         }))
         .filter((d) => d.newCount + d.reviewCount > 0),
-    [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getReviewsDue]
+    [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getReviewsDue]
   )
 
   if (total === 0) return null

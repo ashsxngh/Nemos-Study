@@ -10,13 +10,13 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { exportAsJSON } from '@/lib/export'
 
 export default function StatsRoute() {
-  const { folders, decks, cards, srsData } = useLibraryStore(
-    useShallow((s) => ({ folders: s.folders, decks: s.decks, cards: s.cards, srsData: s.srsData }))
+  const { folders, decks, cards, fsrsData } = useLibraryStore(
+    useShallow((s) => ({ folders: s.folders, decks: s.decks, cards: s.cards, fsrsData: s.fsrsData }))
   )
   const sessions = useHistoryStore((s) => s.sessions)
 
   function handleExport() {
-    exportAsJSON({ folders, decks, cards, srsData, sessions })
+    exportAsJSON({ folders, decks, cards, fsrsData, sessions })
   }
 
   return (

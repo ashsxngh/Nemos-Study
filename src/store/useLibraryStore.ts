@@ -2,11 +2,8 @@
 
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import type { Folder, Deck, Card, SRSData, ReviewLog, FolderColor, CardType } from '@/lib/types'
+import type { Folder, Deck, Card, ReviewLog, FolderColor, CardType } from '@/lib/types'
 import {
-  createInitialSRSData,
-  scheduleCard,
-  isDue,
   fsrsInitCard,
   fsrsSchedule,
   fsrsRetrievability,
@@ -21,6 +18,7 @@ import { getExamDeckIds, getPulledForwardCardIds, computeCardUrgencies } from '@
 import { generateId } from '@/lib/utils'
 import { createIDBStorage } from '@/lib/idbStorage'
 import { CARD_TEXT_MAX_LENGTH, NAME_MAX_LENGTH } from '@/lib/limits'
+import { toLocalDateStr } from '@/lib/formatDate'
 
 const USER_ID = 'local-user'
 
@@ -36,7 +34,6 @@ interface LibraryState {
   folders: Folder[]
   decks: Deck[]
   cards: Card[]
-  srsData: Record<string, SRSData>
   fsrsData: Record<string, FSRSState>
   pendingDeletes: PendingDeletes
 
@@ -65,8 +62,7 @@ interface LibraryState {
 
   // SRS actions
   initCardSRS: (cardId: string) => void
-  reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4) => void
-  setSRSData: (cardId: string, srs: SRSData) => void
+  reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4, responseMs?: number) => void
   setFSRSData: (cardId: string, fsrs: FSRSState) => void
   resetCardSRS: (cardId: string) => void
   clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[], sessions: string[], reviewLogs: string[] }) => void
@@ -161,7 +157,6 @@ export const useLibraryStore = create<LibraryState>()(
       folders: [],
       decks: [],
       cards: [],
-      srsData: {},
       fsrsData: {},
       pendingDeletes: { folders: [], decks: [], cards: [], sessions: [], reviewLogs: [] },
 
@@ -194,17 +189,15 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteFolder: (id) => {
-        const { folders, decks, cards, srsData, fsrsData, pendingDeletes } = get()
+        const { folders, decks, cards, fsrsData, pendingDeletes } = get()
         const descendantIds = getAllDescendantFolderIds(folders, id)
         const allFolderIds = [id, ...descendantIds]
         const deckIdsToDelete = decks.filter((d) => d.folderId && allFolderIds.includes(d.folderId)).map((d) => d.id)
         const cardIdsToDelete = cards.filter((c) => deckIdsToDelete.includes(c.deckId)).map((c) => c.id)
         const cardIdSet = new Set(cardIdsToDelete)
         const deckIdSet = new Set(deckIdsToDelete)
-        const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         cardIdsToDelete.forEach((cid) => {
-          delete newSrsData[cid]
           delete newFsrsData[cid]
         })
         const { sessionIds, logIds } = useHistoryStore.getState().pruneHistory(cardIdSet, deckIdSet)
@@ -212,7 +205,6 @@ export const useLibraryStore = create<LibraryState>()(
           folders: folders.filter((f) => !allFolderIds.includes(f.id)),
           decks: decks.filter((d) => !deckIdsToDelete.includes(d.id)),
           cards: cards.filter((c) => !cardIdsToDelete.includes(c.id)),
-          srsData: newSrsData,
           fsrsData: newFsrsData,
           pendingDeletes: {
             folders: [...pendingDeletes.folders, ...allFolderIds],
@@ -254,15 +246,13 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteDeck: (id) => {
-        const { cards, decks, folders, srsData, fsrsData } = get()
+        const { cards, decks, folders, fsrsData } = get()
         const deck = decks.find((d) => d.id === id)
         const deckCards = cards.filter((c) => c.deckId === id)
         const cardIdsToDelete = deckCards.map((c) => c.id)
         const cardIdSet = new Set(cardIdsToDelete)
-        const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         cardIdsToDelete.forEach((cid) => {
-          delete newSrsData[cid]
           delete newFsrsData[cid]
         })
 
@@ -271,10 +261,8 @@ export const useLibraryStore = create<LibraryState>()(
           const folderName = deck.folderId
             ? folders.find((f) => f.id === deck.folderId)?.name
             : undefined
-          const deckSRS: Record<string, typeof srsData[string]> = {}
           const deckFSRS: Record<string, typeof fsrsData[string]> = {}
           cardIdsToDelete.forEach((cid) => {
-            if (srsData[cid]) deckSRS[cid] = srsData[cid]
             if (fsrsData[cid]) deckFSRS[cid] = fsrsData[cid]
           })
           useTrashStore.getState().add({
@@ -286,7 +274,6 @@ export const useLibraryStore = create<LibraryState>()(
             cardCount: deckCards.length,
             deck,
             deckCards,
-            deckSRS,
             deckFSRS,
           })
         }
@@ -295,7 +282,6 @@ export const useLibraryStore = create<LibraryState>()(
         set((s) => ({
           decks: s.decks.filter((d) => d.id !== id),
           cards: s.cards.filter((c) => c.deckId !== id),
-          srsData: newSrsData,
           fsrsData: newFsrsData,
           pendingDeletes: {
             ...s.pendingDeletes,
@@ -327,11 +313,9 @@ export const useLibraryStore = create<LibraryState>()(
           createdAt: now,
           updatedAt: now,
         }
-        const srs = createInitialSRSData(card.id, USER_ID)
         const fsrs = fsrsInitCard(card.id, USER_ID)
         set((s) => ({
           cards: [...s.cards, card],
-          srsData: { ...s.srsData, [card.id]: srs },
           fsrsData: { ...s.fsrsData, [card.id]: fsrs },
         }))
         return card
@@ -345,7 +329,6 @@ export const useLibraryStore = create<LibraryState>()(
         const now = new Date().toISOString()
         const baseOrder = get().cards.filter((c) => c.deckId === deckId).length
         const newCards: Card[] = []
-        const newSrsData: Record<string, SRSData> = {}
         const newFsrsData: Record<string, FSRSState> = {}
         rawCards.forEach((raw, i) => {
           const card: Card = {
@@ -365,13 +348,11 @@ export const useLibraryStore = create<LibraryState>()(
             createdAt: now,
             updatedAt: now,
           }
-          newSrsData[card.id] = createInitialSRSData(card.id, USER_ID)
           newFsrsData[card.id] = fsrsInitCard(card.id, USER_ID)
           newCards.push(card)
         })
         set((s) => ({
           cards: [...s.cards, ...newCards],
-          srsData: { ...s.srsData, ...newSrsData },
           fsrsData: { ...s.fsrsData, ...newFsrsData },
         }))
       },
@@ -405,11 +386,9 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       deleteCard: (id) => {
-        const { cards, decks, srsData, fsrsData } = get()
+        const { cards, decks, fsrsData } = get()
         const card = cards.find((c) => c.id === id)
-        const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
-        delete newSrsData[id]
         delete newFsrsData[id]
 
         // Save to trash before removing
@@ -423,14 +402,12 @@ export const useLibraryStore = create<LibraryState>()(
             parentName: deckName,
             snippet: card.back?.slice(0, 120),
             card,
-            cardSRS: srsData[id],
             cardFSRS: fsrsData[id],
           })
         }
 
         set((s) => ({
           cards: s.cards.filter((c) => c.id !== id),
-          srsData: newSrsData,
           fsrsData: newFsrsData,
           pendingDeletes: {
             ...s.pendingDeletes,
@@ -441,17 +418,15 @@ export const useLibraryStore = create<LibraryState>()(
 
       deleteCardsBatch: (ids) => {
         if (!ids.length) return
-        const { cards, decks, srsData, fsrsData } = get()
+        const { cards, decks, fsrsData } = get()
         const idSet = new Set(ids)
-        const newSrsData = { ...srsData }
         const newFsrsData = { ...fsrsData }
         ids.forEach((id) => {
-          delete newSrsData[id]
           delete newFsrsData[id]
         })
 
         // Save each to trash before removing (trash's own list is small —
-        // this loop isn't the O(n²) hazard the cards/srsData/fsrsData clones are).
+        // this loop isn't the O(n²) hazard the cards/fsrsData clones are).
         ids.forEach((id) => {
           const card = cards.find((c) => c.id === id)
           if (!card) return
@@ -464,14 +439,12 @@ export const useLibraryStore = create<LibraryState>()(
             parentName: deckName,
             snippet: card.back?.slice(0, 120),
             card,
-            cardSRS: srsData[id],
             cardFSRS: fsrsData[id],
           })
         })
 
         set((s) => ({
           cards: s.cards.filter((c) => !idSet.has(c.id)),
-          srsData: newSrsData,
           fsrsData: newFsrsData,
           pendingDeletes: {
             ...s.pendingDeletes,
@@ -482,17 +455,10 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── SRS actions ─────────────────────────────────────────────────────────
       initCardSRS: (cardId) => {
-        const { srsData, fsrsData } = get()
-        if (!srsData[cardId]) {
-          set((s) => ({ srsData: { ...s.srsData, [cardId]: createInitialSRSData(cardId, USER_ID) } }))
-        }
+        const { fsrsData } = get()
         if (!fsrsData[cardId]) {
           set((s) => ({ fsrsData: { ...s.fsrsData, [cardId]: fsrsInitCard(cardId, USER_ID) } }))
         }
-      },
-
-      setSRSData: (cardId, srs) => {
-        set((s) => ({ srsData: { ...s.srsData, [cardId]: srs } }))
       },
 
       setFSRSData: (cardId, fsrs) => {
@@ -500,26 +466,13 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       resetCardSRS: (cardId) => {
-        const newSrsData = { ...get().srsData }
-        const newFsrsData = { ...get().fsrsData }
-        delete newSrsData[cardId]
-        delete newFsrsData[cardId]
-        set({ srsData: newSrsData, fsrsData: newFsrsData })
-        // Re-init fresh
         set((s) => ({
-          srsData: { ...s.srsData, [cardId]: createInitialSRSData(cardId, USER_ID) },
           fsrsData: { ...s.fsrsData, [cardId]: fsrsInitCard(cardId, USER_ID) },
         }))
       },
 
-      reviewCard: (cardId, rating) => {
+      reviewCard: (cardId, rating, responseMs = 0) => {
         const {
-          algorithm,
-          easyBonus,
-          hardInterval,
-          lapseInterval,
-          startingEase,
-          graduatingInterval,
           fsrsWeights,
           fsrsTargetRetention,
           fsrsMaxInterval,
@@ -542,101 +495,43 @@ export const useLibraryStore = create<LibraryState>()(
           )
         }
 
-        if (algorithm === 'fsrs') {
-          const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
-          const wasNew = existing.state === 'new'
-          const fsrsParams = {
-            ...DEFAULT_FSRS_PARAMS,
-            weights: fsrsWeights,
-            targetRetention: fsrsTargetRetention,
-            maximumInterval: fsrsMaxInterval,
-            requestRetention: fsrsTargetRetention,
-          }
-          const updated = fsrsSchedule(existing, rating, fsrsParams)
-          // Cards graduating from new should be reviewable the same day
-          if (wasNew && rating >= 3) {
-            updated.dueDate = new Date().toISOString()
-          }
-
-          // Derive a compatible interval for the review log
-          const daysDiff =
-            (new Date(updated.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-          const logInterval = Math.max(1, Math.round(daysDiff))
-
-          const log: ReviewLog = {
-            id: generateId(),
-            sessionId: generateId(),
-            cardId,
-            userId: USER_ID,
-            rating,
-            responseMs: 0,
-            reviewedAt: new Date().toISOString(),
-            scheduledInterval: logInterval,
-            ease: updated.difficulty,
-            wasNew,
-          }
-          // Mirror the FSRS result into srsData too — it's the only table that
-          // gets pushed to Supabase (srs_data has no FSRS columns), so without
-          // this every FSRS review would be invisible to sync/stats/the DB.
-          const existingSrs = get().srsData[cardId] ?? createInitialSRSData(cardId, USER_ID, {
-            easyBonus, hardInterval, lapseInterval, startingEase, graduatingInterval,
-          })
-          // FSRS has a 'learning' state with no SM2 equivalent — it's still a
-          // reviewed (non-new) card, so it maps to 'review' here.
-          const mirroredState: SRSData['state'] =
-            updated.state === 'relearning' ? 'relearning' : updated.state === 'new' ? 'new' : 'review'
-          const mirroredSrs: SRSData = {
-            ...existingSrs,
-            interval: logInterval,
-            repetitions: updated.repetitions,
-            lapses: updated.lapses,
-            dueDate: updated.dueDate,
-            lastReviewedAt: updated.lastReviewedAt,
-            masteryPercent: Math.round(fsrsRetrievability(updated) * 100),
-            state: mirroredState,
-          }
-          set((s) => ({
-            fsrsData: { ...s.fsrsData, [cardId]: updated },
-            srsData: { ...s.srsData, [cardId]: mirroredSrs },
-            cards: suspendIfLeech(s.cards, updated.lapses),
-          }))
-          useHistoryStore.getState().addReviewLog(log)
-        } else {
-          // Self-heal a missing entry instead of silently dropping the review
-          // (mirrors the fsrs branch's `?? fsrsInitCard(...)` fallback above).
-          const existing = get().srsData[cardId] ?? createInitialSRSData(cardId, USER_ID, {
-            easyBonus, hardInterval, lapseInterval, startingEase, graduatingInterval,
-          })
-          const wasNew = existing.repetitions === 0
-          const updated = scheduleCard(existing, rating, {
-            easyBonus,
-            hardInterval,
-            lapseInterval,
-            startingEase,
-            graduatingInterval,
-          })
-          // Cards graduating from new should be reviewable the same day
-          if (wasNew && rating >= 3) {
-            updated.dueDate = new Date().toISOString()
-          }
-          const log: ReviewLog = {
-            id: generateId(),
-            sessionId: generateId(),
-            cardId,
-            userId: USER_ID,
-            rating,
-            responseMs: 0,
-            reviewedAt: new Date().toISOString(),
-            scheduledInterval: updated.interval,
-            ease: updated.easeFactor,
-            wasNew,
-          }
-          set((s) => ({
-            srsData: { ...s.srsData, [cardId]: updated },
-            cards: suspendIfLeech(s.cards, updated.lapses),
-          }))
-          useHistoryStore.getState().addReviewLog(log)
+        const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
+        const wasNew = existing.state === 'new'
+        const fsrsParams = {
+          ...DEFAULT_FSRS_PARAMS,
+          weights: fsrsWeights,
+          targetRetention: fsrsTargetRetention,
+          maximumInterval: fsrsMaxInterval,
+          requestRetention: fsrsTargetRetention,
         }
+        const updated = fsrsSchedule(existing, rating, fsrsParams)
+        // Cards graduating from new should be reviewable the same day
+        if (wasNew && rating >= 3) {
+          updated.dueDate = new Date().toISOString()
+        }
+
+        // Derive a whole-day interval for the review log
+        const daysDiff =
+          (new Date(updated.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+        const logInterval = Math.max(1, Math.round(daysDiff))
+
+        const log: ReviewLog = {
+          id: generateId(),
+          sessionId: generateId(),
+          cardId,
+          userId: USER_ID,
+          rating,
+          responseMs,
+          reviewedAt: new Date().toISOString(),
+          scheduledInterval: logInterval,
+          ease: updated.difficulty,
+          wasNew,
+        }
+        set((s) => ({
+          fsrsData: { ...s.fsrsData, [cardId]: updated },
+          cards: suspendIfLeech(s.cards, updated.lapses),
+        }))
+        useHistoryStore.getState().addReviewLog(log)
       },
 
       clearPendingDeletes: (processed) => {
@@ -658,21 +553,21 @@ export const useLibraryStore = create<LibraryState>()(
 
       // ── Query helpers ────────────────────────────────────────────────────────
       getNewCards: (deckId) => {
-        const { cards, fsrsData, srsData, decks } = get()
+        const { cards, fsrsData, decks } = get()
         const { reviewLogs } = useHistoryStore.getState()
-        const { algorithm, newCardsPerDay } = useSettingsStore.getState()
-        const todayStr = new Date().toISOString().slice(0, 10)
+        const { newCardsPerDay } = useSettingsStore.getState()
+        const todayStr = toLocalDateStr(new Date())
         const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
 
         // Count new cards introduced today using wasNew-flagged logs (Issue 7).
-        // This correctly excludes lapsed graduated cards regardless of algorithm.
+        // This correctly excludes lapsed graduated cards.
         // Precompute the set of cards touched by a wasNew log today in one pass
         // over reviewLogs (O(logs)) instead of scanning all logs per card (O(cards×logs)).
         const wasNewTodayCardIds = new Set<string>()
         for (const l of reviewLogs) {
-          if (l.wasNew === true && l.reviewedAt.slice(0, 10) === todayStr) wasNewTodayCardIds.add(l.cardId)
+          if (l.wasNew === true && toLocalDateStr(new Date(l.reviewedAt)) === todayStr) wasNewTodayCardIds.add(l.cardId)
         }
         const studiedNewToday = pool.filter((c) => wasNewTodayCardIds.has(c.id)).length
 
@@ -680,18 +575,13 @@ export const useLibraryStore = create<LibraryState>()(
         if (remaining === 0) return []
 
         const eligible = pool.filter((c) => {
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            return !fs || fs.state === 'new'
-          }
-          const srs = srsData[c.id]
-          return !srs || srs.repetitions === 0
+          const fs = fsrsData[c.id]
+          return !fs || fs.state === 'new'
         })
 
         // Primary sort: due date ascending (a new card's due date is set at
         // creation time, so this is equivalent to oldest-created-first).
-        const dueDateOf = (c: Card) =>
-          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const dueDateOf = (c: Card) => fsrsData[c.id]?.dueDate ?? c.createdAt
         const sorted = [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
 
         // Secondary sort: round-robin across decks, weighted by overdue severity.
@@ -701,8 +591,7 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       getReviewsDue: (deckId) => {
-        const { cards, fsrsData, srsData, decks, folders } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { cards, fsrsData, decks, folders } = get()
         const deckSet = new Set(decks.map((d) => d.id))
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
@@ -723,36 +612,23 @@ export const useLibraryStore = create<LibraryState>()(
 
         const due = pool.filter((c) => {
           if (pulledForwardIds.has(c.id)) return true
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            if (!fs || fs.state === 'new') return false
-            return new Date(fs.dueDate) <= now
-          }
-          const srs = srsData[c.id]
-          if (!srs || srs.repetitions === 0) return false
-          return isDue(srs)
+          const fs = fsrsData[c.id]
+          if (!fs || fs.state === 'new') return false
+          return new Date(fs.dueDate) <= now
         })
 
         // Primary sort: relative overdueness (days_late / scheduled_interval) descending.
         // A card 3d late on a 4d interval (0.75) outranks a card 5d late on a 200d interval
         // (0.025). Lapses break ties — more lapses first.
-        const dueDateOf = (c: Card) =>
-          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const dueDateOf = (c: Card) => fsrsData[c.id]?.dueDate ?? c.createdAt
         const relativeOverdueness = (c: Card): number => {
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            if (!fs || !fs.lastReviewedAt) return 0
-            const msLate = Date.now() - new Date(fs.dueDate).getTime()
-            const scheduled = new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()
-            return scheduled > 0 ? msLate / scheduled : msLate / 86400000
-          }
-          const srs = srsData[c.id]
-          if (!srs) return 0
-          const daysLate = (Date.now() - new Date(srs.dueDate).getTime()) / 86400000
-          return srs.interval > 0 ? daysLate / srs.interval : daysLate
+          const fs = fsrsData[c.id]
+          if (!fs || !fs.lastReviewedAt) return 0
+          const msLate = Date.now() - new Date(fs.dueDate).getTime()
+          const scheduled = new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()
+          return scheduled > 0 ? msLate / scheduled : msLate / 86400000
         }
-        const lapsesOf = (c: Card): number =>
-          algorithm === 'fsrs' ? (fsrsData[c.id]?.lapses ?? 0) : (srsData[c.id]?.lapses ?? 0)
+        const lapsesOf = (c: Card): number => fsrsData[c.id]?.lapses ?? 0
         const sorted = [...due].sort((a, b) => {
           const diff = relativeOverdueness(b) - relativeOverdueness(a)
           if (Math.abs(diff) > 0.001) return diff
@@ -766,8 +642,7 @@ export const useLibraryStore = create<LibraryState>()(
         const reviews = get().getReviewsDue(deckId)
 
         // Sort reviews by exam urgency — highest urgency first in inbox
-        const { fsrsData, srsData, decks, folders } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { fsrsData, decks, folders } = get()
         const futureExams = useExamStore.getState().exams.filter(
           (e) => new Date(e.date + 'T00:00') > new Date()
         )
@@ -781,31 +656,21 @@ export const useLibraryStore = create<LibraryState>()(
         // Session-start warmup: surface the 2-3 cards the learner is most
         // confident on right now, ahead of the harder overdue cards.
         return withWarmup(combined, (c) => {
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            return fs && fs.state !== 'new' ? fsrsRetrievability(fs) : null
-          }
-          const srs = srsData[c.id]
-          return srs && srs.repetitions > 0 ? srs.masteryPercent / 100 : null
+          const fs = fsrsData[c.id]
+          return fs && fs.state !== 'new' ? fsrsRetrievability(fs) : null
         })
       },
 
       // "Reviews" mode in the deck Study popup — every previously-learned
       // card in this deck, regardless of due date (early review allowed).
       getDeckReviewsAll: (deckId) => {
-        const { cards, fsrsData, srsData } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { cards, fsrsData } = get()
         const pool = cards.filter((c) => c.deckId === deckId && !c.isArchived)
         const reviewed = pool.filter((c) => {
-          if (algorithm === 'fsrs') {
-            const fs = fsrsData[c.id]
-            return !!fs && fs.state !== 'new'
-          }
-          const srs = srsData[c.id]
-          return !!srs && srs.repetitions > 0
+          const fs = fsrsData[c.id]
+          return !!fs && fs.state !== 'new'
         })
-        const dueDateOf = (c: Card) =>
-          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const dueDateOf = (c: Card) => fsrsData[c.id]?.dueDate ?? c.createdAt
         return [...reviewed].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
       },
 
@@ -814,16 +679,11 @@ export const useLibraryStore = create<LibraryState>()(
       // (see getNewCards); a manual per-deck study session deliberately
       // ignores it, the same way "deck-all" ignores due dates.
       getDeckNewAll: (deckId) => {
-        const { cards, fsrsData, srsData } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { cards, fsrsData } = get()
         const pool = cards.filter((c) => c.deckId === deckId && !c.isArchived)
-        const eligible = pool.filter((c) => {
-          if (algorithm === 'fsrs') return (fsrsData[c.id]?.state ?? 'new') === 'new'
-          return (srsData[c.id]?.repetitions ?? 0) === 0
-        })
+        const eligible = pool.filter((c) => (fsrsData[c.id]?.state ?? 'new') === 'new')
 
-        const dueDateOf = (c: Card) =>
-          algorithm === 'fsrs' ? (fsrsData[c.id]?.dueDate ?? c.createdAt) : (srsData[c.id]?.dueDate ?? c.createdAt)
+        const dueDateOf = (c: Card) => fsrsData[c.id]?.dueDate ?? c.createdAt
         return [...eligible].sort((a, b) => new Date(dueDateOf(a)).getTime() - new Date(dueDateOf(b)).getTime())
       },
 
@@ -850,14 +710,12 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       getDeckMastery: (deckId) => {
-        const { cards, srsData, fsrsData } = get()
-        const { algorithm } = useSettingsStore.getState()
+        const { cards, fsrsData } = get()
         const deckCards = cards.filter((c) => c.deckId === deckId)
         if (deckCards.length === 0) return 0
 
-        const data = algorithm === 'fsrs' ? fsrsData : srsData
         const learned = deckCards.filter((c) => {
-          const state = data[c.id]?.state
+          const state = fsrsData[c.id]?.state
           return state === 'review' || state === 'relearning'
         }).length
 

@@ -1,22 +1,16 @@
 'use client'
 
 import { create } from 'zustand'
-import type { Card, ReviewLog, SRSData } from '@/lib/types'
+import type { Card, ReviewLog } from '@/lib/types'
 import type { FSRSState } from '@/lib/srs'
 import { generateId } from '@/lib/utils'
 
 interface UndoEntry {
   cardId: string
-  prevSRS: SRSData
-  prevFSRS?: FSRSState
+  prevFSRS: FSRSState
   logId: string
   isNew: boolean
   rating: number
-}
-
-interface RedoEntry {
-  cardId: string
-  newSRS: SRSData
 }
 
 interface StudyState {
@@ -28,7 +22,6 @@ interface StudyState {
   startedAt: Date | null
   mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only' | 'deck-all' | 'deck-reviews' | 'deck-new' | 'deck-both'
   undoStack: UndoEntry[]
-  redoStack: RedoEntry[]
 
   startSession: (queue: Card[], mode?: StudyState['mode']) => void
   endSession: () => void
@@ -37,10 +30,8 @@ interface StudyState {
   nextCard: () => void
   addLog: (log: Omit<ReviewLog, 'id' | 'sessionId'>) => void
   reset: () => void
-  pushUndo: (cardId: string, prevSRS: SRSData, logId: string, isNew: boolean, rating: number, prevFSRS?: FSRSState) => void
+  pushUndo: (cardId: string, prevFSRS: FSRSState, logId: string, isNew: boolean, rating: number) => void
   popUndo: () => UndoEntry | undefined
-  pushRedo: (cardId: string, newSRS: SRSData) => void
-  popRedo: () => RedoEntry | undefined
   decrementIndex: () => void
   requeueCurrentCard: () => void
   removeCurrentCard: () => void
@@ -55,7 +46,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   startedAt: null,
   mode: 'standard',
   undoStack: [],
-  redoStack: [],
 
   startSession: (queue, mode = 'standard') =>
     set({
@@ -67,7 +57,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       startedAt: new Date(),
       sessionId: generateId(),
       undoStack: [],
-      redoStack: [],
     }),
 
   endSession: () => set({ sessionId: null, queue: [], currentIndex: 0 }),
@@ -95,13 +84,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       logs: [],
       startedAt: null,
       undoStack: [],
-      redoStack: [],
     }),
 
-  pushUndo: (cardId, prevSRS, logId, isNew, rating, prevFSRS) =>
+  pushUndo: (cardId, prevFSRS, logId, isNew, rating) =>
     set((s) => ({
-      undoStack: [...s.undoStack, { cardId, prevSRS, prevFSRS, logId, isNew, rating }],
-      redoStack: [],
+      undoStack: [...s.undoStack, { cardId, prevFSRS, logId, isNew, rating }],
     })),
 
   popUndo: () => {
@@ -109,17 +96,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     if (stack.length === 0) return undefined
     const entry = stack[stack.length - 1]
     set((s) => ({ undoStack: s.undoStack.slice(0, -1) }))
-    return entry
-  },
-
-  pushRedo: (cardId, newSRS) =>
-    set((s) => ({ redoStack: [...s.redoStack, { cardId, newSRS }] })),
-
-  popRedo: () => {
-    const stack = get().redoStack
-    if (stack.length === 0) return undefined
-    const entry = stack[stack.length - 1]
-    set((s) => ({ redoStack: s.redoStack.slice(0, -1) }))
     return entry
   },
 

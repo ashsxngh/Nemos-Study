@@ -1,4 +1,6 @@
-import type { Folder, Deck, Card, SRSData, CardType } from '@/lib/types'
+import type { Folder, Deck, Card, CardType } from '@/lib/types'
+import { fsrsInitCard } from '@/lib/srs'
+import type { FSRSState } from '@/lib/srs'
 
 /**
  * Parse a delimited row respecting RFC 4180 quoted fields.
@@ -320,23 +322,70 @@ export interface ImportedBackup {
   folders: Folder[]
   decks: Deck[]
   cards: Card[]
-  srsData: Record<string, SRSData>
+  fsrsData: Record<string, FSRSState>
+}
+
+// Shape of the SM-2 scheduling entries found in backups exported before the
+// SM-2 removal. Only used to convert old backups on import.
+interface LegacySRSData {
+  cardId: string
+  userId: string
+  interval: number
+  repetitions: number
+  dueDate: string
+  lastReviewedAt: string | null
+  lapses: number
+  state?: 'new' | 'review' | 'relearning'
+}
+
+// Converts a legacy SM-2 entry to an FSRS-5 state rather than dropping the
+// card's scheduling history. Approximations: the SM-2 interval stands in for
+// stability (an interval targeting ~90% recall is close to FSRS's definition
+// of S), and difficulty falls back to the FSRS-5 mid-scale default of 5.
+function legacySrsToFsrs(srs: LegacySRSData): FSRSState {
+  const reviewed = (srs.repetitions ?? 0) > 0 && srs.lastReviewedAt != null
+  if (!reviewed) {
+    const init = fsrsInitCard(srs.cardId, srs.userId)
+    return { ...init, dueDate: srs.dueDate ?? init.dueDate }
+  }
+  return {
+    cardId: srs.cardId,
+    userId: srs.userId,
+    stability: Math.max(0.1, srs.interval || 0.1),
+    difficulty: 5,
+    retrievability: 0,
+    dueDate: srs.dueDate,
+    lastReviewedAt: srs.lastReviewedAt,
+    repetitions: srs.repetitions,
+    lapses: srs.lapses ?? 0,
+    state: srs.state === 'relearning' ? 'relearning' : 'review',
+  }
 }
 
 /**
- * Parse a Nemo backup JSON and return the structured data.
+ * Parse a Nemo backup JSON and return the structured data. Backups from
+ * before the SM-2 removal carry a `srsData` record instead of `fsrsData` —
+ * those entries are converted to FSRS states so scheduling survives the
+ * restore instead of being silently dropped.
  */
 export function importFromJSON(jsonText: string): ImportedBackup {
-  const parsed = JSON.parse(jsonText) as Partial<ImportedBackup>
+  const parsed = JSON.parse(jsonText) as Partial<ImportedBackup> & {
+    srsData?: Record<string, LegacySRSData>
+  }
+  let fsrsData: Record<string, FSRSState> = {}
+  if (parsed.fsrsData && typeof parsed.fsrsData === 'object') {
+    fsrsData = parsed.fsrsData
+  } else if (parsed.srsData && typeof parsed.srsData === 'object') {
+    for (const [cardId, srs] of Object.entries(parsed.srsData)) {
+      fsrsData[cardId] = legacySrsToFsrs({ ...srs, cardId: srs.cardId ?? cardId })
+    }
+  }
   return {
     folders: Array.isArray(parsed.folders) ? parsed.folders : [],
     decks: Array.isArray(parsed.decks) ? parsed.decks : [],
     cards: Array.isArray(parsed.cards)
       ? parsed.cards.map((c: Card) => ({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' }))
       : [],
-    srsData:
-      parsed.srsData && typeof parsed.srsData === 'object'
-        ? (parsed.srsData as Record<string, SRSData>)
-        : {},
+    fsrsData,
   }
 }

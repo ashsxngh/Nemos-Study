@@ -57,12 +57,11 @@ export function Sidebar() {
       manualSync: s.manualSync,
     }))
   )
-  const { decks, folders, cards, srsData, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
+  const { decks, folders, cards, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       folders: s.folders,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDueCards: s.getDueCards,
       getNewCards: s.getNewCards,
@@ -70,28 +69,26 @@ export function Sidebar() {
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showNewDeckForm, setShowNewDeckForm] = useState(false)
 
   // getNewCards/getReviewsDue/getDueCards are the most expensive queries in
   // the app (O(cards) scans with sorting/interleaving) — memoized so a
-  // rating echo during a study session (which changes srsData/fsrsData but
+  // rating echo during a study session (which changes fsrsData but
   // not cards/decks/folders) only recomputes what actually changed.
   const newCards = useMemo(
     () => getNewCards(),
-    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+    [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
   const reviewsDue = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+    [cards, decks, folders, fsrsData, getReviewsDue]
   )
   const dueCards = useMemo(
     () => getDueCards(),
-    [cards, decks, folders, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getDueCards]
+    [cards, decks, folders, fsrsData, reviewLogs, newCardsPerDay, getDueCards]
   )
 
   // Don't surface sync errors during an active study session — they're a

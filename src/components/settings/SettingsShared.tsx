@@ -113,43 +113,6 @@ export function NumberField({ value, onChange, bounds, className }: NumberFieldP
   )
 }
 
-// ── Algorithm picker ──────────────────────────────────────────────────────────
-
-export function AlgorithmPicker() {
-  const { algorithm, updateSettings } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, updateSettings: s.updateSettings }))
-  )
-  return (
-    <div>
-      <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">Algorithm</label>
-      <div className="flex gap-2">
-        <button
-          onClick={() => updateSettings({ algorithm: 'sm2' })}
-          className={cn(
-            'px-3 py-1.5 rounded-[var(--radius-sm)] border text-xs font-medium transition-colors',
-            algorithm === 'sm2'
-              ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
-          )}
-        >
-          SM-2 (default)
-        </button>
-        <button
-          onClick={() => updateSettings({ algorithm: 'fsrs' })}
-          className={cn(
-            'px-3 py-1.5 rounded-[var(--radius-sm)] border text-xs font-medium transition-colors',
-            algorithm === 'fsrs'
-              ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
-          )}
-        >
-          FSRS-5
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── FSRS weights grid + reset ─────────────────────────────────────────────────
 
 export function FSRSWeightsGrid() {
@@ -309,12 +272,12 @@ function ImportCSVDialog({ cards, decks, onConfirm, onCancel }: ImportCSVDialogP
 // drop this in under their own section header.
 
 export function DataBackupSection() {
-  const { decks, cards, folders, srsData, createCard } = useLibraryStore(
+  const { decks, cards, folders, fsrsData, createCard } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
       folders: s.folders,
-      srsData: s.srsData,
+      fsrsData: s.fsrsData,
       createCard: s.createCard,
     }))
   )
@@ -328,7 +291,7 @@ export function DataBackupSection() {
   const [deleting, setDeleting] = useState(false)
 
   const handleExportJSON = () => {
-    exportAsJSON({ folders, decks, cards, srsData, sessions })
+    exportAsJSON({ folders, decks, cards, fsrsData, sessions })
   }
 
   const handleExportCSV = () => {

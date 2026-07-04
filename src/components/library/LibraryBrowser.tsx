@@ -177,7 +177,7 @@ function RootDropZone({ isDragging }: { isDragging: boolean }) {
 export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: LibraryBrowserProps) {
   const router = useRouter()
   const {
-    folders, decks, cards, srsData, fsrsData,
+    folders, decks, cards, fsrsData,
     getDeckCards, getDeckMastery, getDueCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore(
@@ -185,7 +185,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
       folders: s.folders,
       decks: s.decks,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDeckCards: s.getDeckCards,
       getDeckMastery: s.getDeckMastery,
@@ -197,7 +196,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     }))
   )
   const sessions = useHistoryStore((s) => s.sessions)
-  const { algorithm } = useSettingsStore(useShallow((s) => ({ algorithm: s.algorithm })))
 
   // The due/new/mastery queries are the most expensive in the app — memoize
   // per-deck results keyed by deck id instead of recomputing (and re-scanning
@@ -213,13 +211,13 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     const map = new Map<string, number>()
     for (const d of decks) map.set(d.id, getDueCards(d.id).length)
     return map
-  }, [decks, cards, srsData, fsrsData, algorithm, getDueCards])
+  }, [decks, cards, fsrsData, getDueCards])
 
   const masteryByDeck = useMemo(() => {
     const map = new Map<string, number>()
     for (const d of decks) map.set(d.id, getDeckMastery(d.id))
     return map
-  }, [decks, cards, srsData, fsrsData, algorithm, getDeckMastery])
+  }, [decks, cards, fsrsData, getDeckMastery])
 
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
@@ -866,14 +864,13 @@ function LibraryTreeTable({
   onStudyClick: (deck: DeckType) => void
 }) {
   const {
-    folders, decks, cards, srsData, fsrsData, getDeckCards, getNewCards,
+    folders, decks, cards, fsrsData, getDeckCards, getNewCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore(
     useShallow((s) => ({
       folders: s.folders,
       decks: s.decks,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDeckCards: s.getDeckCards,
       getNewCards: s.getNewCards,
@@ -884,9 +881,7 @@ function LibraryTreeTable({
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
@@ -909,7 +904,7 @@ function LibraryTreeTable({
       map.set(d.id, { newCount: getNewCards(d.id).length, total: getDeckCards(d.id).length })
     }
     return map
-  }, [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getDeckCards])
+  }, [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getDeckCards])
 
   const deckCounts = (deckId: string): DeckCounts =>
     deckCountsByDeck.get(deckId) ?? { newCount: 0, total: 0 }

@@ -32,12 +32,12 @@ export function StatsOverview({ period }: StatsOverviewProps) {
   const periodLogs = logsInRange(reviewLogs, start, end)
   const reviewOnlyLogs = periodLogs.filter((l) => !l.wasNew)
 
-  // Cards reviewed in period
-  const cardsReviewed = periodLogs.length
+  // Cards reviewed in period (unique cards, not total review events — see Total Reviews below)
+  const cardsReviewed = new Set(periodLogs.map((l) => l.cardId)).size
 
   // Retention rate — new card graduation events excluded (wasNew logs skew accuracy down)
   const retention = reviewOnlyLogs.length > 0
-    ? Math.round((reviewOnlyLogs.filter((l) => l.rating >= 3).length / reviewOnlyLogs.length) * 100)
+    ? Math.round((reviewOnlyLogs.filter((l) => l.rating >= 2).length / reviewOnlyLogs.length) * 100)
     : 0
 
   // Total reviews (cumulative if "all time", else period)

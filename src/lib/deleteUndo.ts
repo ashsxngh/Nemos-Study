@@ -6,7 +6,7 @@ const UNDO_WINDOW_MS = 5000
 
 /**
  * Restores previously-trashed cards back into the library store. Prefers the
- * trash entry's snapshot (SRS/FSRS as they were at delete time); falls back
+ * trash entry's snapshot (FSRS state as it was at delete time); falls back
  * to a caller-supplied in-memory card when the trash entry is already gone
  * (e.g. undo fires right as the entry gets purged elsewhere).
  */
@@ -14,7 +14,6 @@ export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string,
   const trash = useTrashStore.getState()
   useLibraryStore.setState((s) => {
     const newCards = [...s.cards]
-    const newSrsData = { ...s.srsData }
     const newFsrsData = { ...s.fsrsData }
     const restoredIds = new Set<string>()
     for (const id of ids) {
@@ -22,13 +21,11 @@ export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string,
       const card = entry?.card ?? fallbackCards?.get(id)
       if (!card) continue
       newCards.push(card)
-      if (entry?.cardSRS) newSrsData[id] = entry.cardSRS
       if (entry?.cardFSRS) newFsrsData[id] = entry.cardFSRS
       restoredIds.add(id)
     }
     return {
       cards: newCards,
-      srsData: newSrsData,
       fsrsData: newFsrsData,
       pendingDeletes: {
         ...s.pendingDeletes,

@@ -6,15 +6,9 @@ import { DEFAULT_FSRS_PARAMS } from '@/lib/srs'
 
 interface SettingsData {
   // SRS
-  algorithm: 'sm2' | 'fsrs'
   newCardsPerDay: number
   maxReviewsPerDay: number
   sessionLength: number
-  easyBonus: number
-  hardInterval: number
-  graduatingInterval: number
-  lapseInterval: number
-  startingEase: number
 
   // FSRS parameters
   fsrsWeights: number[]        // 17 weights w0-w16
@@ -70,15 +64,9 @@ interface SettingsState extends SettingsData {
 }
 
 const defaults: SettingsData = {
-  algorithm: 'fsrs',
   newCardsPerDay: 20,
   maxReviewsPerDay: 200,
   sessionLength: 20,
-  easyBonus: 1.3,
-  hardInterval: 1.2,
-  graduatingInterval: 4,
-  lapseInterval: 10,
-  startingEase: 2.5,
 
   fsrsWeights: DEFAULT_FSRS_PARAMS.weights,
   fsrsTargetRetention: DEFAULT_FSRS_PARAMS.targetRetention,

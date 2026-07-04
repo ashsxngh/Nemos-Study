@@ -31,9 +31,10 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
 import { cn, truncate, formatDate } from '@/lib/utils'
-import { isDue } from '@/lib/srs'
+import { fsrsRetrievability } from '@/lib/srs'
+import type { FSRSState } from '@/lib/srs'
 import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
-import type { Card, SRSData } from '@/lib/types'
+import type { Card } from '@/lib/types'
 
 const TYPE_LABELS: Record<string, string> = {
   basic: 'Basic',
@@ -47,7 +48,10 @@ const TYPE_LABELS: Record<string, string> = {
 interface SortableCardRowProps {
   card: Card
   isDueCard: boolean
-  srs?: SRSData
+  fsrs?: FSRSState
+  // Live retrievability percent to display — computed by the parent from
+  // fsrsData. null when there's no meaningful value yet (new card).
+  masteryPct: number | null
   selected?: boolean
   onEdit: (card: Card) => void
   onDelete: (id: string) => void
@@ -71,8 +75,6 @@ function fmtRelative(iso: string | null) {
   return `${days}d ago`
 }
 
-// SM2's early learning steps use sub-day intervals (minutes) — show those in
-// minutes instead of rounding down to "0 DAYS".
 function fmtInterval(days: number): string {
   if (days < 1) {
     const minutes = Math.max(1, Math.round(days * 1440))
@@ -82,7 +84,14 @@ function fmtInterval(days: number): string {
   return `${rounded} DAY${rounded === 1 ? '' : 'S'}`
 }
 
-function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onResetSRS, onPreview, onClick, checked, onToggleCheck }: SortableCardRowProps) {
+// Current scheduled interval in days — FSRS stores due/last-reviewed
+// timestamps rather than an interval field, so derive it.
+function fsrsIntervalDays(fs: FSRSState): number | null {
+  if (fs.state === 'new' || !fs.lastReviewedAt) return null
+  return (new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()) / 86400000
+}
+
+function SortableCardRow({ card, isDueCard, fsrs, masteryPct, selected, onEdit, onDelete, onResetSRS, onPreview, onClick, checked, onToggleCheck }: SortableCardRowProps) {
   const [confirmReset, setConfirmReset] = useState(false)
   const cardFields = useSettingsStore((s) => s.cardFields)
   const {
@@ -147,19 +156,22 @@ function SortableCardRow({ card, isDueCard, srs, selected, onEdit, onDelete, onR
             {cardFields.progress && (
               <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
                 <span className="w-2.5 h-2.5 rounded-full border border-[var(--text-muted)] inline-block shrink-0" />
-                {srs ? fmtInterval(srs.interval) : 'NEW'}
+                {(() => {
+                  const interval = fsrs ? fsrsIntervalDays(fsrs) : null
+                  return interval !== null ? fmtInterval(interval) : 'NEW'
+                })()}
               </span>
             )}
-            {cardFields.retention && srs && (
-              <span className="text-[11px] text-[var(--text-muted)]">↺ {srs.masteryPercent}%</span>
+            {cardFields.retention && masteryPct !== null && (
+              <span className="text-[11px] text-[var(--text-muted)]">↺ {masteryPct}%</span>
             )}
             {cardFields.lastReview && (
               <span className="text-[11px] text-[var(--text-muted)]">
-                {srs?.lastReviewedAt ? `Reviewed ${fmtRelative(srs.lastReviewedAt)}` : 'Never reviewed'}
+                {fsrs?.lastReviewedAt ? `Reviewed ${fmtRelative(fsrs.lastReviewedAt)}` : 'Never reviewed'}
               </span>
             )}
-            {cardFields.dueDate && srs && (
-              <span className="text-[11px] text-[var(--text-muted)]">Due {fmtDate(srs.dueDate)}</span>
+            {cardFields.dueDate && fsrs && (
+              <span className="text-[11px] text-[var(--text-muted)]">Due {fmtDate(fsrs.dueDate)}</span>
             )}
             {cardFields.tagsList && card.tags.length > 0 && (
               <span className="text-[11px] text-[var(--text-muted)]">{card.tags.map((t) => `#${t}`).join(' ')}</span>
@@ -246,13 +258,12 @@ interface DeckViewProps {
 export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const router = useRouter()
   const {
-    decks, allCards, srsData, fsrsData,
+    decks, allCards, fsrsData,
     getDeckCards, getDeckMastery, deleteCard, deleteCardsBatch, updateCardsBatch, resetCardSRS,
   } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       allCards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDeckCards: s.getDeckCards,
       getDeckMastery: s.getDeckMastery,
@@ -262,12 +273,11 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
       resetCardSRS: s.resetCardSRS,
     }))
   )
-  const algorithm = useSettingsStore((s) => s.algorithm)
   const deck = decks.find((d) => d.id === deckId)
   const cards = useMemo(() => getDeckCards(deckId), [allCards, deckId, getDeckCards])
   const mastery = useMemo(
     () => getDeckMastery(deckId),
-    [allCards, srsData, fsrsData, algorithm, deckId, getDeckMastery]
+    [allCards, fsrsData, deckId, getDeckMastery]
   )
 
   const [addingCard, setAddingCard] = useState(false)
@@ -519,14 +529,18 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
             <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-1">
                 {cards.map((card, idx) => {
-                  const srs = srsData[card.id]
-                  const due = srs ? isDue(srs) : true
+                  const fs = fsrsData[card.id]
+                  const due = fs ? new Date(fs.dueDate) <= new Date() : true
+                  const masteryPct = fs && fs.state !== 'new'
+                    ? Math.round(fsrsRetrievability(fs) * 100)
+                    : null
                   return (
                     <SortableCardRow
                       key={card.id}
                       card={card}
                       isDueCard={due}
-                      srs={srs}
+                      fsrs={fs}
+                      masteryPct={masteryPct}
                       selected={selectedIdx === idx}
                       onEdit={setEditingCard}
                       onDelete={setConfirmDeleteId}

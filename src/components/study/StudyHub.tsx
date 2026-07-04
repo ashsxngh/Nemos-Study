@@ -14,13 +14,13 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn } from '@/lib/utils'
+import { toLocalDateStr } from '@/lib/formatDate'
 
 export function StudyHub() {
-  const { decks, cards, srsData, fsrsData, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore(
+  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
       getReviewsDue: s.getReviewsDue,
@@ -30,9 +30,7 @@ export function StudyHub() {
   const { reviewLogs, sessions } = useHistoryStore(
     useShallow((s) => ({ reviewLogs: s.reviewLogs, sessions: s.sessions }))
   )
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
   const [search, setSearch] = useState('')
   const [goalTargets, setGoalTargets] = useState({ cards: 50, minutes: 30, accuracy: 85 })
   const [editingGoals, setEditingGoals] = useState(false)
@@ -42,9 +40,9 @@ export function StudyHub() {
     if (saved) { try { setGoalTargets(JSON.parse(saved)) } catch {} }
   }, [])
 
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const todayLogs = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === todayStr)
-  const todaySessions = sessions.filter((s) => s.endedAt && s.startedAt.slice(0, 10) === todayStr)
+  const todayStr = toLocalDateStr(new Date())
+  const todayLogs = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === todayStr)
+  const todaySessions = sessions.filter((s) => s.endedAt && toLocalDateStr(new Date(s.startedAt)) === todayStr)
   const todayMinutes = Math.round(
     todaySessions.reduce((sum, s) => {
       if (!s.endedAt) return sum
@@ -53,16 +51,16 @@ export function StudyHub() {
   )
   const todayReviewLogs = todayLogs.filter((l) => !l.wasNew)
   const todayAccuracy = todayReviewLogs.length > 0
-    ? Math.round((todayReviewLogs.filter((l) => l.rating >= 3).length / todayReviewLogs.length) * 100)
+    ? Math.round((todayReviewLogs.filter((l) => l.rating >= 2).length / todayReviewLogs.length) * 100)
     : 0
 
   const allNewCards = useMemo(
     () => getNewCards(),
-    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+    [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
   const allReviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, srsData, fsrsData, algorithm, getReviewsDue]
+    [cards, decks, fsrsData, getReviewsDue]
   )
   const inboxTotal = allNewCards.length + allReviews.length
 
@@ -78,7 +76,7 @@ export function StudyHub() {
           mastery: getDeckMastery(deck.id),
         }))
         .filter((d) => d.totalCards > 0),
-    [decks, cards, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards, getReviewsDue, getDeckMastery]
+    [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getReviewsDue, getDeckMastery]
   )
 
   const filtered = deckData.filter((d) =>

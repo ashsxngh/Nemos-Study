@@ -11,22 +11,19 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function NewCardsPage() {
-  const { cards, decks, srsData, fsrsData, getNewCards } = useLibraryStore(
+  const { cards, decks, fsrsData, getNewCards } = useLibraryStore(
     useShallow((s) => ({
       cards: s.cards,
       decks: s.decks,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
   const newCards = useMemo(
     () => getNewCards(),
-    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+    [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
 
   const isEmpty = newCards.length === 0

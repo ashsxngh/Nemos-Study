@@ -36,8 +36,18 @@ export async function getCachedUserId(supabase: SupabaseClient): Promise<string 
     })
   }
   if (cachedUserId === undefined) {
-    const { data: { session } } = await supabase.auth.getSession()
-    cachedUserId = session?.user?.id ?? null
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      cachedUserId = session?.user?.id ?? null
+    } catch (err) {
+      // getSession() transparently refreshes a near-expired token; that refresh
+      // is a real network call and can fail (offline, Supabase unreachable).
+      // Leave cachedUserId as undefined so the next call retries, and treat
+      // this call as "not authenticated yet" rather than throwing — callers
+      // all already handle a null user id by skipping the push/pull.
+      console.error('[SYNC] getCachedUserId: getSession failed', err)
+      return null
+    }
   }
   return cachedUserId
 }

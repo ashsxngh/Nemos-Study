@@ -60,30 +60,8 @@ create table if not exists cards (
   updated_at            timestamptz not null default now()
 );
 
--- srs_data
-create table if not exists srs_data (
-  card_id          uuid primary key,
-  user_id          uuid not null references auth.users(id) on delete cascade,
-  interval         int  not null default 0,
-  ease_factor      float not null default 2.5,
-  repetitions      int  not null default 0,
-  due_date         timestamptz not null default now(),
-  last_reviewed_at timestamptz,
-  lapses           int  not null default 0,
-  mastery_percent  int  not null default 0,
-  state            text not null default 'new'
-);
-
--- Adds the state column for databases created before it existed.
-alter table srs_data add column if not exists state text not null default 'new';
-
--- Adds updated_at for incremental sync (lets the client filter "what changed
--- since my last pull" instead of always fetching the whole table).
-alter table srs_data add column if not exists updated_at timestamptz not null default now();
-
--- fsrs_data — FSRS scheduling state, parallel to srs_data (SM-2). Previously
--- local-only (never synced), which left FSRS-mode queues stale on any device
--- that didn't perform the review.
+-- fsrs_data — FSRS scheduling state (the only scheduling table; the SM-2
+-- srs_data table was removed along with the SM-2 algorithm).
 create table if not exists fsrs_data (
   card_id          uuid primary key,
   user_id          uuid not null references auth.users(id) on delete cascade,
@@ -178,7 +156,6 @@ create table if not exists user_settings (
   fsrs_weights       jsonb,
   target_retention   float8,
   daily_review_limit int,
-  algorithm          text,
   updated_at         timestamptz not null default now()
 );
 
@@ -188,17 +165,16 @@ create table if not exists user_settings (
 alter table user_settings add column if not exists new_cards_per_day int not null default 20;
 alter table user_settings add column if not exists updated_at timestamptz not null default now();
 
--- Adds SRS-relevant columns (fsrsWeights/targetRetention/dailyReviewLimit/algorithm)
+-- Adds SRS-relevant columns (fsrsWeights/targetRetention/dailyReviewLimit)
 -- so scheduling settings sync cross-device instead of staying per-device.
 alter table user_settings add column if not exists fsrs_weights jsonb;
 alter table user_settings add column if not exists target_retention float8;
 alter table user_settings add column if not exists daily_review_limit int;
-alter table user_settings add column if not exists algorithm text;
 
 -- ────────────────────────────────────────────────────────────
 -- INCREMENTAL SYNC TRIGGERS
 -- ────────────────────────────────────────────────────────────
--- srs_data/fsrs_data/exams have no client-maintained updated_at field (unlike
+-- fsrs_data/exams have no client-maintained updated_at field (unlike
 -- folders/decks/cards/notes, which already stamp it on every local edit), so
 -- a DB trigger stamps it on every insert/update instead. This is what lets
 -- incremental pulls filter "rows changed since my last pull" for these tables.
@@ -208,10 +184,6 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
-drop trigger if exists trg_srs_data_updated_at on srs_data;
-create trigger trg_srs_data_updated_at before insert or update on srs_data
-  for each row execute function set_updated_at();
 
 drop trigger if exists trg_fsrs_data_updated_at on fsrs_data;
 create trigger trg_fsrs_data_updated_at before insert or update on fsrs_data
@@ -227,7 +199,6 @@ create trigger trg_exams_updated_at before insert or update on exams
 alter table folders        enable row level security;
 alter table decks          enable row level security;
 alter table cards          enable row level security;
-alter table srs_data       enable row level security;
 alter table fsrs_data      enable row level security;
 alter table review_logs    enable row level security;
 alter table review_sessions enable row level security;
@@ -245,10 +216,6 @@ create policy "Users can only access own data" on decks
 
 -- cards
 create policy "Users can only access own data" on cards
-  for all using (auth.uid() = user_id);
-
--- srs_data
-create policy "Users can only access own data" on srs_data
   for all using (auth.uid() = user_id);
 
 -- fsrs_data
@@ -281,8 +248,6 @@ create policy "Users can only access own data" on user_settings
 create index if not exists idx_folders_user_id        on folders        (user_id);
 create index if not exists idx_decks_user_id          on decks          (user_id);
 create index if not exists idx_cards_user_id          on cards          (user_id);
-create index if not exists idx_srs_data_user_id       on srs_data       (user_id);
-create index if not exists idx_srs_data_due_date      on srs_data       (due_date);
 create index if not exists idx_fsrs_data_user_id      on fsrs_data      (user_id);
 create index if not exists idx_fsrs_data_due_date     on fsrs_data      (due_date);
 create index if not exists idx_review_logs_user_id    on review_logs    (user_id);
@@ -292,7 +257,6 @@ create index if not exists idx_exams_user_id          on exams          (user_id
 create index if not exists idx_user_settings_user_id  on user_settings  (user_id);
 
 -- Incremental sync filters on these columns directly (in addition to user_id).
-create index if not exists idx_srs_data_updated_at    on srs_data       (updated_at);
 create index if not exists idx_fsrs_data_updated_at   on fsrs_data      (updated_at);
 create index if not exists idx_exams_updated_at       on exams          (updated_at);
 create index if not exists idx_review_logs_reviewed_at on review_logs   (reviewed_at);

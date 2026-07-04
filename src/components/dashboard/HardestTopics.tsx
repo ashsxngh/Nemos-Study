@@ -7,25 +7,33 @@ import { Progress } from '@/components/ui/Progress'
 import { useLibraryStore } from '@/store/useLibraryStore'
 
 export function HardestTopics() {
-  const { decks, cards, srsData, fsrsData, getDeckMastery } = useLibraryStore(
+  const { decks, cards, fsrsData, getDeckMastery } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDeckMastery: s.getDeckMastery,
     }))
   )
 
-  const ranked = useMemo(
-    () =>
-      decks
-        .filter((d) => !d.isArchived)
-        .map((deck) => ({ deck, mastery: getDeckMastery(deck.id) }))
-        .sort((a, b) => a.mastery - b.mastery)
-        .slice(0, 5),
-    [decks, cards, srsData, fsrsData, getDeckMastery]
-  )
+  const ranked = useMemo(() => {
+    return decks
+      .filter((d) => !d.isArchived)
+      .map((deck) => {
+        const deckCards = cards.filter((c) => c.deckId === deck.id)
+        // A deck nobody has started yet isn't "hard" — it just has no
+        // evidence either way, and getDeckMastery would rank it as 0%
+        // (indistinguishable from a deck that's actually being failed).
+        const reviewedCount = deckCards.filter((c) => {
+          const state = fsrsData[c.id]?.state
+          return state === 'review' || state === 'relearning'
+        }).length
+        return { deck, mastery: getDeckMastery(deck.id), reviewedCount }
+      })
+      .filter((d) => d.reviewedCount > 0)
+      .sort((a, b) => a.mastery - b.mastery)
+      .slice(0, 5)
+  }, [decks, cards, fsrsData, getDeckMastery])
 
   return (
     <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">

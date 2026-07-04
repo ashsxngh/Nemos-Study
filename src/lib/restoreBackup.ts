@@ -5,7 +5,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 
 /**
  * Parses a Nemo backup JSON and applies it to the library store as a full
- * replacement — the backup's folders, decks, cards, and SRS data overwrite
+ * replacement — the backup's folders, decks, cards, and FSRS data overwrite
  * the current library outright (restore, not merge). Throws on invalid JSON
  * so the caller can surface a visible error.
  */
@@ -15,7 +15,7 @@ export function restoreBackup(jsonText: string): ImportedBackup {
     folders: backup.folders,
     decks: backup.decks,
     cards: backup.cards,
-    srsData: backup.srsData,
+    fsrsData: backup.fsrsData,
   })
   return backup
 }

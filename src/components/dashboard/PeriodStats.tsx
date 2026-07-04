@@ -7,7 +7,7 @@ interface PeriodStatsProps { period: Period }
 
 export function PeriodStats({ period }: PeriodStatsProps) {
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { start, end, prevStart, prevEnd, label } = getPeriodRange(period)
+  const { start, end, prevStart, prevEnd } = getPeriodRange(period)
 
   const curLogs  = logsInRange(reviewLogs, start, end)
   const prevLogs = logsInRange(reviewLogs, prevStart, prevEnd)
@@ -21,7 +21,7 @@ export function PeriodStats({ period }: PeriodStatsProps) {
   const retentionOf = (logs: typeof reviewLogs) => {
     const reviewed = logs.filter((l) => !l.wasNew)
     return reviewed.length > 0
-      ? Math.round((reviewed.filter((l) => l.rating >= 3).length / reviewed.length) * 100)
+      ? Math.round((reviewed.filter((l) => l.rating >= 2).length / reviewed.length) * 100)
       : null
   }
 
@@ -30,7 +30,19 @@ export function PeriodStats({ period }: PeriodStatsProps) {
 
   const uniqueCardCount = (logs: typeof reviewLogs) => new Set(logs.map((l) => l.cardId)).size
 
-  const prevLabel = period === 'all' ? '' : `prev. ${label.toLowerCase()}`
+  // Names the actual prior window being compared against, rather than
+  // reusing the current period's own label (which used to render nonsense
+  // like "prev. today" / "prev. yesterday").
+  const PREV_WINDOW_LABELS: Record<Period, string> = {
+    today: 'yesterday',
+    yesterday: 'day before',
+    '7d': 'prev. 7 days',
+    '30d': 'prev. 30 days',
+    '6m': 'prev. 6 months',
+    '1y': 'prev. year',
+    all: '',
+  }
+  const prevLabel = PREV_WINDOW_LABELS[period]
 
   const stats = [
     {

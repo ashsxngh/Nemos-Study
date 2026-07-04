@@ -16,6 +16,8 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, formatDate } from '@/lib/utils'
+import { toLocalDateStr } from '@/lib/formatDate'
+import { fsrsRetrievability } from '@/lib/srs'
 
 // ── useCountUp hook ───────────────────────────────────────────────────────────
 
@@ -39,13 +41,17 @@ function useCountUp(target: number, duration = 800): number {
 
 function computeStreak(logs: { reviewedAt: string }[]): number {
   if (logs.length === 0) return 0
-  const days = new Set(logs.map((l) => l.reviewedAt.slice(0, 10)))
-  let streak = 0
+  const days = new Set(logs.map((l) => toLocalDateStr(new Date(l.reviewedAt))))
   const today = new Date()
-  for (let i = 0; i < 365; i++) {
+  // If today has no log yet, don't zero out a genuine streak that's still
+  // unbroken through yesterday — start the scan there instead. The streak
+  // only actually breaks once a full calendar day is skipped entirely.
+  const startOffset = days.has(toLocalDateStr(today)) ? 0 : 1
+  let streak = 0
+  for (let i = startOffset; i < 365 + startOffset; i++) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
-    if (days.has(d.toISOString().slice(0, 10))) streak++
+    if (days.has(toLocalDateStr(d))) streak++
     else break
   }
   return streak
@@ -54,7 +60,7 @@ function computeStreak(logs: { reviewedAt: string }[]): number {
 function dateStr(daysAgo: number): string {
   const d = new Date()
   d.setDate(d.getDate() - daysAgo)
-  return d.toISOString().slice(0, 10)
+  return toLocalDateStr(d)
 }
 
 function shortDate(iso: string): string {
@@ -136,11 +142,10 @@ export function StatsPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const router = useRouter()
 
-  const { cards, decks, srsData, fsrsData, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore(
+  const { cards, decks, fsrsData, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       cards: s.cards,
       decks: s.decks,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDeckMastery: s.getDeckMastery,
       getNewCards: s.getNewCards,
@@ -150,21 +155,22 @@ export function StatsPage() {
   const { sessions, reviewLogs } = useHistoryStore(
     useShallow((s) => ({ sessions: s.sessions, reviewLogs: s.reviewLogs }))
   )
-  const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold, algorithm } = useSettingsStore(
+  const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold } = useSettingsStore(
     useShallow((s) => ({
       burnoutWarningEnabled: s.burnoutWarningEnabled,
       burnoutThresholdCards: s.burnoutThresholdCards,
       leechThreshold: s.leechThreshold,
-      algorithm: s.algorithm,
     }))
   )
 
   // ── Core aggregates ──────────────────────────────────────────────────────
   const totalCards = cards.length
-  const masteredCards = useMemo(
-    () => cards.filter((c) => srsData[c.id]?.masteryPercent >= 80).length,
-    [cards, srsData]
-  )
+  const masteredCards = useMemo(() => {
+    return cards.filter((c) => {
+      const fs = fsrsData[c.id]
+      return !!fs && fs.state !== 'new' && fsrsRetrievability(fs) >= 0.8
+    }).length
+  }, [cards, fsrsData])
 
   const oneMonthAgo = useMemo(() => {
     const d = new Date(); d.setMonth(d.getMonth() - 1); return d
@@ -187,25 +193,37 @@ export function StatsPage() {
   // count must match what the inbox/sidebar shows, not just scheduled reviews.
   const todayDueCount = useMemo(
     () => getReviewsDue().length + getNewCards().length,
-    [cards, decks, reviewLogs, srsData, fsrsData, algorithm, getReviewsDue, getNewCards]
+    [cards, decks, reviewLogs, fsrsData, getReviewsDue, getNewCards]
   )
 
   const retentionData = useMemo(() => {
     return Array.from({ length: 30 }, (_, i) => {
       const ds = dateStr(29 - i)
-      const dayLogs = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === ds && !l.wasNew)
+      const dayLogs = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === ds && !l.wasNew)
       if (dayLogs.length === 0) return { date: shortDate(ds), retention: null }
-      const correct = dayLogs.filter((l) => l.rating >= 3).length
+      const correct = dayLogs.filter((l) => l.rating >= 2).length
       return { date: shortDate(ds), retention: Math.round((correct / dayLogs.length) * 100) }
     })
   }, [reviewLogs])
 
-  const ratingCounts = useMemo(() => {
-    const counts = [0, 0, 0, 0]
-    reviewLogs.forEach((l) => { counts[l.rating - 1]++ })
-    return counts
-  }, [reviewLogs])
-  const totalRatings = ratingCounts.reduce((a, b) => a + b, 0)
+  // Cards actually eligible to appear in a future queue — mirrors getReviewsDue's
+  // filter (not archived, deck still exists) so the forecast doesn't inflate
+  // load with cards that will never actually surface.
+  const forecastEligibleCards = useMemo(() => {
+    const deckSet = new Set(decks.map((d) => d.id))
+    return cards.filter((c) => !c.isArchived && deckSet.has(c.deckId))
+  }, [cards, decks])
+
+  const forecastData = useMemo(() => {
+    return Array.from({ length: 14 }, (_, i) => {
+      const ds = dateStr(-i)
+      const count = forecastEligibleCards.filter((c) => {
+        const fs = fsrsData[c.id]
+        return !!fs && fs.state !== 'new' && toLocalDateStr(new Date(fs.dueDate)) === ds
+      }).length
+      return { i, count, isToday: i === 0 }
+    })
+  }, [forecastEligibleCards, fsrsData])
 
   const avgResponseByRating = useMemo(() => {
     const byRating: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [] }
@@ -236,23 +254,25 @@ export function StatsPage() {
     const studiedDays = new Set(
       reviewLogs
         .filter((l) => (Date.now() - new Date(l.reviewedAt).getTime()) / 86400000 <= 30)
-        .map((l) => l.reviewedAt.slice(0, 10))
+        .map((l) => toLocalDateStr(new Date(l.reviewedAt)))
     ).size
     return Math.round((studiedDays / 30) * 100)
   }, [reviewLogs])
 
   const leechCards = useMemo(() => {
     return cards
-      .filter((c) => (srsData[c.id]?.lapses ?? 0) >= leechThreshold)
-      .map((c) => ({ id: c.id, front: c.front, lapses: srsData[c.id]?.lapses ?? 0 }))
+      .filter((c) => (fsrsData[c.id]?.lapses ?? 0) >= leechThreshold)
+      .map((c) => ({ id: c.id, front: c.front, lapses: fsrsData[c.id]?.lapses ?? 0 }))
       .sort((a, b) => b.lapses - a.lapses)
-  }, [cards, srsData, leechThreshold])
+  }, [cards, fsrsData, leechThreshold])
 
   const weeklyData = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
       const ds = dateStr(6 - i)
-      const d = new Date(ds)
-      const count = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === ds).length
+      // Date-only strings parse as UTC midnight per spec — force local-time
+      // parsing so getDay() below reflects the actual local day of week.
+      const d = new Date(ds + 'T00:00:00')
+      const count = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === ds).length
       return { day: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()], cards: count }
     })
   }, [reviewLogs])
@@ -288,7 +308,6 @@ export function StatsPage() {
   ]
 
   const ratingLabels = ['Again', 'Hard', 'Good', 'Easy']
-  const ratingColors = ['bg-red-500', 'bg-orange-500', 'bg-[var(--accent)]', 'bg-[var(--success)]']
   const ratingTextColors = ['text-red-400', 'text-orange-400', 'text-[var(--accent)]', 'text-[var(--success)]']
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -506,17 +525,11 @@ export function StatsPage() {
 
   // #5 — Stability flatliners
   const stabilityFlatliners = useMemo(() => {
-    if (algorithm !== 'fsrs') {
-      return cards
-        .filter((c) => { const s = srsData[c.id]; return s && s.repetitions >= 5 && s.easeFactor < 1.6 })
-        .map((c) => ({ id: c.id, front: c.front, reps: srsData[c.id].repetitions, metric: Math.round(srsData[c.id].easeFactor * 100) / 100, metricLabel: 'ease' }))
-        .sort((a, b) => a.metric - b.metric).slice(0, 6)
-    }
     return cards
       .filter((c) => { const fs = fsrsData[c.id]; return fs && fs.repetitions >= 5 && fs.stability < 10 })
-      .map((c) => ({ id: c.id, front: c.front, reps: fsrsData[c.id].repetitions, metric: Math.round(fsrsData[c.id].stability * 10) / 10, metricLabel: 'stability' }))
+      .map((c) => ({ id: c.id, front: c.front, reps: fsrsData[c.id].repetitions, metric: Math.round(fsrsData[c.id].stability * 10) / 10 }))
       .sort((a, b) => a.metric - b.metric).slice(0, 6)
-  }, [cards, fsrsData, srsData, algorithm])
+  }, [cards, fsrsData])
 
   // ════════════════════════════════════════════════════════════════════════════
   // INSIGHTS — Long-term Memory Architecture
@@ -581,17 +594,12 @@ export function StatsPage() {
       reviewedCards++
       if (logs.some(l => l.rating === 1)) continue
 
-      if (algorithm === 'fsrs') {
-        const fs = fsrsData[card.id]
-        if (fs && fs.stability > THRESHOLD) asymptotic++
-      } else {
-        const srs = srsData[card.id]
-        if (srs && srs.interval > THRESHOLD) asymptotic++
-      }
+      const fs = fsrsData[card.id]
+      if (fs && fs.stability > THRESHOLD) asymptotic++
     }
 
     return { count: asymptotic, total: reviewedCards, pct: reviewedCards > 0 ? Math.round((asymptotic / reviewedCards) * 100) : 0 }
-  }, [cards, reviewLogs, fsrsData, srsData, algorithm])
+  }, [cards, reviewLogs, fsrsData])
 
   // Irreducible leeches: 5+ lapses, never broke 14d interval, high difficulty
   const irreducibleLeeches = useMemo(() => {
@@ -605,19 +613,13 @@ export function StatsPage() {
       const maxInterval = logs.reduce((m, l) => Math.max(m, l.scheduledInterval), 0)
       if (maxInterval >= 14) continue
 
-      if (algorithm === 'fsrs') {
-        const fs = fsrsData[card.id]
-        if (!fs || fs.difficulty <= 7) continue
-        results.push({ id: card.id, front: card.front, lapses: lapseCount, maxInterval, difficulty: Math.round(fs.difficulty * 10) / 10 })
-      } else {
-        const srs = srsData[card.id]
-        if (!srs || srs.easeFactor > 1.5) continue
-        results.push({ id: card.id, front: card.front, lapses: lapseCount, maxInterval })
-      }
+      const fs = fsrsData[card.id]
+      if (!fs || fs.difficulty <= 7) continue
+      results.push({ id: card.id, front: card.front, lapses: lapseCount, maxInterval, difficulty: Math.round(fs.difficulty * 10) / 10 })
     }
 
     return results.sort((a, b) => b.lapses - a.lapses).slice(0, 8)
-  }, [cards, reviewLogs, fsrsData, srsData, algorithm])
+  }, [cards, reviewLogs, fsrsData])
 
   // Memory consolidation events: single reviews that caused stability to jump 3x+
   const consolidationEvents = useMemo(() => {
@@ -631,7 +633,7 @@ export function StatsPage() {
         if (curr.rating < 3 || prev.scheduledInterval < 3) continue
         const ratio = curr.scheduledInterval / prev.scheduledInterval
         if (ratio >= 3) {
-          events.push({ front: card.front, prevInterval: prev.scheduledInterval, newInterval: curr.scheduledInterval, ratio: Math.round(ratio * 10) / 10, date: curr.reviewedAt.slice(0, 10) })
+          events.push({ front: card.front, prevInterval: prev.scheduledInterval, newInterval: curr.scheduledInterval, ratio: Math.round(ratio * 10) / 10, date: toLocalDateStr(new Date(curr.reviewedAt)) })
         }
       }
     }
@@ -662,7 +664,6 @@ export function StatsPage() {
   }, [decks, cards, reviewLogs])
 
   const difficultyLapseCorr = useMemo(() => {
-    if (algorithm !== 'fsrs') return null
     const buckets = [
       { label: '1–3', min: 1, max: 3, lapses: 0, count: 0 },
       { label: '3–5', min: 3, max: 5, lapses: 0, count: 0 },
@@ -677,7 +678,7 @@ export function StatsPage() {
       if (b) { b.count++; b.lapses += fs.lapses }
     }
     return buckets.filter((b) => b.count > 0).map((b) => ({ label: b.label, avgLapses: Math.round((b.lapses / b.count) * 10) / 10, count: b.count }))
-  }, [cards, fsrsData, algorithm])
+  }, [cards, fsrsData])
 
   const sessionFatigue = useMemo(() => {
     const bySession = new Map<string, typeof reviewLogs>()
@@ -730,21 +731,14 @@ export function StatsPage() {
       { label: '1y+', min: 365, max: Infinity, count: 0 },
     ]
     for (const card of cards) {
-      let interval: number
-      if (algorithm === 'fsrs') {
-        const fs = fsrsData[card.id]
-        if (!fs || fs.repetitions === 0 || !fs.lastReviewedAt) continue
-        interval = (new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()) / 86400000
-      } else {
-        const srs = srsData[card.id]
-        if (!srs || srs.repetitions === 0) continue
-        interval = srs.interval
-      }
+      const fs = fsrsData[card.id]
+      if (!fs || fs.repetitions === 0 || !fs.lastReviewedAt) continue
+      const interval = (new Date(fs.dueDate).getTime() - new Date(fs.lastReviewedAt).getTime()) / 86400000
       const b = buckets.find((b) => interval >= b.min && interval < b.max)
       if (b) b.count++
     }
     return buckets.filter((b) => b.count > 0)
-  }, [cards, fsrsData, srsData, algorithm])
+  }, [cards, fsrsData])
 
   const insightsDataCount = reviewLogs.length
 
@@ -825,13 +819,7 @@ export function StatsPage() {
               <Badge variant="outline">Next 14 days</Badge>
             </div>
             <div className="flex items-end gap-1.5 h-24">
-              {Array.from({ length: 14 }, (_, i) => {
-                const ds = dateStr(-i)
-                const count = algorithm === 'fsrs'
-                  ? Object.values(fsrsData).filter((s) => s.state !== 'new' && s.dueDate.slice(0, 10) === ds).length
-                  : Object.values(srsData).filter((s) => s.repetitions > 0 && s.dueDate.slice(0, 10) === ds).length
-                return { i, count, isToday: i === 0 }
-              }).map(({ i, count, isToday }) => (
+              {forecastData.map(({ i, count, isToday }) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1">
                   <div className="w-full flex flex-col justify-end" style={{ height: '72px' }}>
                     <div className={`w-full rounded-t-sm transition-colors ${isToday ? 'bg-[var(--danger)]' : 'bg-[var(--bg-active)] hover:bg-[var(--accent)]'}`} style={{ height: `${Math.max(2, (count / 30) * 100)}%` }} title={`${count} cards`} />
@@ -917,34 +905,6 @@ export function StatsPage() {
                     <span className="text-[9px] text-[var(--text-muted)]">{day}</span>
                   </div>
                 ))}
-              </div>
-            )}
-          </div>
-
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <Brain size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Rating Distribution</h2>
-              {algorithm === 'sm2' && (
-                <span className="text-xs text-[var(--text-muted)] ml-auto">{totalRatings.toLocaleString()} total reviews</span>
-              )}
-            </div>
-            {algorithm !== 'sm2' ? (
-              <EmptyState message="Rating distributions are available in SM2 mode." />
-            ) : totalRatings === 0 ? <EmptyState message="No reviews yet" /> : (
-              <div className="space-y-2.5">
-                {ratingLabels.map((label, i) => {
-                  const pct = totalRatings > 0 ? Math.round((ratingCounts[i] / totalRatings) * 100) : 0
-                  return (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className={cn('text-xs font-medium w-10 shrink-0', ratingTextColors[i])}>{label}</span>
-                      <div className="flex-1 h-2 bg-[var(--bg-active)] rounded-full overflow-hidden">
-                        <div className={cn('h-full rounded-full transition-all duration-300', ratingColors[i])} style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="text-xs text-[var(--text-muted)] w-20 text-right shrink-0">{ratingCounts[i]} ({pct}%)</span>
-                    </div>
-                  )
-                })}
               </div>
             )}
           </div>
@@ -1287,7 +1247,7 @@ export function StatsPage() {
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Stability Flatliners</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              Cards with 5+ reviews but {algorithm === 'fsrs' ? 'stability < 10 days — never making it to long-term memory' : 'ease factor stuck near minimum'}.
+              Cards with 5+ reviews but stability &lt; 10 days — never making it to long-term memory.
             </p>
             {stabilityFlatliners.length === 0 ? <EmptyState message="No flatliners — your cards are progressing well!" /> : (
               <div className="space-y-1.5">
@@ -1296,7 +1256,7 @@ export function StatsPage() {
                     <span className="text-xs text-[var(--text-primary)] truncate max-w-[55%]">{card.front.length > 55 ? card.front.slice(0, 55) + '…' : card.front}</span>
                     <div className="flex items-center gap-3 shrink-0 ml-2">
                       <span className="text-[10px] text-[var(--text-muted)]">{card.reps} reps</span>
-                      <span className="text-xs text-orange-400 font-semibold">{card.metricLabel === 'stability' ? `${card.metric}d` : `ease ${card.metric}`}</span>
+                      <span className="text-xs text-orange-400 font-semibold">{card.metric}d</span>
                     </div>
                   </div>
                 ))}
@@ -1379,7 +1339,7 @@ export function StatsPage() {
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Irreducible Leeches</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              Cards with 5+ lapses, never broke a 14-day interval, and {algorithm === 'fsrs' ? 'D > 7' : 'ease < 1.5'}. True cognitive dead weight — worth deleting or rewriting.
+              Cards with 5+ lapses, never broke a 14-day interval, and D &gt; 7. True cognitive dead weight — worth deleting or rewriting.
             </p>
             {irreducibleLeeches.length === 0 ? <EmptyState message="No irreducible leeches found" /> : (
               <div className="space-y-1.5">
@@ -1457,9 +1417,8 @@ export function StatsPage() {
             )}
           </div>
 
-          {/* Difficulty vs lapse rate — FSRS only */}
-          {algorithm === 'fsrs' && (
-            <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          {/* Difficulty vs lapse rate */}
+          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
               <div className="flex items-center gap-2 mb-1">
                 <Brain size={14} className="text-[var(--text-muted)]" />
                 <h2 className="text-sm font-semibold text-[var(--text-primary)]">Difficulty vs. Actual Lapse Rate</h2>
@@ -1467,7 +1426,7 @@ export function StatsPage() {
               <p className="text-xs text-[var(--text-muted)] mb-4">
                 Does FSRS-5's D score predict which cards you forget? Bars should rise left-to-right if well-calibrated.
               </p>
-              {!difficultyLapseCorr || difficultyLapseCorr.length < 2 ? <EmptyState message="Need more FSRS cards with reviews" /> : (
+              {difficultyLapseCorr.length < 2 ? <EmptyState message="Need more FSRS cards with reviews" /> : (
                 <ResponsiveContainer width="100%" height={120}>
                   <BarChart data={difficultyLapseCorr} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                     <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
@@ -1480,7 +1439,6 @@ export function StatsPage() {
                 </ResponsiveContainer>
               )}
             </div>
-          )}
 
           {/* Session fatigue */}
           <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">

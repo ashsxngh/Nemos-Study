@@ -12,7 +12,6 @@ import type {
   Folder,
   Deck,
   Card,
-  SRSData,
   ReviewSession,
   ReviewLog,
   Note,
@@ -106,6 +105,32 @@ function migrateHistoryToOwnStore(): void {
   })
   useLibraryStore.setState({ reviewLogs: undefined, sessions: undefined } as unknown as Parameters<typeof useLibraryStore.setState>[0])
   if (DEBUG_SYNC) console.log(`[SYNC] migrateHistoryToOwnStore: moved ${strayLogs.length} log(s) / ${straySessions.length} session(s) into nemos-history`)
+}
+
+// One-time cleanup: the library store used to persist an SM-2 `srsData`
+// record (removed along with the SM-2 algorithm). persist's default shallow
+// merge keeps the old blob's stray key on the rehydrated state, where it
+// would get re-serialized on every write — blank it out so the next persist
+// write drops it (undefined values are stripped by JSON.stringify). The
+// settings store similarly held SM-2-only keys (algorithm, easyBonus, …)
+// that are now stray; they're tiny, but strip the algorithm flag too so no
+// 'sm2' value can linger anywhere.
+function stripLegacySm2State(): void {
+  const lib = useLibraryStore.getState() as unknown as Record<string, unknown>
+  if (lib.srsData !== undefined) {
+    useLibraryStore.setState({ srsData: undefined } as unknown as Parameters<typeof useLibraryStore.setState>[0])
+  }
+  const settings = useSettingsStore.getState() as unknown as Record<string, unknown>
+  if (settings.algorithm !== undefined) {
+    useSettingsStore.setState({
+      algorithm: undefined,
+      easyBonus: undefined,
+      hardInterval: undefined,
+      graduatingInterval: undefined,
+      lapseInterval: undefined,
+      startingEase: undefined,
+    } as unknown as Parameters<typeof useSettingsStore.setState>[0])
+  }
 }
 
 // IDs that existed in localStorage when this session loaded (snapshotted once,
@@ -239,7 +264,6 @@ async function runPull(
     foldersRes,
     decksRes,
     cardsRes,
-    srsRes,
     fsrsRes,
     sessionsRes,
     logsRes,
@@ -256,9 +280,6 @@ async function runPull(
     since !== null
       ? supabase.from('cards').select('*').eq('user_id', userId).gt('updated_at', since)
       : supabase.from('cards').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('srs_data').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('srs_data').select('*').eq('user_id', userId),
     since !== null
       ? supabase.from('fsrs_data').select('*').eq('user_id', userId).gt('updated_at', since)
       : supabase.from('fsrs_data').select('*').eq('user_id', userId),
@@ -283,7 +304,6 @@ async function runPull(
   if (foldersRes.error)  console.error('[SYNC] pullFromSupabase: folders error', formatPgError(foldersRes.error))
   if (decksRes.error)    console.error('[SYNC] pullFromSupabase: decks error', formatPgError(decksRes.error))
   if (cardsRes.error)    console.error('[SYNC] pullFromSupabase: cards error', formatPgError(cardsRes.error))
-  if (srsRes.error)      console.error('[SYNC] pullFromSupabase: srs_data error', formatPgError(srsRes.error))
   if (fsrsRes.error)     console.error('[SYNC] pullFromSupabase: fsrs_data error', formatPgError(fsrsRes.error))
   if (sessionsRes.error) console.error('[SYNC] pullFromSupabase: review_sessions error', formatPgError(sessionsRes.error))
   if (logsRes.error)     console.error('[SYNC] pullFromSupabase: review_logs error', formatPgError(logsRes.error))
@@ -296,7 +316,7 @@ async function runPull(
   // and let the caller retry as a full pull); a full pull that errored on any
   // table must not advance the watermark, or the rows missed during the error
   // window would never be fetched again until a new tab starts a fresh full pull.
-  const anyError = !!(foldersRes.error || decksRes.error || cardsRes.error || srsRes.error ||
+  const anyError = !!(foldersRes.error || decksRes.error || cardsRes.error ||
     fsrsRes.error || sessionsRes.error || logsRes.error || notesRes.error || examsRes.error || settingsRes.error)
   if (incremental && anyError) {
     throw new Error('incremental pull: one or more tables errored')
@@ -331,22 +351,9 @@ async function runPull(
   const exams = examsRes.error ? null :
     (examsRes.data ?? []).map((r) => toCamel(r) as Exam).filter((e) => !pendingExamSet.has(e.id))
 
-  // Build srsData record from server rows. null on error — preserve local.
+  // Build fsrsData record from server rows. null on error — preserve local.
   // Pre-filter to fetched card IDs to avoid re-upserting orphaned rows; the
   // setState merge below does a final pass using the full merged card set.
-  let fetchedSrsData: Record<string, SRSData> | null = null
-  if (!srsRes.error) {
-    fetchedSrsData = {}
-    const fetchedCardSet = new Set((cards ?? []).map((c) => c.id))
-    for (const row of srsRes.data ?? []) {
-      const s = toCamel(row) as SRSData
-      if (!pendingCardSet.has(s.cardId) && (cards === null || fetchedCardSet.has(s.cardId))) {
-        fetchedSrsData[s.cardId] = s
-      }
-    }
-  }
-
-  // Same as fetchedSrsData but for FSRS scheduling state.
   let fetchedFsrsData: Record<string, FSRSState> | null = null
   if (!fsrsRes.error) {
     fetchedFsrsData = {}
@@ -387,14 +394,7 @@ async function runPull(
       (id) => !current.pendingDeletes.cards.includes(id),
     )
 
-    // Merge srsData: server wins for existing entries, prune orphans.
-    const mergedSrsData = fetchedSrsData !== null
-      ? Object.fromEntries(
-          Object.entries({ ...current.srsData, ...fetchedSrsData }).filter(([id]) => mergedCardSet.has(id))
-        )
-      : Object.fromEntries(Object.entries(current.srsData).filter(([id]) => mergedCardSet.has(id)))
-
-    // Merge fsrsData the same way — server wins for existing entries, prune orphans.
+    // Merge fsrsData: server wins for existing entries, prune orphans.
     const mergedFsrsData = fetchedFsrsData !== null
       ? Object.fromEntries(
           Object.entries({ ...current.fsrsData, ...fetchedFsrsData }).filter(([id]) => mergedCardSet.has(id))
@@ -409,7 +409,6 @@ async function runPull(
       } : {}),
       decks: mergedDecks,
       cards: mergedCards,
-      srsData: mergedSrsData,
       fsrsData: mergedFsrsData,
       ...(newOrphanIds.length > 0 ? {
         pendingDeletes: {
@@ -447,22 +446,22 @@ async function runPull(
   // when a row exists. No row yet (new user) means nothing to hydrate. On an
   // incremental pull, no row simply means settings haven't changed since the
   // watermark — local state is already correct, so this is a no-op either way.
-  // fsrsWeights/targetRetention/dailyReviewLimit/algorithm may be null on a row
-  // written before these columns existed — leave local state alone for those.
+  // fsrsWeights/targetRetention/dailyReviewLimit are `undefined`
+  // (key absent from the row) rather than `null` if the migration adding
+  // those columns hasn't been run on this database yet — must use `!= null`
+  // (not `!== null`) so an absent key doesn't wipe local state to undefined.
   if (!settingsRes.error && settingsRes.data) {
     const s = toCamel(settingsRes.data) as {
       newCardsPerDay: number
-      fsrsWeights: number[] | null
-      targetRetention: number | null
-      dailyReviewLimit: number | null
-      algorithm: 'sm2' | 'fsrs' | null
+      fsrsWeights?: number[] | null
+      targetRetention?: number | null
+      dailyReviewLimit?: number | null
     }
     useSettingsStore.setState({
       newCardsPerDay: s.newCardsPerDay,
-      ...(s.fsrsWeights !== null ? { fsrsWeights: s.fsrsWeights } : {}),
-      ...(s.targetRetention !== null ? { fsrsTargetRetention: s.targetRetention } : {}),
-      ...(s.dailyReviewLimit !== null ? { maxReviewsPerDay: s.dailyReviewLimit } : {}),
-      ...(s.algorithm !== null ? { algorithm: s.algorithm } : {}),
+      ...(s.fsrsWeights != null ? { fsrsWeights: s.fsrsWeights } : {}),
+      ...(s.targetRetention != null ? { fsrsTargetRetention: s.targetRetention } : {}),
+      ...(s.dailyReviewLimit != null ? { maxReviewsPerDay: s.dailyReviewLimit } : {}),
     })
   }
 
@@ -470,10 +469,6 @@ async function runPull(
   // doesn't immediately re-upload rows we just pulled unchanged. The store
   // rows for server-fetched items are the exact toCamel(row) objects applied
   // above, so their JSON matches what the push-side dirty filter serializes.
-  for (const row of srsRes.data ?? []) {
-    const s = toCamel(row) as SRSData
-    lastPushedSrs.set(s.cardId, JSON.stringify(s))
-  }
   for (const row of fsrsRes.data ?? []) {
     const f = toCamel(row) as FSRSState
     lastPushedFsrs.set(f.cardId, JSON.stringify(f))
@@ -504,7 +499,7 @@ async function runPull(
 
 // ─── Dirty tracking (push only rows that changed since the last successful
 // push) ────────────────────────────────────────────────────────────────────
-// fsrs_data/srs_data are keyed by cardId and get rewritten in full on every
+// fsrs_data is keyed by cardId and gets rewritten in full on every
 // review; review_logs is append-only. Tracking what we've already sent lets
 // repeated 400ms-debounced pushes skip rows that haven't changed, instead of
 // re-upserting the entire table every cycle (181+ fsrs_data rows, an
@@ -513,7 +508,6 @@ async function runPull(
 // same JSON-snapshot-per-id pattern so a single card rating no longer
 // re-uploads every row of those tables.
 const lastPushedFsrs     = new Map<string, string>()
-const lastPushedSrs      = new Map<string, string>()
 const lastPushedFolders  = new Map<string, string>()
 const lastPushedDecks    = new Map<string, string>()
 const lastPushedCards    = new Map<string, string>()
@@ -559,7 +553,6 @@ async function pushToSupabase(
   folders: Folder[],
   decks: Deck[],
   cards: Card[],
-  srsData: Record<string, SRSData>,
   fsrsData: Record<string, FSRSState>,
   sessions: ReviewSession[],
   reviewLogs: ReviewLog[],
@@ -588,14 +581,13 @@ async function pushToSupabase(
       folders: (folders ?? []).length,
       decks: (decks ?? []).length,
       cards: (cards ?? []).length,
-      srsData: Object.keys(srsData ?? {}).length,
       fsrsData: Object.keys(fsrsData ?? {}).length,
       sessions: (sessions ?? []).length,
       reviewLogs: (reviewLogs ?? []).length,
     })
   }
 
-  // Only upsert srs_data/fsrs_data for cards that exist in the active card set.
+  // Only upsert fsrs_data for cards that exist in the active card set.
   // This prevents orphaned entries (e.g. from a deleted deck whose cards were
   // briefly re-pulled from Supabase before the delete push ran) from being
   // written back. Also excludes cards about to be deleted to avoid a deadlock
@@ -605,7 +597,6 @@ async function pushToSupabase(
 
   // Clean up tracking maps for deleted rows so they don't grow unbounded.
   for (const id of cardDeleteSet) {
-    lastPushedSrs.delete(id)
     lastPushedFsrs.delete(id)
     lastPushedCards.delete(id)
   }
@@ -634,11 +625,6 @@ async function pushToSupabase(
   ])
 
   const sessionsToUpsert = sessions.filter((s) => !sessionDeleteSet.has(s.id) && lastPushedSessions.get(s.id) !== JSON.stringify(s))
-  const srsToUpsert = Object.values(srsData).filter((s) => {
-    if (!activeCardSet.has(s.cardId) || cardDeleteSet.has(s.cardId)) return false
-    const serialized = JSON.stringify(s)
-    return lastPushedSrs.get(s.cardId) !== serialized
-  })
   const fsrsToUpsert = Object.values(fsrsData).filter((f) => {
     if (!activeCardSet.has(f.cardId) || cardDeleteSet.has(f.cardId)) return false
     const serialized = JSON.stringify(f)
@@ -648,7 +634,7 @@ async function pushToSupabase(
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
-    table: 'folders' | 'decks' | 'cards' | 'srs_data' | 'fsrs_data' | 'review_sessions' | 'review_logs',
+    table: 'folders' | 'decks' | 'cards' | 'fsrs_data' | 'review_sessions' | 'review_logs',
     rows: T[],
     opts: { onConflict: string },
   ): Promise<void> {
@@ -676,9 +662,6 @@ async function pushToSupabase(
           upsertOpts,
         )
       : null,
-    srsToUpsert.length
-      ? upsertBatched('srs_data', srsToUpsert.map(withUserId), { onConflict: 'card_id' })
-      : null,
     fsrsToUpsert.length
       ? upsertBatched('fsrs_data', fsrsToUpsert.map(withUserId), { onConflict: 'card_id' })
       : null,
@@ -695,13 +678,12 @@ async function pushToSupabase(
   for (const d of decksToUpsert)    lastPushedDecks.set(d.id, JSON.stringify(d))
   for (const c of cardsToUpsert)    lastPushedCards.set(c.id, JSON.stringify(c))
   for (const s of sessionsToUpsert) lastPushedSessions.set(s.id, JSON.stringify(s))
-  for (const s of srsToUpsert)  lastPushedSrs.set(s.cardId, JSON.stringify(s))
   for (const f of fsrsToUpsert) lastPushedFsrs.set(f.cardId, JSON.stringify(f))
   for (const l of reviewLogsToUpsert) pushedLogIds.add(l.id)
 
   if (DEBUG_SYNC) console.log('[SYNC] pushToSupabase: all upserts succeeded')
 
-  // Execute pending deletes — cards/srs first, then decks, then folders
+  // Execute pending deletes — cards first, then decks, then folders
   // so child rows are gone before their parents (avoids any implicit ordering issues).
   // Each delete is batched: .in() with hundreds of IDs exceeds PostgREST's URL
   // length limit and returns "Bad Request".
@@ -741,10 +723,10 @@ async function pushToSupabase(
           console.error('[SYNC] pushToSupabase: cards delete error', formatPgError(delCardsRes.error))
           throw new Error(`cards delete: ${delCardsRes.error.message} (code ${delCardsRes.error.code})`)
         }
-        const delSrs = await supabase.from('srs_data').delete().in('card_id', chunk)
-        if (delSrs.error) {
-          console.error('[SYNC] pushToSupabase: srs_data delete error', formatPgError(delSrs.error))
-          throw new Error(`srs_data delete: ${delSrs.error.message} (code ${delSrs.error.code})`)
+        const delFsrs = await supabase.from('fsrs_data').delete().in('card_id', chunk)
+        if (delFsrs.error) {
+          console.error('[SYNC] pushToSupabase: fsrs_data delete error', formatPgError(delFsrs.error))
+          throw new Error(`fsrs_data delete: ${delFsrs.error.message} (code ${delFsrs.error.code})`)
         }
       }
     }
@@ -842,7 +824,6 @@ export interface SyncedSettings {
   fsrsWeights: number[]
   fsrsTargetRetention: number
   maxReviewsPerDay: number
-  algorithm: 'sm2' | 'fsrs'
 }
 
 async function pushSettingsToSupabase(settings: SyncedSettings): Promise<void> {
@@ -858,7 +839,6 @@ async function pushSettingsToSupabase(settings: SyncedSettings): Promise<void> {
       fsrs_weights: settings.fsrsWeights,
       target_retention: settings.fsrsTargetRetention,
       daily_review_limit: settings.maxReviewsPerDay,
-      algorithm: settings.algorithm,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' },
@@ -929,7 +909,7 @@ export function useSync(): SyncStatus {
         const s = useLibraryStore.getState()
         const h = useHistoryStore.getState()
         if (DEBUG_SYNC) console.log('[SYNC] handlePush: pushing', { decks: s.decks.map(d => ({ id: d.id, name: d.name })) })
-        await pushToSupabase(s.folders, s.decks, s.cards, s.srsData, s.fsrsData, h.sessions, h.reviewLogs, s.pendingDeletes)
+        await pushToSupabase(s.folders, s.decks, s.cards, s.fsrsData, h.sessions, h.reviewLogs, s.pendingDeletes)
         // Clear only the IDs that were in this push — new deletes queued
         // while in-flight are preserved for the next push.
         // pendingDeletes may come from state persisted before `sessions`/`reviewLogs`
@@ -1087,7 +1067,7 @@ export function useSync(): SyncStatus {
         folders: s.folders.filter((f) => !fSet.has(f.id)),
         decks:   s.decks.filter((d)   => !dSet.has(d.id)),
         cards:   s.cards.filter((c)   => !cSet.has(c.id)),
-        srsData: Object.fromEntries(Object.entries(s.srsData).filter(([id]) => !cSet.has(id))),
+        fsrsData: Object.fromEntries(Object.entries(s.fsrsData).filter(([id]) => !cSet.has(id))),
         pendingDeletes: {
           folders:    s.pendingDeletes.folders.filter((id) => !fSet.has(id)),
           decks:      s.pendingDeletes.decks.filter((id)   => !dSet.has(id)),
@@ -1127,6 +1107,9 @@ export function useSync(): SyncStatus {
       // Lift reviewLogs/sessions out of an old-format library blob into the
       // history store. No-op once migrated.
       migrateHistoryToOwnStore()
+      // Strip the removed SM-2 srsData blob / settings keys from persisted
+      // state. No-op once stripped.
+      stripLegacySm2State()
       // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
       // don't fail Supabase's uuid columns. No-op when nothing is legacy.
       migrateLegacyIds()
@@ -1165,7 +1148,6 @@ export function useSync(): SyncStatus {
             fsrsWeights: settingsState.fsrsWeights,
             fsrsTargetRetention: settingsState.fsrsTargetRetention,
             maxReviewsPerDay: settingsState.maxReviewsPerDay,
-            algorithm: settingsState.algorithm,
           })
         } else if (DEBUG_SYNC) {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
@@ -1228,14 +1210,16 @@ export function useSync(): SyncStatus {
 
   // Periodic + visibility-triggered incremental pull — without this, a tab left
   // open all day only learns about another device's reviews via the review_logs
-  // realtime feed, never the fsrs_data/srs_data scheduling changes that go with
+  // realtime feed, never the fsrs_data scheduling changes that go with
   // them, so its due queue silently drifts until a manual reload.
   useEffect(() => {
     function incrementalPullIfLeader() {
       if (!isLeaderRef.current) return
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
       if (DEBUG_SYNC) console.log('[SYNC] leader tab: periodic/visibility incremental pull')
-      pullFromSupabase()
+      pullFromSupabase().catch((err: unknown) => {
+        console.error('[SYNC] periodic/visibility pull failed', err)
+      })
     }
     function handleVisibilityChange() {
       if (document.visibilityState === 'visible') incrementalPullIfLeader()
@@ -1317,7 +1301,7 @@ export function useSync(): SyncStatus {
 
   // Subscribe to settings store changes with a 400ms debounce — only the
   // SRS-relevant fields (newCardsPerDay, fsrsWeights, fsrsTargetRetention,
-  // maxReviewsPerDay, algorithm) are synced; everything else stays local-only.
+  // maxReviewsPerDay) are synced; everything else stays local-only.
   useEffect(() => {
     const unsub = useSettingsStore.subscribe((state) => {
       if (!mountedRef.current || applyingRemoteRef.current) return
@@ -1328,7 +1312,6 @@ export function useSync(): SyncStatus {
           fsrsWeights: state.fsrsWeights,
           fsrsTargetRetention: state.fsrsTargetRetention,
           maxReviewsPerDay: state.maxReviewsPerDay,
-          algorithm: state.algorithm,
         })
       }, 400)
     })

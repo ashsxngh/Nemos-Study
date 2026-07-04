@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Card, Deck, Note, SRSData } from '@/lib/types'
+import type { Card, Deck, Note } from '@/lib/types'
 import type { FSRSState } from '@/lib/srs'
 
 const TRASH_TTL_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
@@ -20,11 +20,9 @@ export interface TrashEntry {
 
   // Restoration payloads
   card?: Card
-  cardSRS?: SRSData
   cardFSRS?: FSRSState
   deck?: Deck
   deckCards?: Card[]
-  deckSRS?: Record<string, SRSData>
   deckFSRS?: Record<string, FSRSState>
   note?: Note
 }

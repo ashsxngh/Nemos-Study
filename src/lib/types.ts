@@ -52,7 +52,6 @@ export interface Deck {
   createdAt: string
   updatedAt: string
   _cardCount?: number
-  _masteryPercent?: number
   _dueCount?: number
 }
 
@@ -73,20 +72,6 @@ export interface Card {
   order: number
   createdAt: string
   updatedAt: string
-  _srsData?: SRSData
-}
-
-export interface SRSData {
-  cardId: string
-  userId: string
-  interval: number
-  easeFactor: number
-  repetitions: number
-  dueDate: string
-  lastReviewedAt: string | null
-  lapses: number
-  masteryPercent: number
-  state: 'new' | 'review' | 'relearning'
 }
 
 export interface ReviewSession {
@@ -205,16 +190,4 @@ export interface ToastData {
   message: string
   duration?: number
   action?: { label: string; onClick: () => void }
-}
-
-export interface StudySettings {
-  algorithm: 'sm2' | 'fsrs'
-  newCardsPerDay: number
-  maxReviewsPerDay: number
-  easeBonus: number
-  hardInterval: number
-  graduatingInterval: number
-  lapseInterval: number
-  showAnswerTimer: boolean
-  autoPlayAudio: boolean
 }

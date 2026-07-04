@@ -30,9 +30,10 @@ import { ConfidenceRating } from '@/components/study/ConfidenceRating'
 import { Progress } from '@/components/ui/Progress'
 import { Dialog } from '@/components/ui/Dialog'
 import { CardEditor } from '@/components/library/CardEditor'
-import { fsrsRetrievability, daysUntilDue } from '@/lib/srs'
+import { fsrsRetrievability } from '@/lib/srs'
 import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
 import { cn, formatDuration, formatDate, generateId } from '@/lib/utils'
+import { toLocalDateStr } from '@/lib/formatDate'
 import type { Card, Difficulty } from '@/lib/types'
 
 // ── Session abandonment recovery ──────────────────────────────────────────────
@@ -123,7 +124,6 @@ function SessionContent() {
     reviewCard,
     decks,
     fsrsData,
-    srsData,
     deleteCard,
     resetCardSRS,
     cards: allCards,
@@ -138,7 +138,6 @@ function SessionContent() {
       reviewCard: s.reviewCard,
       decks: s.decks,
       fsrsData: s.fsrsData,
-      srsData: s.srsData,
       deleteCard: s.deleteCard,
       resetCardSRS: s.resetCardSRS,
       cards: s.cards,
@@ -149,10 +148,9 @@ function SessionContent() {
 
   const exams = useExamStore((s) => s.exams)
 
-  const { studyShortcuts, algorithm, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore(
+  const { studyShortcuts, showSessionProgress, dailyCardTarget, sessionLength } = useSettingsStore(
     useShallow((s) => ({
       studyShortcuts: s.studyShortcuts,
-      algorithm: s.algorithm,
       showSessionProgress: s.showSessionProgress,
       dailyCardTarget: s.dailyCardTarget,
       sessionLength: s.sessionLength,
@@ -193,7 +191,7 @@ function SessionContent() {
     if (!sessionId) return
     const sessionLogs = useStudyStore.getState().logs
     const cardsReviewed = sessionLogs.length
-    const cardsCorrect = sessionLogs.filter((l) => l.rating >= 3).length
+    const cardsCorrect = sessionLogs.filter((l) => l.rating >= 2).length
     useHistoryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
     librarySessionIdRef.current = null
   }, [])
@@ -272,7 +270,7 @@ function SessionContent() {
       return getWeakestCards(examObj, lib.decks, lib.cards, lib.folders, lib.fsrsData, 50)
     }
 
-    const { cards: rawCards, srsData: rawSrs } = useLibraryStore.getState()
+    const { cards: rawCards, fsrsData: rawFsrs } = useLibraryStore.getState()
     const pool = (deckId
       ? rawCards.filter((c) => c.deckId === deckId)
       : rawCards
@@ -284,9 +282,11 @@ function SessionContent() {
     if (resolvedMode === 'deck-all') return [...pool]
     if (resolvedMode === 'random') return [...pool].sort(() => Math.random() - 0.5)
     if (resolvedMode === 'failed-only') {
+      // Lapsed at least once, or current retrievability below 30% (new cards
+      // score 0, so never-studied cards are included — same as before).
       return pool.filter((c) => {
-        const srs = rawSrs[c.id]
-        return srs && (srs.lapses > 0 || srs.masteryPercent < 30)
+        const fs = rawFsrs[c.id]
+        return fs && (fs.lapses > 0 || fsrsRetrievability(fs) < 0.3)
       })
     }
     if (resolvedMode === 'new-only') return getNewCards(deckId)
@@ -348,10 +348,8 @@ function SessionContent() {
     setLoaded(true)
     // Progress bar denominator = review cards only; new cards tracked separately
     const lib = useLibraryStore.getState()
-    const reviewCount = sessionCards.filter((c) =>
-      algorithm === 'fsrs'
-        ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
-        : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+    const reviewCount = sessionCards.filter(
+      (c) => (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
     ).length
     setInitialQueueLength(reviewCount)
     setRememberedCount(0)
@@ -365,7 +363,7 @@ function SessionContent() {
       checkBurnoutAndMaybeNudge()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildQueue, resolvedMode, algorithm])
+  }, [buildQueue, resolvedMode])
 
   const handleResumeSession = useCallback(() => {
     if (!pendingRecovery) return
@@ -375,7 +373,6 @@ function SessionContent() {
       currentIndex: pendingRecovery.currentIndex,
       logs: pendingRecovery.logs,
       undoStack: pendingRecovery.undoStack,
-      redoStack: [],
       showAnswer: false,
       startedAt: new Date(),
       mode: pendingRecovery.mode,
@@ -384,10 +381,8 @@ function SessionContent() {
     setHistory([])
     setLoaded(true)
     const lib = useLibraryStore.getState()
-    const reviewCount = pendingRecovery.queue.filter((c) =>
-      algorithm === 'fsrs'
-        ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
-        : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+    const reviewCount = pendingRecovery.queue.filter(
+      (c) => (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
     ).length
     setInitialQueueLength(reviewCount)
     setRememberedCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating >= 3).length)
@@ -398,7 +393,7 @@ function SessionContent() {
     setSessionPhase('first')
     setPendingRecovery(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingRecovery, algorithm])
+  }, [pendingRecovery])
 
   const handleDiscardRecovery = useCallback(() => {
     clearRecovery()
@@ -475,58 +470,33 @@ function SessionContent() {
     : deckName
 
   /* Helper: is the current card "new" (never reviewed)? */
-  const isCurrentCardNew = (() => {
-    if (!currentCard) return false
-    if (algorithm === 'fsrs') return (fsrsData[currentCard.id]?.state ?? 'new') === 'new'
-    return (srsData[currentCard.id]?.repetitions ?? 0) === 0
-  })()
+  const isCurrentCardNew =
+    !!currentCard && (fsrsData[currentCard.id]?.state ?? 'new') === 'new'
 
-  /* Card metadata — last seen + difficulty, derived from SRS data */
+  /* Card metadata — last seen, derived from FSRS data */
   const cardMeta = (() => {
     if (!currentCard) return null
-    const lastReviewedAt = algorithm === 'fsrs'
-      ? fsrsData[currentCard.id]?.lastReviewedAt
-      : srsData[currentCard.id]?.lastReviewedAt
+    const lastReviewedAt = fsrsData[currentCard.id]?.lastReviewedAt
     if (!lastReviewedAt) return null
 
     const days = Math.floor((Date.now() - new Date(lastReviewedAt).getTime()) / 86400000)
     const lastSeen = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
-
-    let difficulty: 'Easy' | 'Medium' | 'Hard'
-    if (algorithm === 'fsrs') {
-      const d = fsrsData[currentCard.id]?.difficulty ?? 0
-      difficulty = d > 7 ? 'Hard' : d > 4.5 ? 'Medium' : 'Easy'
-    } else {
-      const ef = srsData[currentCard.id]?.easeFactor ?? 2.5
-      difficulty = ef < 2.0 ? 'Hard' : ef < 2.4 ? 'Medium' : 'Easy'
-    }
-    return { lastSeen, difficulty }
+    return { lastSeen }
   })()
 
   /* Retention transparency — raw scheduling numbers behind the rating, shown
-     collapsed by default. FSRS mode reads fsrsData directly per spec; SM-2
-     mode shows the closest equivalent fields from srsData. */
+     collapsed by default. */
   const retentionInfo = (() => {
     if (!currentCard) return null
-    if (algorithm === 'fsrs') {
-      const fs = fsrsData[currentCard.id]
-      if (!fs) return null
-      const due = new Date(fs.dueDate)
-      const daysDiff = Math.round((due.getTime() - Date.now()) / 86400000)
-      return {
-        stability: fs.stability,
-        retrievability: Math.round(fsrsRetrievability(fs) * 100),
-        daysDiff,
-        state: fs.state,
-      }
-    }
-    const srs = srsData[currentCard.id]
-    if (!srs) return null
+    const fs = fsrsData[currentCard.id]
+    if (!fs) return null
+    const due = new Date(fs.dueDate)
+    const daysDiff = Math.round((due.getTime() - Date.now()) / 86400000)
     return {
-      stability: srs.interval,
-      retrievability: srs.masteryPercent,
-      daysDiff: daysUntilDue(srs),
-      state: srs.state,
+      stability: fs.stability,
+      retrievability: Math.round(fsrsRetrievability(fs) * 100),
+      daysDiff,
+      state: fs.state,
     }
   })()
 
@@ -540,8 +510,8 @@ function SessionContent() {
     !!currentCard && struggleCount >= 3 && !dismissedStruggleIds.has(currentCard.id)
 
   /* Daily progress — today's reviews vs daily card target */
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const todayReviewCount = reviewLogs.filter((l) => l.reviewedAt.slice(0, 10) === todayStr).length
+  const todayStr = toLocalDateStr(new Date())
+  const todayReviewCount = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === todayStr).length
   const dailyPct = Math.min(100, Math.round((todayReviewCount / Math.max(dailyCardTarget, 1)) * 100))
 
   /* ── Rate a card ── */
@@ -552,9 +522,7 @@ function SessionContent() {
       if (!card || animatingOut) return
       ratingInFlightRef.current = true
 
-      const isNew = algorithm === 'fsrs'
-        ? (useLibraryStore.getState().fsrsData[card.id]?.state ?? 'new') === 'new'
-        : (useLibraryStore.getState().srsData[card.id]?.repetitions ?? 0) === 0
+      const isNew = (useLibraryStore.getState().fsrsData[card.id]?.state ?? 'new') === 'new'
 
       // New card: only Good (3) or Easy (4) graduates; Again (1) or Hard (2) re-queues
       if (isNew && rating <= 2) {
@@ -569,9 +537,7 @@ function SessionContent() {
       }
 
       const responseMs = Date.now() - cardShownAtRef.current
-      const libState = useLibraryStore.getState()
-      const prevSRS = libState.srsData[card.id]
-      const prevFSRS = libState.fsrsData[card.id]
+      const prevFSRS = useLibraryStore.getState().fsrsData[card.id]
 
       const logId = generateId()
       addLog({
@@ -581,10 +547,10 @@ function SessionContent() {
         responseMs,
         reviewedAt: new Date().toISOString(),
         scheduledInterval: 0,
-        ease: 2.5,
+        ease: 0,
       })
 
-      reviewCard(card.id, rating)
+      reviewCard(card.id, rating, responseMs)
 
       // Update progress bar counters (new cards excluded from review metrics)
       if (isNew) {
@@ -597,7 +563,7 @@ function SessionContent() {
         if (rating === 1) setMissedReviewCount((c) => c + 1)
       }
 
-      if (prevSRS) pushUndo(card.id, prevSRS, logId, isNew, rating, prevFSRS)
+      if (prevFSRS) pushUndo(card.id, prevFSRS, logId, isNew, rating)
       setHistory((h) => [...h, currentIndex])
 
       // Animate then advance
@@ -609,16 +575,15 @@ function SessionContent() {
       }, 180)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, currentIndex, deckId, animatingOut, algorithm]
+    [queue, currentIndex, deckId, animatingOut]
   )
 
   /* ── Undo last review ── */
   const handleUndo = useCallback(() => {
     const entry = popUndo()
     if (!entry) return
-    const lib = useLibraryStore.getState()
-    lib.setSRSData(entry.cardId, entry.prevSRS)
-    if (entry.prevFSRS) lib.setFSRSData(entry.cardId, entry.prevFSRS)
+    // Guard against a pre-FSRS-only recovery snapshot missing the field
+    if (entry.prevFSRS) useLibraryStore.getState().setFSRSData(entry.cardId, entry.prevFSRS)
     useHistoryStore.getState().removeLastLog()
     decrementIndex()
     if (entry.isNew) {
@@ -974,10 +939,8 @@ function SessionContent() {
                 setHistory([])
                 setLoaded(true)
                 const lib = useLibraryStore.getState()
-                const reviewCount = cards.filter((c) =>
-                  algorithm === 'fsrs'
-                    ? (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
-                    : (lib.srsData[c.id]?.repetitions ?? 0) > 0
+                const reviewCount = cards.filter(
+                  (c) => (lib.fsrsData[c.id]?.state ?? 'new') !== 'new'
                 ).length
                 setInitialQueueLength(reviewCount)
                 setRememberedCount(0)
@@ -1250,26 +1213,6 @@ function SessionContent() {
                   <span className="text-[11px]" style={{ color: '#6b6b72' }}>
                     Last seen {cardMeta.lastSeen}
                   </span>
-                  {/* Ease/difficulty badge is an SM-2 concept — FSRS exposes
-                      retrievability instead, shown in the collapsible card-details panel below. */}
-                  {algorithm === 'sm2' && (
-                    <span className="text-[11px]" style={{ color: '#6b6b72' }}>
-                      Difficulty:{' '}
-                      <span
-                        className="font-medium"
-                        style={{
-                          color:
-                            cardMeta.difficulty === 'Hard'
-                              ? '#f87171'
-                              : cardMeta.difficulty === 'Medium'
-                                ? '#fbbf24'
-                                : '#4ade80',
-                        }}
-                      >
-                        {cardMeta.difficulty}
-                      </span>
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -1278,11 +1221,11 @@ function SessionContent() {
                 <div className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <div className="grid grid-cols-4 gap-2 px-4 py-2.5">
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Stability' : 'Interval'}</p>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Stability</p>
                       <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
                     </div>
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>{algorithm === 'fsrs' ? 'Retrievability' : 'Mastery'}</p>
+                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Retrievability</p>
                       <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
                     </div>
                     <div>

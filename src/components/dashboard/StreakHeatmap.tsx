@@ -2,6 +2,7 @@
 
 import { cn, formatDate } from '@/lib/utils'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { toLocalDateStr } from '@/lib/formatDate'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
@@ -22,7 +23,7 @@ interface DayCell {
 function buildYearData(reviewLogs: { reviewedAt: string }[], year: number): DayCell[][] {
   const countMap: Record<string, number> = {}
   for (const log of reviewLogs) {
-    const day = log.reviewedAt.slice(0, 10)
+    const day = toLocalDateStr(new Date(log.reviewedAt))
     countMap[day] = (countMap[day] ?? 0) + 1
   }
 
@@ -47,7 +48,7 @@ function buildYearData(reviewLogs: { reviewedAt: string }[], year: number): DayC
   while (cur <= endDate) {
     const week: DayCell[] = []
     for (let d = 0; d < 7; d++) {
-      const key = cur.toISOString().slice(0, 10)
+      const key = toLocalDateStr(cur)
       const inYear = cur.getFullYear() === year
       week.push({ date: new Date(cur), count: inYear ? (countMap[key] ?? 0) : -1 })
       cur.setDate(cur.getDate() + 1)
@@ -84,10 +85,10 @@ export function StreakHeatmap() {
   // Summary stats
   const activeDays = new Set(
     reviewLogs
-      .filter((l) => l.reviewedAt.startsWith(String(year)))
-      .map((l) => l.reviewedAt.slice(0, 10))
+      .filter((l) => new Date(l.reviewedAt).getFullYear() === year)
+      .map((l) => toLocalDateStr(new Date(l.reviewedAt)))
   ).size
-  const totalReviews = reviewLogs.filter((l) => l.reviewedAt.startsWith(String(year))).length
+  const totalReviews = reviewLogs.filter((l) => new Date(l.reviewedAt).getFullYear() === year).length
 
   return (
     <div className="mb-6">

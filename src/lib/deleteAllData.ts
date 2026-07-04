@@ -14,7 +14,6 @@ import { useRecentStore } from '@/store/useRecentStore'
 const USER_TABLES = [
   'review_logs',
   'review_sessions',
-  'srs_data',
   'fsrs_data',
   'cards',
   'decks',
@@ -54,7 +53,6 @@ export async function deleteAllData(): Promise<void> {
     folders: [],
     decks: [],
     cards: [],
-    srsData: {},
     fsrsData: {},
     pendingDeletes: { folders: [], decks: [], cards: [], sessions: [], reviewLogs: [] },
   })

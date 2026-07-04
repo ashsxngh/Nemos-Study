@@ -9,7 +9,6 @@ import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
 import {
   Toggle,
   SettingRow,
-  AlgorithmPicker,
   FSRSWeightsGrid,
   ResetFSRSDefaultsButton,
   BurnoutThresholdToggles,
@@ -193,44 +192,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <section className="space-y-4">
               <SectionHeading icon={Brain} label="SRS Algorithm" />
 
-              <AlgorithmPicker />
-
-              {settings.algorithm === 'sm2' && (
-                <>
-                  <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
-                    <SettingRow label="New cards per day" description="Maximum new cards introduced per day">
-                      <NumberField value={settings.newCardsPerDay} onChange={(v) => updateSettings({ newCardsPerDay: v })} />
-                    </SettingRow>
-                    <SettingRow label="Max reviews per day" description="Cap on review cards per day">
-                      <NumberField value={settings.maxReviewsPerDay} onChange={(v) => updateSettings({ maxReviewsPerDay: v })} />
-                    </SettingRow>
-                    <SettingRow label="Session length" description="Cards per study session (default 20, 5-100)">
-                      <NumberField value={settings.sessionLength} onChange={(v) => updateSettings({ sessionLength: v })} bounds={{ min: 5, max: 100 }} />
-                    </SettingRow>
-                    <SettingRow label="Starting ease factor" description="Initial ease multiplier for new cards (default: 2.5)">
-                      <NumberField value={settings.startingEase} onChange={(v) => updateSettings({ startingEase: v })} />
-                    </SettingRow>
-                    <SettingRow label="Easy bonus" description="Added to ease factor when you rate Easy (default: 0.15)">
-                      <NumberField value={settings.easyBonus} onChange={(v) => updateSettings({ easyBonus: v })} />
-                    </SettingRow>
-                    <SettingRow label="Hard interval multiplier" description="Interval multiplier when you rate Hard (default: 1.2)">
-                      <NumberField value={settings.hardInterval} onChange={(v) => updateSettings({ hardInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Graduating interval (days)" description="Interval after second Good rating (default: 4)">
-                      <NumberField value={settings.graduatingInterval} onChange={(v) => updateSettings({ graduatingInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Lapse interval (%)" description="New interval as % of previous after forgetting (default: 10%)">
-                      <NumberField value={settings.lapseInterval} onChange={(v) => updateSettings({ lapseInterval: v })} />
-                    </SettingRow>
-                    <SettingRow label="Leech threshold (lapses)" description="Flag a card as a leech after this many lapses">
-                      <NumberField value={settings.leechThreshold} onChange={(v) => updateSettings({ leechThreshold: v })} />
-                    </SettingRow>
-                  </div>
-                </>
-              )}
-
-              {settings.algorithm === 'fsrs' && (
-                <>
+              <>
                   <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
                     <SettingRow label="New cards per day" description="Maximum new cards introduced per day">
                       <NumberField value={settings.newCardsPerDay} onChange={(v) => updateSettings({ newCardsPerDay: v })} />
@@ -281,8 +243,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   <div className="flex justify-end">
                     <ResetFSRSDefaultsButton />
                   </div>
-                </>
-              )}
+              </>
             </section>
 
             {/* ── FSRS Simulator ── */}

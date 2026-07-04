@@ -132,8 +132,6 @@ export default function TrashPage() {
     if (!userId) return
     try {
       if (entry.type === 'card' && entry.card) {
-        const delSrs = await supabase.from('srs_data').delete().eq('card_id', entry.card.id)
-        if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
         const delFsrs = await supabase.from('fsrs_data').delete().eq('card_id', entry.card.id)
         if (delFsrs.error) throw new Error(`fsrs_data: ${delFsrs.error.message}`)
         const delCard = await supabase.from('cards').delete().eq('id', entry.card.id)
@@ -141,8 +139,6 @@ export default function TrashPage() {
       } else if (entry.type === 'deck' && entry.deck) {
         const cardIds = (entry.deckCards ?? []).map((c) => c.id)
         if (cardIds.length) {
-          const delSrs = await supabase.from('srs_data').delete().in('card_id', cardIds)
-          if (delSrs.error) throw new Error(`srs_data: ${delSrs.error.message}`)
           const delFsrs = await supabase.from('fsrs_data').delete().in('card_id', cardIds)
           if (delFsrs.error) throw new Error(`fsrs_data: ${delFsrs.error.message}`)
           const delCards = await supabase.from('cards').delete().in('id', cardIds)
@@ -187,7 +183,6 @@ export default function TrashPage() {
     if (entry.type === 'card' && entry.card) {
       useLibraryStore.setState((s) => ({
         cards: [...s.cards, entry.card!],
-        srsData: entry.cardSRS ? { ...s.srsData, [entry.card!.id]: entry.cardSRS } : s.srsData,
         fsrsData: entry.cardFSRS ? { ...s.fsrsData, [entry.card!.id]: entry.cardFSRS } : s.fsrsData,
         // Remove from pendingDeletes in case it was queued for Supabase DELETE
         pendingDeletes: {
@@ -199,7 +194,6 @@ export default function TrashPage() {
       useLibraryStore.setState((s) => ({
         decks: [...s.decks, entry.deck!],
         cards: [...s.cards, ...(entry.deckCards ?? [])],
-        srsData: { ...s.srsData, ...(entry.deckSRS ?? {}) },
         fsrsData: { ...s.fsrsData, ...(entry.deckFSRS ?? {}) },
         pendingDeletes: {
           ...s.pendingDeletes,

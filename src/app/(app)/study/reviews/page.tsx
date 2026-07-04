@@ -7,23 +7,20 @@ import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
-import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function ReviewsPage() {
-  const { cards, decks, folders, srsData, fsrsData, getReviewsDue } = useLibraryStore(
+  const { cards, decks, folders, fsrsData, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       cards: s.cards,
       decks: s.decks,
       folders: s.folders,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getReviewsDue: s.getReviewsDue,
     }))
   )
-  const algorithm = useSettingsStore((s) => s.algorithm)
   const reviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+    [cards, decks, folders, fsrsData, getReviewsDue]
   )
 
   const isEmpty = reviews.length === 0

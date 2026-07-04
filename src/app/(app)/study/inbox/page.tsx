@@ -11,12 +11,11 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 
 export default function InboxPage() {
-  const { cards, decks, folders, srsData, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
+  const { cards, decks, folders, fsrsData, getDueCards, getNewCards, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       cards: s.cards,
       decks: s.decks,
       folders: s.folders,
-      srsData: s.srsData,
       fsrsData: s.fsrsData,
       getDueCards: s.getDueCards,
       getNewCards: s.getNewCards,
@@ -24,20 +23,18 @@ export default function InboxPage() {
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const { algorithm, newCardsPerDay } = useSettingsStore(
-    useShallow((s) => ({ algorithm: s.algorithm, newCardsPerDay: s.newCardsPerDay }))
-  )
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
   const dueCards = useMemo(
     () => getDueCards(),
-    [cards, decks, folders, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getDueCards]
+    [cards, decks, folders, fsrsData, reviewLogs, newCardsPerDay, getDueCards]
   )
   const newCards = useMemo(
     () => getNewCards(),
-    [cards, decks, srsData, fsrsData, reviewLogs, algorithm, newCardsPerDay, getNewCards]
+    [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
   const reviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, srsData, fsrsData, algorithm, getReviewsDue]
+    [cards, decks, folders, fsrsData, getReviewsDue]
   )
 
   const isEmpty = dueCards.length === 0
