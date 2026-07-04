@@ -170,11 +170,16 @@ alter table exams add column if not exists predicted_retention_at_exam float;
 -- Adds updated_at for incremental sync filtering.
 alter table exams add column if not exists updated_at timestamptz not null default now();
 
--- user_settings (one row per user; currently holds the global daily new-card limit)
+-- user_settings (one row per user; holds the SRS-relevant settings that must
+-- schedule cards identically across devices)
 create table if not exists user_settings (
-  user_id           uuid primary key references auth.users(id) on delete cascade,
-  new_cards_per_day int not null default 20,
-  updated_at        timestamptz not null default now()
+  user_id            uuid primary key references auth.users(id) on delete cascade,
+  new_cards_per_day  int not null default 20,
+  fsrs_weights       jsonb,
+  target_retention   float8,
+  daily_review_limit int,
+  algorithm          text,
+  updated_at         timestamptz not null default now()
 );
 
 -- Adds the column for a user_settings table created before this existed
@@ -182,6 +187,13 @@ create table if not exists user_settings (
 -- table, so an earlier partial run can leave this column missing).
 alter table user_settings add column if not exists new_cards_per_day int not null default 20;
 alter table user_settings add column if not exists updated_at timestamptz not null default now();
+
+-- Adds SRS-relevant columns (fsrsWeights/targetRetention/dailyReviewLimit/algorithm)
+-- so scheduling settings sync cross-device instead of staying per-device.
+alter table user_settings add column if not exists fsrs_weights jsonb;
+alter table user_settings add column if not exists target_retention float8;
+alter table user_settings add column if not exists daily_review_limit int;
+alter table user_settings add column if not exists algorithm text;
 
 -- ────────────────────────────────────────────────────────────
 -- INCREMENTAL SYNC TRIGGERS

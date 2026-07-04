@@ -447,9 +447,23 @@ async function runPull(
   // when a row exists. No row yet (new user) means nothing to hydrate. On an
   // incremental pull, no row simply means settings haven't changed since the
   // watermark — local state is already correct, so this is a no-op either way.
+  // fsrsWeights/targetRetention/dailyReviewLimit/algorithm may be null on a row
+  // written before these columns existed — leave local state alone for those.
   if (!settingsRes.error && settingsRes.data) {
-    const s = toCamel(settingsRes.data) as { newCardsPerDay: number }
-    useSettingsStore.setState({ newCardsPerDay: s.newCardsPerDay })
+    const s = toCamel(settingsRes.data) as {
+      newCardsPerDay: number
+      fsrsWeights: number[] | null
+      targetRetention: number | null
+      dailyReviewLimit: number | null
+      algorithm: 'sm2' | 'fsrs' | null
+    }
+    useSettingsStore.setState({
+      newCardsPerDay: s.newCardsPerDay,
+      ...(s.fsrsWeights !== null ? { fsrsWeights: s.fsrsWeights } : {}),
+      ...(s.targetRetention !== null ? { fsrsTargetRetention: s.targetRetention } : {}),
+      ...(s.dailyReviewLimit !== null ? { maxReviewsPerDay: s.dailyReviewLimit } : {}),
+      ...(s.algorithm !== null ? { algorithm: s.algorithm } : {}),
+    })
   }
 
   // Seed dirty-tracking with what the server already has, so the next push
@@ -505,6 +519,41 @@ const lastPushedDecks    = new Map<string, string>()
 const lastPushedCards    = new Map<string, string>()
 const lastPushedSessions = new Map<string, string>()
 const pushedLogIds       = new Set<string>()
+
+// Compare-and-swap guard — a device that was offline for a while must not
+// blindly overwrite edits another device already pushed in the meantime.
+// Only push a row if the local updatedAt is newer than or equal to what the
+// server currently has for that id; rows dropped here stay "dirty" in the
+// lastPushedX maps (never marked as pushed), so the next pull picks up the
+// server's newer copy and the next push cycle naturally stops retrying.
+async function dropStaleOverwrites<T extends { id: string; updatedAt: string }>(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  table: 'folders' | 'decks' | 'cards',
+  rows: T[],
+): Promise<T[]> {
+  if (!rows.length) return rows
+  const BATCH = 100
+  const serverUpdatedAt = new Map<string, string>()
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const ids = rows.slice(i, i + BATCH).map((r) => r.id)
+    const res = await supabase.from(table).select('id, updated_at').eq('user_id', userId).in('id', ids)
+    if (res.error) {
+      // Can't verify server state — push anyway rather than silently dropping
+      // a local edit because of a transient read failure.
+      console.error(`[SYNC] pushToSupabase: CAS check failed on "${table}", pushing unconditionally`, formatPgError(res.error))
+      return rows
+    }
+    for (const row of res.data ?? []) {
+      serverUpdatedAt.set((row as { id: string }).id, (row as { updated_at: string }).updated_at)
+    }
+  }
+  return rows.filter((r) => {
+    const serverTs = serverUpdatedAt.get(r.id)
+    if (!serverTs) return true // no server row yet — nothing to clobber
+    return new Date(r.updatedAt).getTime() >= new Date(serverTs).getTime()
+  })
+}
 
 async function pushToSupabase(
   folders: Folder[],
@@ -572,9 +621,18 @@ async function pushToSupabase(
 
   // Dirty filter: only upsert a row if its serialized contents differ from
   // what we last successfully pushed for that id.
-  const foldersToUpsert = folders.filter((f) => lastPushedFolders.get(f.id) !== JSON.stringify(f))
-  const decksToUpsert   = decks.filter((d) => lastPushedDecks.get(d.id) !== JSON.stringify(d))
-  const cardsToUpsert   = cards.filter((c) => lastPushedCards.get(c.id) !== JSON.stringify(c))
+  const foldersDirty = folders.filter((f) => lastPushedFolders.get(f.id) !== JSON.stringify(f))
+  const decksDirty   = decks.filter((d) => lastPushedDecks.get(d.id) !== JSON.stringify(d))
+  const cardsDirty   = cards.filter((c) => lastPushedCards.get(c.id) !== JSON.stringify(c))
+
+  // CAS guard: drop any of the above whose server copy is newer than our
+  // local one (see dropStaleOverwrites doc comment).
+  const [foldersToUpsert, decksToUpsert, cardsToUpsert] = await Promise.all([
+    dropStaleOverwrites(supabase, userId, 'folders', foldersDirty),
+    dropStaleOverwrites(supabase, userId, 'decks', decksDirty),
+    dropStaleOverwrites(supabase, userId, 'cards', cardsDirty),
+  ])
+
   const sessionsToUpsert = sessions.filter((s) => !sessionDeleteSet.has(s.id) && lastPushedSessions.get(s.id) !== JSON.stringify(s))
   const srsToUpsert = Object.values(srsData).filter((s) => {
     if (!activeCardSet.has(s.cardId) || cardDeleteSet.has(s.cardId)) return false
@@ -776,14 +834,33 @@ async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[])
   }
 }
 
-async function pushSettingsToSupabase(newCardsPerDay: number): Promise<void> {
+// The SRS-relevant subset of settings that must schedule cards identically
+// across devices — synced to user_settings with last-write-wins via
+// updated_at, same as every other table.
+export interface SyncedSettings {
+  newCardsPerDay: number
+  fsrsWeights: number[]
+  fsrsTargetRetention: number
+  maxReviewsPerDay: number
+  algorithm: 'sm2' | 'fsrs'
+}
+
+async function pushSettingsToSupabase(settings: SyncedSettings): Promise<void> {
   if (!isSupabaseConfigured()) return
   const supabase = createClient()
   const userId = await getCachedUserId(supabase)
   if (!userId) return
 
   const res = await supabase.from('user_settings').upsert(
-    { user_id: userId, new_cards_per_day: newCardsPerDay, updated_at: new Date().toISOString() },
+    {
+      user_id: userId,
+      new_cards_per_day: settings.newCardsPerDay,
+      fsrs_weights: settings.fsrsWeights,
+      target_retention: settings.fsrsTargetRetention,
+      daily_review_limit: settings.maxReviewsPerDay,
+      algorithm: settings.algorithm,
+      updated_at: new Date().toISOString(),
+    },
     { onConflict: 'user_id' },
   )
   if (res.error) {
@@ -823,6 +900,10 @@ export function useSync(): SyncStatus {
   // triggers this tab's own push, which re-broadcasts, which the other tab
   // re-applies and re-pushes, looping indefinitely between tabs.
   const applyingRemoteRef = useRef(false)
+  // True only for the one tab holding the 'nemos-sync-leader' Web Lock — see
+  // the leader-election effect below. Gates the periodic/visibility pull so
+  // ten open tabs don't all hammer Supabase every 5 minutes.
+  const isLeaderRef = useRef(false)
 
   const handlePush = useCallback(async () => {
     // Offline: skip the push attempt entirely rather than letting it fail and
@@ -937,14 +1018,14 @@ export function useSync(): SyncStatus {
     }
   }, [])
 
-  const handleSettingsPush = useCallback(async (newCardsPerDay: number) => {
+  const handleSettingsPush = useCallback(async (settings: SyncedSettings) => {
     setSyncing(true)
     setError(null)
     try {
-      await pushSettingsToSupabase(newCardsPerDay)
+      await pushSettingsToSupabase(settings)
       syncChannel.current?.postMessage({
         type: 'settings-push-complete',
-        newCardsPerDay,
+        settings,
       })
       setLastSynced(new Date())
     } catch (err) {
@@ -982,9 +1063,9 @@ export function useSync(): SyncStatus {
         return
       }
       if (e.data?.type === 'settings-push-complete') {
-        if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab pushed settings changes, applying locally', e.data.newCardsPerDay)
+        if (DEBUG_SYNC) console.log('[SYNC] BroadcastChannel: another tab pushed settings changes, applying locally', e.data.settings)
         applyingRemoteRef.current = true
-        useSettingsStore.setState({ newCardsPerDay: e.data.newCardsPerDay })
+        useSettingsStore.setState(e.data.settings as SyncedSettings)
         applyingRemoteRef.current = false
         return
       }
@@ -1078,7 +1159,14 @@ export function useSync(): SyncStatus {
           if (examState.exams.length || examState.pendingDeletedExams.length) {
             handleExamsPush(examState.exams, examState.pendingDeletedExams)
           }
-          handleSettingsPush(useSettingsStore.getState().newCardsPerDay)
+          const settingsState = useSettingsStore.getState()
+          handleSettingsPush({
+            newCardsPerDay: settingsState.newCardsPerDay,
+            fsrsWeights: settingsState.fsrsWeights,
+            fsrsTargetRetention: settingsState.fsrsTargetRetention,
+            maxReviewsPerDay: settingsState.maxReviewsPerDay,
+            algorithm: settingsState.algorithm,
+          })
         } else if (DEBUG_SYNC) {
           console.log('[SYNC] useSync mount: initial pull done but component was cancelled/unmounted')
         }
@@ -1115,6 +1203,50 @@ export function useSync(): SyncStatus {
       window.removeEventListener('offline', handleOffline)
     }
   }, [handlePush])
+
+  // Leader election — exactly one open tab holds the 'nemos-sync-leader' Web
+  // Lock at a time (auto-released on tab close/reload), so periodic/visibility
+  // pulls below fire once across all tabs instead of once per tab. Realtime +
+  // BroadcastChannel already keep non-leader tabs current between pulls.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+      // No Web Locks support — assume single-tab usage rather than never pulling.
+      isLeaderRef.current = true
+      return
+    }
+    let releaseLock: (() => void) | null = null
+    navigator.locks.request('nemos-sync-leader', () => {
+      isLeaderRef.current = true
+      if (DEBUG_SYNC) console.log('[SYNC] this tab elected leader')
+      return new Promise<void>((resolve) => { releaseLock = resolve })
+    }).catch(() => {})
+    return () => {
+      isLeaderRef.current = false
+      releaseLock?.()
+    }
+  }, [])
+
+  // Periodic + visibility-triggered incremental pull — without this, a tab left
+  // open all day only learns about another device's reviews via the review_logs
+  // realtime feed, never the fsrs_data/srs_data scheduling changes that go with
+  // them, so its due queue silently drifts until a manual reload.
+  useEffect(() => {
+    function incrementalPullIfLeader() {
+      if (!isLeaderRef.current) return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+      if (DEBUG_SYNC) console.log('[SYNC] leader tab: periodic/visibility incremental pull')
+      pullFromSupabase()
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') incrementalPullIfLeader()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    const intervalId = setInterval(incrementalPullIfLeader, 5 * 60 * 1000)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      clearInterval(intervalId)
+    }
+  }, [])
 
   // Subscribe to library store changes with a 400ms debounce
   useEffect(() => {
@@ -1184,13 +1316,20 @@ export function useSync(): SyncStatus {
   }, [handleExamsPush])
 
   // Subscribe to settings store changes with a 400ms debounce — only the
-  // daily new-card limit is synced; other settings fields stay local-only.
+  // SRS-relevant fields (newCardsPerDay, fsrsWeights, fsrsTargetRetention,
+  // maxReviewsPerDay, algorithm) are synced; everything else stays local-only.
   useEffect(() => {
     const unsub = useSettingsStore.subscribe((state) => {
       if (!mountedRef.current || applyingRemoteRef.current) return
       if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current)
       settingsDebounceRef.current = setTimeout(() => {
-        handleSettingsPush(state.newCardsPerDay)
+        handleSettingsPush({
+          newCardsPerDay: state.newCardsPerDay,
+          fsrsWeights: state.fsrsWeights,
+          fsrsTargetRetention: state.fsrsTargetRetention,
+          maxReviewsPerDay: state.maxReviewsPerDay,
+          algorithm: state.algorithm,
+        })
       }, 400)
     })
     return () => {
