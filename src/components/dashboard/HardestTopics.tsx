@@ -36,25 +36,28 @@ export function HardestTopics() {
   }, [decks, cards, fsrsData, getDeckMastery])
 
   return (
-    <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
-        <AlertTriangle size={13} className="text-[var(--warning)]" />
-        <h2 className="meta-label text-[var(--text-secondary)]">Hardest Topics</h2>
+    <div className="card-surface p-8">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="meta-label text-[var(--text-secondary)]">Focus Areas</h2>
+        <AlertTriangle size={16} className="text-[var(--warning)]" />
       </div>
 
       {ranked.length === 0 ? (
-        <div className="px-4 py-6 text-center text-xs text-[var(--text-muted)]">
+        <div className="py-8 text-center text-sm text-[var(--text-muted)]">
           No decks yet — add cards to see your weakest areas
         </div>
       ) : (
-        <div className="divide-y divide-[var(--border)]">
+        <div className="space-y-5">
           {ranked.map(({ deck, mastery }) => (
-            <div key={deck.id} className="px-4 py-2.5 hover:bg-[var(--bg-hover)] transition-colors">
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-xs font-medium text-[var(--text-primary)] truncate">{deck.name}</p>
-                <span className="font-mono text-xs font-semibold text-[var(--danger)] ml-2 shrink-0">{mastery}%</span>
+            <div key={deck.id}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[15px] font-medium text-[var(--text-primary)] truncate">{deck.name}</p>
+                <span className={`font-mono text-[11px] ml-2 shrink-0 ${mastery < 40 ? 'text-[var(--danger)]' : mastery < 70 ? 'text-[var(--warning)]' : 'text-[var(--success)]'}`}>
+                  {mastery < 40 ? 'Low Mastery' : mastery < 70 ? 'Needs Review' : 'Stable'}
+                </span>
               </div>
               <Progress value={mastery} color={mastery < 40 ? 'danger' : mastery < 70 ? 'warning' : 'success'} size="sm" />
+              <p className="font-mono text-[11px] text-[var(--text-muted)] mt-1.5">M: {mastery}%</p>
             </div>
           ))}
         </div>

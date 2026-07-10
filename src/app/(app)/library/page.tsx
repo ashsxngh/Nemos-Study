@@ -23,7 +23,6 @@ export default function LibraryPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Header
-        title="Library"
         actions={
           <>
             <Link href="/import">

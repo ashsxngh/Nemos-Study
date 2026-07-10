@@ -348,7 +348,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
   // ── Past: unrated → rating UI ──────────────────────────────────────────────
   if (isPast && !exam.rating) {
     return (
-      <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
+      <div className="card-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-[var(--border)] flex items-center gap-3">
           <div>
             <p className="text-xs font-semibold text-[var(--text-primary)]">{exam.name}</p>
@@ -384,7 +384,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
       ? Math.round(exam.predictedRetentionAtExam * 100)
       : retPct
     return (
-      <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] px-4 py-3 flex items-center justify-between">
+      <div className="card-surface px-4 py-3 flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold text-[var(--text-primary)]">{exam.name}</p>
           <p className="text-[10px] text-[var(--text-muted)]">{exam.subject} · {dateLabel}</p>
@@ -405,11 +405,11 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
 
   // ── Upcoming: mission-control card ────────────────────────────────────────
   return (
-    <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
+    <div className="card-surface overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{exam.name}</p>
+          <p className="text-base font-semibold text-[var(--text-primary)] truncate">{exam.name}</p>
           <p className="text-[10px] text-[var(--text-muted)]">{exam.subject} · {dateLabel}</p>
         </div>
         <button
@@ -641,12 +641,12 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
   void folders
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-[1200px] mx-auto space-y-6">
       {/* Add exam form */}
       {showExamForm && (
         <div className="bg-[var(--bg-surface)] border border-[var(--accent)] rounded-[var(--radius)] p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">New Exam</h3>
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">New Exam</h3>
             <button onClick={() => { setShowExamForm(false); onExamAdded?.() }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
               <X size={14} />
             </button>
@@ -681,9 +681,9 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
         {/* Left: calendar + exam cards */}
         <div className="lg:col-span-2 space-y-5">
           {/* Calendar */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
                 {MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}
               </h2>
               <div className="flex items-center gap-1">
@@ -759,7 +759,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
 
           {/* Empty state */}
           {upcomingExams.length === 0 && pastExams.length === 0 && (
-            <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-8 text-center space-y-2">
+            <div className="card-surface p-8 text-center space-y-2">
               <p className="text-sm text-[var(--text-muted)]">No exams yet.</p>
               <button onClick={() => setShowExamForm(true)} className="text-xs text-[var(--accent)] hover:underline">
                 Add your first exam →
@@ -771,10 +771,10 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
         {/* Right panel */}
         <div className="space-y-4">
           {/* Pomodoro */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4 text-center">
+          <div className="card-surface p-5 text-center">
             <div className="flex items-center justify-center gap-2 mb-1">
               <Timer size={13} className="text-[var(--text-muted)]" />
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Pomodoro</h3>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Pomodoro</h3>
             </div>
             <p className="text-[10px] text-[var(--text-muted)] mb-3 capitalize">{pomodoroMode} session</p>
             <div className="text-4xl font-mono font-bold text-[var(--text-primary)] mb-4 tabular-nums">
@@ -791,10 +791,10 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
           </div>
 
           {/* Tasks */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
+          <div className="card-surface overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
               <CheckSquare size={13} className="text-[var(--text-muted)]" />
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Today&apos;s Tasks</h3>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Today&apos;s Tasks</h3>
             </div>
             <div className="divide-y divide-[var(--border)]">
               {tasks.map((task) => (

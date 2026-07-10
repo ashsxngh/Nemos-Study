@@ -96,19 +96,35 @@ export function StreakHeatmap() {
   ).length
 
   return (
-    <div className="mb-6">
+    <div className="card-surface p-8 mb-6">
+      {/* Card header: mono section label + intensity legend (Stitch heatmap card) */}
+      <div className="flex items-center justify-between mb-6">
+        <span className="meta-label text-[var(--text-secondary)]">Study Activity</span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] text-[var(--text-muted)]">Less</span>
+          {[0, 3, 10, 20, 40].map((v) => (
+            <div
+              key={v}
+              className={cn('rounded-[2px]', intensityClass(v))}
+              style={{ width: '12px', height: '12px' }}
+            />
+          ))}
+          <span className="font-mono text-[11px] text-[var(--text-muted)]">More</span>
+        </div>
+      </div>
+
       {/* Month labels */}
       <div className="overflow-x-auto">
         <div style={{ minWidth: 'max-content' }}>
           {/* Month header row */}
-          <div className="flex mb-1 ml-8">
+          <div className="flex mb-1.5 ml-9">
             {monthPositions.map(({ label, col }, i) => {
               const nextCol = monthPositions[i + 1]?.col ?? weeks.length
-              const width = (nextCol - col) * 12 // 10px cell + 2px gap
+              const width = (nextCol - col) * 15 // 12px cell + 3px gap
               return (
                 <div
                   key={label}
-                  className="text-[10px] text-[var(--text-muted)] truncate"
+                  className="font-mono text-[10px] text-[var(--text-muted)] truncate"
                   style={{ width: `${width}px`, minWidth: 0 }}
                 >
                   {label}
@@ -120,12 +136,12 @@ export function StreakHeatmap() {
           {/* Heatmap grid */}
           <div className="flex gap-0">
             {/* Day labels */}
-            <div className="flex flex-col mr-1">
+            <div className="flex flex-col mr-1.5">
               {DAY_LABELS.map((d, i) => (
                 <div
                   key={i}
-                  className="text-[10px] text-[var(--text-muted)] flex items-center justify-end pr-1"
-                  style={{ height: '12px', marginBottom: '2px' }}
+                  className="font-mono text-[10px] text-[var(--text-muted)] flex items-center justify-end pr-1"
+                  style={{ height: '12px', marginBottom: '3px' }}
                 >
                   {d}
                 </div>
@@ -133,9 +149,9 @@ export function StreakHeatmap() {
             </div>
 
             {/* Columns (weeks) */}
-            <div className="flex gap-[2px]">
+            <div className="flex gap-[3px]">
               {weeks.map((week, wi) => (
-                <div key={wi} className="flex flex-col gap-[2px]">
+                <div key={wi} className="flex flex-col gap-[3px]">
                   {week.map(({ date, count }, di) => (
                     <div
                       key={di}
@@ -146,7 +162,7 @@ export function StreakHeatmap() {
                           ? 'opacity-0'
                           : cn('hover:opacity-80', intensityClass(count))
                       )}
-                      style={{ width: '10px', height: '10px' }}
+                      style={{ width: '12px', height: '12px' }}
                     />
                   ))}
                 </div>
@@ -156,25 +172,12 @@ export function StreakHeatmap() {
         </div>
       </div>
 
-      {/* Summary + legend */}
-      <div className="flex items-center justify-between mt-3">
-        <p className="text-xs text-[var(--text-muted)]">
-          {totalReviews > 0
-            ? `${totalReviews} reviews over ${activeDays} active days`
-            : 'No reviews yet this year'}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-[var(--text-muted)]">Less</span>
-          {[0, 3, 10, 20, 40].map((v) => (
-            <div
-              key={v}
-              className={cn('rounded-[2px]', intensityClass(v))}
-              style={{ width: '10px', height: '10px' }}
-            />
-          ))}
-          <span className="text-[10px] text-[var(--text-muted)]">More</span>
-        </div>
-      </div>
+      {/* Summary */}
+      <p className="font-mono text-[11px] text-[var(--text-muted)] mt-4">
+        {totalReviews > 0
+          ? `${totalReviews} reviews over ${activeDays} active days`
+          : 'No reviews yet this year'}
+      </p>
     </div>
   )
 }

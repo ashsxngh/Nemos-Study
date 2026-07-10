@@ -80,11 +80,11 @@ export function StatsOverview({ period }: StatsOverviewProps) {
   ]
 
   return (
-    <div className="flex items-stretch divide-x divide-[var(--border)] mb-8">
-      {stats.map(({ label, value }, i) => (
-        <div key={label} className={i === 0 ? 'pr-8' : 'px-8'}>
-          <p className="meta-label text-[var(--text-muted)] mb-1.5">{label}</p>
-          <p className="text-3xl font-bold text-[var(--text-primary)] leading-none">{value}</p>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {stats.map(({ label, value }) => (
+        <div key={label} className="card-surface card-hover p-7">
+          <p className="meta-label text-[var(--text-secondary)] mb-5">{label}</p>
+          <p className="text-[2.75rem] font-semibold tracking-tight text-[var(--text-primary)] leading-none">{value}</p>
         </div>
       ))}
     </div>

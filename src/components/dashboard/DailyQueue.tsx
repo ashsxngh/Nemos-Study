@@ -48,41 +48,42 @@ export function DailyQueue() {
   if (total === 0) return null
 
   return (
-    <div className="mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
+    <div className="card-surface p-8 mb-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
           <h3 className="meta-label text-[var(--text-secondary)]">Due now</h3>
-          <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+          <div className="flex items-center gap-2.5 font-mono text-[11px] text-[var(--text-muted)]">
             {totalNew > 0 && (
-              <span className="flex items-center gap-1 text-[var(--accent)]">
-                <Sparkles size={10} />
+              <span className="flex items-center gap-1.5 text-[var(--accent)]">
+                <Sparkles size={12} />
                 {totalNew} new
               </span>
             )}
             {totalNew > 0 && totalReviews > 0 && <span>·</span>}
             {totalReviews > 0 && (
-              <span className="flex items-center gap-1 text-[var(--success)]">
-                <RefreshCw size={10} />
+              <span className="flex items-center gap-1.5 text-[var(--success)]">
+                <RefreshCw size={12} />
                 {totalReviews} reviews
               </span>
             )}
           </div>
         </div>
         <Link href="/study/session">
-          <Button variant="primary" size="sm" icon={<Play size={11} />}>
+          <Button variant="primary" size="md" icon={<Play size={14} />}>
             Start Inbox
           </Button>
         </Link>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-3">
         {decksWithDue.slice(0, 5).map(({ deck, newCount, reviewCount }) => (
           <div
             key={deck.id}
-            className="flex items-center justify-between py-1.5 text-sm"
+            className="flex items-center gap-3 p-3 rounded-lg bg-[var(--bg-raised)] hover:bg-[var(--bg-active)] transition-colors group"
           >
-            <span className="text-[var(--text-secondary)] truncate">{deck.name}</span>
+            <div className={`w-2 h-2 rounded-full shrink-0 ${newCount > 0 ? 'bg-[var(--accent)]' : 'bg-[var(--success)]'}`} />
+            <span className="flex-1 text-[15px] text-[var(--text-primary)] truncate group-hover:text-[var(--accent)] transition-colors">{deck.name}</span>
             <div className="flex items-center gap-3 shrink-0 ml-4">
-              <div className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <div className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--text-muted)]">
                 {newCount > 0 && (
                   <span className="text-[var(--accent)]">{newCount} new</span>
                 )}
@@ -92,7 +93,7 @@ export function DailyQueue() {
                 )}
               </div>
               <Link href={`/study/session?deck=${deck.id}`}>
-                <Button variant="ghost" size="xs" icon={<Play size={10} />}>
+                <Button variant="ghost" size="sm" icon={<Play size={12} />}>
                   Study
                 </Button>
               </Link>

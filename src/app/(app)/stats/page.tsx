@@ -22,14 +22,13 @@ export default function StatsRoute() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Header
-        title="Stats & Analytics"
         actions={
-          <Button variant="ghost" size="sm" icon={<Download size={13} />} onClick={handleExport}>
+          <Button variant="secondary" size="sm" icon={<Download size={14} />} onClick={handleExport}>
             Export
           </Button>
         }
       />
-      <main className="flex-1 overflow-y-auto p-5">
+      <main className="flex-1 overflow-y-auto px-6 py-6">
         <StatsPage />
       </main>
     </div>

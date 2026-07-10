@@ -84,18 +84,20 @@ export function PeriodStats({ period }: PeriodStatsProps) {
   ]
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-0 mt-6 divide-x divide-[var(--border)]">
-      {stats.map(({ label: statLabel, value, prev }, i) => (
-        <div key={statLabel} className={i === 0 ? 'pr-6' : 'px-6'}>
-          <p className="meta-label text-[var(--text-muted)] mb-1.5">{statLabel}</p>
-          <p className="text-2xl font-bold text-[var(--text-primary)] leading-none mb-1">{value}</p>
-          {prev !== null && (
-            <p className="text-xs text-[var(--text-muted)]">
-              {prev} {prevLabel}
-            </p>
-          )}
-        </div>
-      ))}
+    <div className="card-surface p-8 mt-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-0 divide-x divide-[var(--border)]">
+        {stats.map(({ label: statLabel, value, prev }, i) => (
+          <div key={statLabel} className={`text-center ${i === 0 ? 'pr-6' : 'px-6'}`}>
+            <p className="meta-label text-[var(--text-secondary)] mb-3">{statLabel}</p>
+            <p className="text-3xl font-semibold tracking-tight text-[var(--text-primary)] leading-none mb-2">{value}</p>
+            {prev !== null && (
+              <p className="font-mono text-[11px] text-[var(--text-muted)]">
+                {prev} {prevLabel}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

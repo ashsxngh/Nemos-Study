@@ -18,7 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={`dark h-full ${inter.variable} ${jetbrainsMono.variable}`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#131315" />
+        <meta name="theme-color" content="#0f0f11" />
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="h-full" suppressHydrationWarning>

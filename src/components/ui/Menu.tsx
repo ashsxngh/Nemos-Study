@@ -48,7 +48,7 @@ export function MenuItemRow({ item, onDone, dense }: { item: MenuItem; onDone: (
       }}
       className={cn(
         'w-full flex items-center gap-2 text-left transition-colors',
-        dense ? 'px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]' : 'px-3 h-8 text-sm hover:bg-[var(--bg-hover)]',
+        dense ? 'px-3.5 py-2 text-[13px] hover:bg-[var(--bg-hover)]' : 'px-4 h-10 text-sm hover:bg-[var(--bg-hover)]',
         item.danger ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'
       )}
     >

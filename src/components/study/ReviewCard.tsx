@@ -74,7 +74,7 @@ function CardContent({ content }: { content: string }) {
       rehypePlugins={[[rehypeKatex, { strict: false }]]}
       components={{
         p: ({ children }) => (
-          <p className="leading-relaxed text-base text-[var(--text-primary)]">{children}</p>
+          <p className="leading-[1.6] text-[18px] text-[var(--text-primary)]">{children}</p>
         ),
         code: ({ children, className }) => {
           const isBlock = className?.includes('language-')
@@ -176,11 +176,11 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
 
   return (
     <div className={cn('w-full', className)}>
-      {/* Question section */}
-      <div className="p-6 text-[var(--text-primary)]">
+      {/* Question section — Stitch mandates ≥32px padding inside study cards */}
+      <div className="p-8 text-[var(--text-primary)]">
         {card.type === 'cloze' ? (
           <>
-            <p className="text-lg leading-relaxed mb-4">
+            <p className="text-[18px] leading-[1.6] mb-4">
               {parseCloze(card.front, false)}
             </p>
 
@@ -256,7 +256,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
 
       {/* Answer section */}
       {showAnswer && (
-        <div className="animate-fade-in border-t border-[var(--border)] bg-[var(--bg-surface)] p-6">
+        <div className="animate-fade-in border-t border-[var(--border)] p-8">
 
           {/* Typed result feedback */}
           {card.type === 'typed' && answerChecked && (
@@ -302,7 +302,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
           )}
 
           {card.type === 'cloze' ? (
-            <p className="text-base leading-relaxed text-[var(--text-primary)]">
+            <p className="text-[18px] leading-[1.6] text-[var(--text-primary)]">
               {parseCloze(card.back?.trim() ? card.back : card.front, true)}
             </p>
           ) : isImage ? (

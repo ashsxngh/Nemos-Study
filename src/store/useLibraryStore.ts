@@ -207,11 +207,11 @@ export const useLibraryStore = create<LibraryState>()(
           cards: cards.filter((c) => !cardIdsToDelete.includes(c.id)),
           fsrsData: newFsrsData,
           pendingDeletes: {
-            folders: [...pendingDeletes.folders, ...allFolderIds],
-            decks: [...pendingDeletes.decks, ...deckIdsToDelete],
-            cards: [...pendingDeletes.cards, ...cardIdsToDelete],
-            sessions: [...pendingDeletes.sessions, ...sessionIds],
-            reviewLogs: [...pendingDeletes.reviewLogs, ...logIds],
+            folders: [...(pendingDeletes.folders ?? []), ...allFolderIds],
+            decks: [...(pendingDeletes.decks ?? []), ...deckIdsToDelete],
+            cards: [...(pendingDeletes.cards ?? []), ...cardIdsToDelete],
+            sessions: [...(pendingDeletes.sessions ?? []), ...sessionIds],
+            reviewLogs: [...(pendingDeletes.reviewLogs ?? []), ...logIds],
           },
         })
       },
@@ -284,11 +284,11 @@ export const useLibraryStore = create<LibraryState>()(
           cards: s.cards.filter((c) => c.deckId !== id),
           fsrsData: newFsrsData,
           pendingDeletes: {
-            ...s.pendingDeletes,
-            decks: [...s.pendingDeletes.decks, id],
-            cards: [...s.pendingDeletes.cards, ...cardIdsToDelete],
-            sessions: [...s.pendingDeletes.sessions, ...sessionIds],
-            reviewLogs: [...s.pendingDeletes.reviewLogs, ...logIds],
+            folders: s.pendingDeletes.folders ?? [],
+            decks: [...(s.pendingDeletes.decks ?? []), id],
+            cards: [...(s.pendingDeletes.cards ?? []), ...cardIdsToDelete],
+            sessions: [...(s.pendingDeletes.sessions ?? []), ...sessionIds],
+            reviewLogs: [...(s.pendingDeletes.reviewLogs ?? []), ...logIds],
           },
         }))
       },
@@ -725,6 +725,26 @@ export const useLibraryStore = create<LibraryState>()(
     {
       name: 'nemos-library',
       skipHydration: true,
+      // State persisted before the `sessions`/`reviewLogs` buckets were added
+      // carries a pendingDeletes object without them; the default shallow
+      // merge would adopt that incomplete object wholesale, leaving the
+      // missing arrays undefined and crashing the first delete that spreads
+      // them. Normalize the shape on every rehydrate.
+      merge: (persisted, current) => {
+        const p = persisted as Partial<LibraryState> | undefined
+        const pd = p?.pendingDeletes as Partial<PendingDeletes> | undefined
+        return {
+          ...current,
+          ...p,
+          pendingDeletes: {
+            folders: pd?.folders ?? [],
+            decks: pd?.decks ?? [],
+            cards: pd?.cards ?? [],
+            sessions: pd?.sessions ?? [],
+            reviewLogs: pd?.reviewLogs ?? [],
+          },
+        }
+      },
       // IDB has no practical size limit — localStorage caps at ~5–10 MB which
       // is too small for large decks (20k cards ≈ 16 MB). createIDBStorage()
       // also auto-migrates existing localStorage data on first read.

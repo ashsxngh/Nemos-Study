@@ -36,17 +36,17 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
-            <BookOpen size={22} className="text-[var(--accent-fg)]" />
+        <div className="flex flex-col items-center gap-4 mb-8">
+          <div className="w-14 h-14 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center shadow-lg shadow-[var(--accent)]/20">
+            <BookOpen size={26} className="text-[var(--accent-fg)]" />
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
-            <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+            <p className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+            <p className="meta-label text-[var(--text-muted)] mt-1">Deep Focus Learning</p>
           </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8">
+        <div className="card-surface rounded-[var(--radius-lg)] p-8">
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Email Address</label>

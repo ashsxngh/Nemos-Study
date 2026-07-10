@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Focus,
   X,
+  ChevronRight,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStudyStore } from '@/store/useStudyStore'
@@ -858,17 +859,16 @@ function SessionContent() {
     const missedN = firstPassMissedCards.length
 
     return (
-      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
-        <div className="w-full max-w-sm animate-fade-in space-y-4">
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="p-7 text-center space-y-2">
-              <p className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                You remembered {rememberedPct}% of cards.
-              </p>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Review the cards you missed again.
-              </p>
-            </div>
+      <div className="flex flex-col items-center justify-center flex-1 p-6 focus-gradient">
+        <div className="w-full max-w-[560px] animate-fade-in space-y-6">
+          <div className="text-center space-y-2">
+            <p className="meta-label text-[var(--text-muted)]">Session Checkpoint</p>
+            <p className="text-[28px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+              You remembered <span style={{ color: 'var(--accent)' }}>{rememberedPct}%</span> of cards.
+            </p>
+            <p className="text-[15px]" style={{ color: 'var(--text-secondary)' }}>
+              Review the cards you missed again while the concepts are fresh.
+            </p>
           </div>
           <button
             onClick={() => {
@@ -876,15 +876,16 @@ function SessionContent() {
               setSessionPhase('retry')
               setMissedReviewCount(0)
             }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
+            className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
             style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
           >
+            <RotateCcw size={16} />
             Review missed cards ({missedN})
           </button>
           <button
             onClick={() => setSessionPhase('retry')}
-            className="w-full text-center text-sm py-1"
-            style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+            className="w-full text-center text-[15px] py-4 rounded-[var(--radius-lg)] transition-colors hover:bg-[var(--bg-hover)]"
+            style={{ color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}
           >
             Skip and finish
           </button>
@@ -903,38 +904,46 @@ function SessionContent() {
     const elapsed = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : 0
 
     return (
-      <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
-        <div className="w-full max-w-sm animate-fade-in space-y-5">
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="p-6 text-center space-y-1">
-              <div className="text-3xl mb-3">🎉</div>
-              <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Session Complete</h1>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Great work!
-              </p>
-            </div>
-            <div className="border-t grid grid-cols-2" style={{ borderColor: 'var(--border)' }}>
-              {[
-                { label: 'Reviewed', value: totalLogged },
-                { label: 'Correct', value: correct },
-                { label: 'Accuracy', value: `${accuracy}%` },
-                { label: 'Time', value: formatDuration(elapsed) },
-              ].map(({ label, value }, i) => (
-                <div key={label} className={cn('p-4', i % 2 === 0 ? 'border-r' : '', i < 2 ? 'border-b' : '')} style={{ borderColor: 'var(--border)' }}>
-                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{value}</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
-                </div>
-              ))}
-            </div>
-            <div className="p-4 border-t" style={{ borderColor: 'var(--border)' }}>
-              <div className="flex justify-between mb-1.5">
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Accuracy</span>
-                <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{accuracy}%</span>
-              </div>
-              <Progress value={accuracy} max={100} color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
-            </div>
+      <div className="flex flex-col items-center justify-center flex-1 p-6 focus-gradient">
+        <div className="w-full max-w-[640px] animate-fade-in space-y-6">
+          {/* Header — Stitch session summary */}
+          <div className="text-center space-y-2">
+            <p className="meta-label text-[var(--text-muted)]">Session Summary</p>
+            <h1 className="text-[28px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+              You&apos;ve completed your review{deckName && deckName !== 'All cards' ? ' of ' : '.'}
+              {deckName && deckName !== 'All cards' && <span style={{ color: 'var(--accent)' }}>{deckName}</span>}
+            </h1>
           </div>
-          <div className="flex flex-col gap-2">
+
+          {/* Stat tiles — mono labels, display numbers */}
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Accuracy', value: `${accuracy}%`, accent: true },
+              { label: 'Cards', value: String(totalLogged), sub: `${formatDuration(elapsed)} elapsed` },
+              { label: 'Correct', value: String(correct) },
+            ].map(({ label, value, sub, accent }) => (
+              <div key={label} className="card-surface p-6 text-center">
+                <p className="meta-label text-[var(--text-secondary)] mb-3">{label}</p>
+                <p className="text-[2.25rem] font-semibold tracking-tight leading-none" style={{ color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>
+                  {value}
+                </p>
+                {sub && <p className="font-mono text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
+              </div>
+            ))}
+          </div>
+
+          {/* Recall breakdown bar */}
+          <div className="card-surface p-6">
+            <div className="flex justify-between mb-3">
+              <span className="font-mono text-[13px]" style={{ color: 'var(--text-secondary)' }}>Recall Breakdown</span>
+              <span className="font-mono text-[13px]" style={{ color: totalLogged - correct > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                {totalLogged - correct} {totalLogged - correct === 1 ? 'card' : 'cards'} missed
+              </span>
+            </div>
+            <Progress value={accuracy} max={100} size="lg" color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
+          </div>
+
+          <div className="flex flex-col gap-3">
             <button
               onClick={() => {
                 const cards = buildQueue()
@@ -954,18 +963,18 @@ function SessionContent() {
                 setMissedReviewCount(0)
                 setSessionPhase('first')
               }}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
               style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
             >
-              <RotateCcw size={14} />
+              <RotateCcw size={16} />
               Review Again
             </button>
             <button
               onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] transition-colors hover:bg-[var(--bg-hover)]"
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
-              <ArrowLeft size={14} />
+              <ArrowLeft size={16} />
               Back to Study
             </button>
           </div>
@@ -1018,14 +1027,23 @@ function SessionContent() {
     .filter((l) => l.cardId === currentCard.id)
     .sort((a, b) => new Date(b.reviewedAt).getTime() - new Date(a.reviewedAt).getTime())
 
+  // Queue progress for the Stitch top-right ring — same position data as the
+  // old "N / M" counter, expressed as a percentage.
+  const queuePct = queue.length > 0 ? Math.round((currentIndex / queue.length) * 100) : 0
+
   return (
     <div
-      className={cn('flex flex-col', zenMode ? 'fixed inset-0 z-50' : 'h-full')}
-      style={{ background: 'var(--bg-base)' }}
+      className={cn('flex flex-col focus-gradient relative', zenMode ? 'fixed inset-0 z-50' : 'h-full')}
     >
+      {/* ── Atmosphere glows (Stitch session backdrop) ── */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden>
+        <div className="absolute top-1/4 -right-20 w-96 h-96 rounded-full" style={{ background: 'color-mix(in srgb, var(--accent) 5%, transparent)', filter: 'blur(120px)' }} />
+        <div className="absolute bottom-1/4 -left-20 w-96 h-96 rounded-full" style={{ background: 'color-mix(in srgb, var(--warning) 5%, transparent)', filter: 'blur(120px)' }} />
+      </div>
+
       {/* ── Progress bar ── */}
       {showSessionProgress && !zenMode && (
-        <div className="h-[3px] w-full shrink-0 flex" style={{ background: 'var(--border)' }}>
+        <div className="h-[3px] w-full shrink-0 flex relative z-10" style={{ background: 'var(--border)' }}>
           <div
             className="h-full transition-all duration-300"
             style={{ width: `${greenPct}%`, background: 'var(--success)' }}
@@ -1037,87 +1055,115 @@ function SessionContent() {
         </div>
       )}
 
-      {/* ── Top bar ── */}
+      {/* ── Top bar — Stitch: h-16 borderless translucent, breadcrumb left,
+             Focus Mode center, Session Progress ring right ── */}
       {!zenMode && (
-      <div
-        className="flex items-center h-11 px-4 gap-3 shrink-0"
-        style={{ background: 'var(--bg-base)', borderBottom: '1px solid var(--border)' }}
-      >
-        <button
-          onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: 'var(--text-muted)' }}
-          title="Exit session"
-        >
-          <ArrowLeft size={15} />
-        </button>
-        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-          {deckName}
-        </span>
-
-        {isCurrentCardNew && (
-          <span
-            className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
+      <div className="flex items-center h-16 px-6 gap-4 shrink-0 relative z-10 bg-[var(--bg-base)]/80 backdrop-blur-md">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <button
+            onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
+            className="flex items-center justify-center w-10 h-10 rounded-full transition-colors hover:bg-[var(--bg-active)] active:scale-95 duration-150 shrink-0"
+            style={{ color: 'var(--text-secondary)' }}
+            title="Exit session"
           >
-            NEW
+            <ArrowLeft size={19} />
+          </button>
+          <span className="font-mono text-[13px] font-medium truncate" style={{ color: 'var(--text-secondary)' }}>
+            {deckName}
           </span>
-        )}
 
-        <div className="flex-1" />
-
-        {/* Mistake counter badge — hidden until first miss */}
-        {missedReviewCount > 0 && (
-          <span
-            className="font-mono text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
-          >
-            ✕ {missedReviewCount}
-          </span>
-        )}
-
-        {/* Daily progress */}
-        <div
-          className="hidden md:flex items-center gap-2 mr-1"
-          title={`${todayReviewCount} of ${dailyCardTarget} cards studied today`}
-        >
-          <span className="font-mono text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
-            Today
-          </span>
-          <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{ width: `${dailyPct}%`, background: 'var(--accent)' }}
-            />
-          </div>
-          <span className="text-[10px] tabular-nums font-semibold" style={{ color: 'var(--accent)' }}>
-            {dailyPct}%
-          </span>
+          {isCurrentCardNew && (
+            <>
+              <ChevronRight size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+              <span
+                className="font-mono text-[10px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full shrink-0"
+                style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
+              >
+                New
+              </span>
+            </>
+          )}
         </div>
 
-        <button
-          onClick={() => setZenMode(true)}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: 'var(--text-muted)' }}
-          title="Zen mode (Z)"
-        >
-          <Focus size={14} />
-        </button>
+        {/* Center: Focus Mode + shuffle */}
+        <div className="flex items-center gap-1 justify-center">
+          <button
+            onClick={() => setZenMode(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--bg-hover)] group"
+            style={{ color: 'var(--text-secondary)' }}
+            title="Zen mode (Z)"
+          >
+            <Focus size={17} className="group-hover:text-[var(--accent)] transition-colors" />
+            <span className="font-mono text-[11px] font-medium">Focus Mode</span>
+          </button>
+          <button
+            onClick={handleShuffle}
+            className="flex items-center justify-center w-10 h-10 rounded-full transition-colors hover:bg-[var(--bg-hover)]"
+            style={{ color: 'var(--text-muted)' }}
+            title="Shuffle remaining"
+          >
+            <Shuffle size={16} />
+          </button>
+        </div>
 
-        <button
-          onClick={handleShuffle}
-          className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: 'var(--text-muted)' }}
-          title="Shuffle remaining"
-        >
-          <Shuffle size={14} />
-        </button>
+        <div className="flex items-center gap-4 flex-1 justify-end min-w-0">
+          {/* Mistake counter badge — hidden until first miss */}
+          {missedReviewCount > 0 && (
+            <span
+              className="font-mono text-[11px] font-semibold tabular-nums px-2 py-1 rounded-[var(--radius-sm)]"
+              style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
+            >
+              ✕ {missedReviewCount}
+            </span>
+          )}
 
-        {deckId && (
-          <span className="text-xs tabular-nums font-medium" style={{ color: 'var(--text-muted)' }}>
-            {currentIndex + 1} / {queue.length}
-          </span>
-        )}
+          {/* Daily progress */}
+          <div
+            className="hidden md:flex items-center gap-2"
+            title={`${todayReviewCount} of ${dailyCardTarget} cards studied today`}
+          >
+            <span className="font-mono text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
+              Today
+            </span>
+            <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{ width: `${dailyPct}%`, background: 'var(--accent)' }}
+              />
+            </div>
+            <span className="font-mono text-[10px] tabular-nums font-semibold" style={{ color: 'var(--accent)' }}>
+              {dailyPct}%
+            </span>
+          </div>
+
+          {/* Session Progress — mono label + % + ring (Stitch top-right cluster) */}
+          {deckId && (
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex flex-col items-end">
+                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  Session Progress
+                </span>
+                <span className="font-mono text-lg font-semibold leading-none mt-0.5" style={{ color: 'var(--accent)' }}>
+                  {queuePct}%
+                </span>
+              </div>
+              <div className="relative flex items-center justify-center w-10 h-10">
+                <svg className="w-full h-full" viewBox="0 0 36 36">
+                  <path
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none" strokeWidth="3" stroke="var(--bg-active)"
+                  />
+                  <path
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none" strokeWidth="3" stroke="var(--accent)" strokeLinecap="round"
+                    strokeDasharray={`${queuePct}, 100`}
+                    style={{ transition: 'stroke-dasharray 0.35s' }}
+                  />
+                </svg>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       )}
 
@@ -1134,9 +1180,9 @@ function SessionContent() {
         </button>
       )}
 
-      {/* ── Scrollable card area ── */}
-      <div className="flex-1 px-4 py-6 overflow-y-auto">
-        <div className={cn('w-full max-w-2xl mx-auto', zenMode ? 'pt-12' : 'pt-6')}>
+      {/* ── Scrollable card area ── Stitch: card floats centered in a vast focus space */}
+      <div className="flex-1 px-6 py-6 overflow-y-auto flex flex-col items-center justify-center relative z-10">
+        <div className={cn('w-full max-w-[720px] mx-auto', zenMode && 'pt-12')}>
 
           {/* Zen mode header — deck chip + counter */}
           {zenMode && (
@@ -1191,12 +1237,7 @@ function SessionContent() {
             )}
           >
             <div
-              className="relative rounded-xl overflow-hidden w-full"
-              style={{
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border)',
-                boxShadow: '0 4px 20px -4px rgba(0,0,0,0.4)',
-              }}
+              className="relative glass rounded-[var(--radius-lg)] overflow-hidden w-full shadow-lg"
             >
               {/* Subtle deck name — corner of the card, not the page chrome */}
               <span
@@ -1285,112 +1326,123 @@ function SessionContent() {
         </div>
       </div>
 
-      {/* ── Bottom bar ── */}
+      {/* ── Bottom rating bar — Stitch: h-24 surface-container-low, borderless,
+             undo/nav left · big binary buttons center · More right ── */}
       <div
-        className="flex items-center px-6 py-3 gap-3 shrink-0"
-        style={{ background: 'var(--bg-base)', borderTop: '1px solid var(--border)' }}
+        className="flex items-center px-6 h-24 gap-4 shrink-0 relative z-10"
+        style={{ background: zenMode ? 'transparent' : 'var(--bg-inset)' }}
       >
-        {/* ← Back */}
-        {!zenMode && (
-        <button
-          onClick={handleBack}
-          disabled={!canGoBack}
-          className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors"
-          style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border)',
-            color: canGoBack ? 'var(--text-primary)' : 'var(--border-strong)',
-            cursor: canGoBack ? 'pointer' : 'not-allowed',
-          }}
-          title="Previous card"
-        >
-          <ArrowLeft size={15} />
-        </button>
-        )}
+        <div className="flex-1 flex items-center gap-2 min-w-0">
+          {/* ↩ Undo */}
+          {undoStack.length > 0 && (
+            <button
+              onClick={handleUndo}
+              className="flex items-center justify-center w-12 h-12 rounded-lg transition-colors hover:bg-[var(--bg-active)] active:scale-90 shrink-0"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+              title="Undo last review (Ctrl+Z)"
+            >
+              <Undo2 size={18} />
+            </button>
+          )}
 
-        {/* ↩ Undo */}
-        {undoStack.length > 0 && (
+          {!zenMode && undoStack.length > 0 && (
+            <div className="h-6 w-px mx-2 shrink-0" style={{ background: 'var(--border)' }} />
+          )}
+
+          {/* ← Back */}
+          {!zenMode && (
           <button
-            onClick={handleUndo}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            title="Undo last review (Ctrl+Z)"
+            onClick={handleBack}
+            disabled={!canGoBack}
+            className="flex items-center justify-center w-10 h-10 rounded-full transition-colors hover:bg-[var(--bg-active)] shrink-0"
+            style={{
+              color: canGoBack ? 'var(--text-secondary)' : 'var(--border-strong)',
+              cursor: canGoBack ? 'pointer' : 'not-allowed',
+            }}
+            title="Previous card"
           >
-            <Undo2 size={12} />
-            Undo
+            <ArrowLeft size={18} />
           </button>
-        )}
-
-        {/* → Skip */}
-        {!zenMode && (
-        <button
-          onClick={handleSkip}
-          className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:brightness-110"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
-          title="Skip card"
-        >
-          <ArrowRight size={15} />
-        </button>
-        )}
-
-        <div className="flex-1" />
-
-        {/* ✕ Missed (rating 1) — Stitch idiom: ghost button with a red border */}
-        <button
-          onClick={() => answerReady && !isAnimating && handleRate(1)}
-          disabled={!answerReady || isAnimating}
-          className="flex items-center gap-2 px-8 py-3 rounded-[var(--radius-lg)] text-sm font-semibold transition-all duration-150 select-none active:scale-[0.98]"
-          style={{
-            background: answerReady ? 'var(--danger-subtle)' : 'var(--bg-surface)',
-            border: `1px solid ${answerReady ? 'color-mix(in srgb, var(--danger) 40%, transparent)' : 'var(--border)'}`,
-            color: answerReady ? 'var(--danger)' : 'var(--border-strong)',
-            cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
-          }}
-          title={`Missed (${formatKey(studyShortcuts.forgot)})`}
-        >
-          <span>✕</span>
-          Missed
-          {answerReady && (
-            <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
-              {formatKey(studyShortcuts.forgot)}
-            </kbd>
           )}
-        </button>
 
-        {/* ✓ Remembered — Stitch idiom: periwinkle fill, dark text */}
-        <button
-          onClick={() => answerReady && !isAnimating && handleRate(4)}
-          disabled={!answerReady || isAnimating}
-          className="flex items-center gap-2 px-8 py-3 rounded-[var(--radius-lg)] text-sm font-semibold transition-all duration-150 select-none active:scale-[0.98]"
-          style={{
-            background: answerReady ? 'var(--accent)' : 'var(--bg-surface)',
-            border: `1px solid ${answerReady ? 'var(--accent)' : 'var(--border)'}`,
-            color: answerReady ? 'var(--accent-fg)' : 'var(--border-strong)',
-            cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
-          }}
-          title={`Remembered (${formatKey(studyShortcuts.remembered)})`}
-        >
-          <span>✓</span>
-          Remembered
-          {answerReady && (
-            <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
-              {formatKey(studyShortcuts.remembered)}
-            </kbd>
+          {/* → Skip */}
+          {!zenMode && (
+          <button
+            onClick={handleSkip}
+            className="flex items-center justify-center w-10 h-10 rounded-full transition-colors hover:bg-[var(--bg-active)] shrink-0"
+            style={{ color: 'var(--text-secondary)' }}
+            title="Skip card"
+          >
+            <ArrowRight size={18} />
+          </button>
           )}
-        </button>
+        </div>
 
-        <div className="flex-1" />
+        {/* Binary rating — Stitch: big two-line buttons, min-w 180 */}
+        <div className="flex justify-center gap-4 shrink-0">
+          {/* ✕ Missed (rating 1) — ghost with red border */}
+          <button
+            onClick={() => answerReady && !isAnimating && handleRate(1)}
+            disabled={!answerReady || isAnimating}
+            className="group flex items-center justify-center gap-3.5 px-8 py-3 rounded-[var(--radius-lg)] min-w-[180px] transition-all duration-200 select-none active:scale-95"
+            style={{
+              background: answerReady ? 'var(--bg-surface)' : 'transparent',
+              border: `1px solid ${answerReady ? 'color-mix(in srgb, var(--danger) 40%, transparent)' : 'var(--border)'}`,
+              cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
+            }}
+            title={`Missed (${formatKey(studyShortcuts.forgot)})`}
+          >
+            <span className="text-lg leading-none" style={{ color: answerReady ? 'var(--danger)' : 'var(--border-strong)' }}>✕</span>
+            <span className="flex flex-col items-start">
+              <span className="text-[17px] font-medium leading-none" style={{ color: answerReady ? 'var(--text-primary)' : 'var(--border-strong)' }}>
+                Missed
+              </span>
+              {answerReady && (
+                <span className="font-mono text-[10px] mt-1 leading-none opacity-70" style={{ color: 'var(--danger)' }}>
+                  {formatKey(studyShortcuts.forgot)}
+                </span>
+              )}
+            </span>
+          </button>
+
+          {/* ✓ Remembered — periwinkle fill, dark indigo text */}
+          <button
+            onClick={() => answerReady && !isAnimating && handleRate(4)}
+            disabled={!answerReady || isAnimating}
+            className="group flex items-center justify-center gap-3.5 px-8 py-3 rounded-[var(--radius-lg)] min-w-[180px] transition-all duration-200 select-none active:scale-95"
+            style={{
+              background: answerReady ? 'var(--accent)' : 'var(--bg-surface)',
+              border: `1px solid ${answerReady ? 'var(--accent)' : 'var(--border)'}`,
+              cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
+            }}
+            title={`Remembered (${formatKey(studyShortcuts.remembered)})`}
+          >
+            <span className="text-lg leading-none" style={{ color: answerReady ? 'var(--accent-fg)' : 'var(--border-strong)' }}>✓</span>
+            <span className="flex flex-col items-start">
+              <span className="text-[17px] font-medium leading-none" style={{ color: answerReady ? 'var(--accent-fg)' : 'var(--border-strong)' }}>
+                Remembered
+              </span>
+              {answerReady && (
+                <span className="font-mono text-[10px] mt-1 leading-none opacity-70" style={{ color: 'var(--accent-fg)' }}>
+                  {formatKey(studyShortcuts.remembered)}
+                </span>
+              )}
+            </span>
+          </button>
+        </div>
 
         {/* … Options */}
-        <div className={cn('relative', zenMode && 'hidden')}>
+        <div className={cn('flex-1 flex justify-end', zenMode && 'invisible')}>
+        <div className="relative">
           <button
             ref={optionsButtonRef}
             onClick={() => setShowOptionsMenu((v) => !v)}
-            className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[var(--bg-surface)]"
-            style={{ color: showOptionsMenu ? 'var(--accent)' : 'var(--text-muted)' }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors hover:bg-[var(--bg-active)]"
+            style={{ color: showOptionsMenu ? 'var(--accent)' : 'var(--text-secondary)' }}
             title="Options"
           >
-            <MoreHorizontal size={16} />
+            <span className="font-mono text-[13px] font-medium">More</span>
+            <MoreHorizontal size={18} />
           </button>
 
           {showOptionsMenu && (
@@ -1456,6 +1508,7 @@ function SessionContent() {
               </button>
             </div>
           )}
+        </div>
         </div>
       </div>
 

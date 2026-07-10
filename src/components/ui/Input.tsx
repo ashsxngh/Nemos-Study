@@ -13,19 +13,19 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="relative w-full">
         {icon && (
-          <div className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none">
+          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none">
             {icon}
           </div>
         )}
         <input
           ref={ref}
           className={cn(
-            'w-full h-8 bg-[var(--bg-base)] border border-[var(--border)] rounded-[var(--radius)]',
-            'text-[var(--text-primary)] text-sm placeholder:text-[var(--text-muted)]',
-            'px-3 transition-colors duration-100',
+            'w-full h-11 bg-[var(--bg-inset)] border border-[var(--border)] rounded-[var(--radius)]',
+            'text-[var(--text-primary)] text-[15px] placeholder:text-[var(--text-muted)]',
+            'px-4 transition-colors duration-100',
             'hover:border-[var(--border-strong)]',
             'focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20',
-            icon && 'pl-8',
+            icon && 'pl-10',
             error && 'border-[var(--danger)] focus:border-[var(--danger)] focus:ring-[var(--danger)]',
             className
           )}

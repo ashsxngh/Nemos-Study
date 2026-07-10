@@ -95,11 +95,11 @@ export function migrateLegacyIds(): void {
     // Legacy ids were never accepted by the server, so there is nothing to
     // delete remotely — keep only valid UUIDs.
     pendingDeletes: {
-      folders: (lib.pendingDeletes.folders ?? []).filter(isUuid),
-      decks: (lib.pendingDeletes.decks ?? []).filter(isUuid),
-      cards: (lib.pendingDeletes.cards ?? []).filter(isUuid),
-      sessions: (lib.pendingDeletes.sessions ?? []).filter(isUuid),
-      reviewLogs: (lib.pendingDeletes.reviewLogs ?? []).filter(isUuid),
+      folders: (lib.pendingDeletes?.folders ?? []).filter(isUuid),
+      decks: (lib.pendingDeletes?.decks ?? []).filter(isUuid),
+      cards: (lib.pendingDeletes?.cards ?? []).filter(isUuid),
+      sessions: (lib.pendingDeletes?.sessions ?? []).filter(isUuid),
+      reviewLogs: (lib.pendingDeletes?.reviewLogs ?? []).filter(isUuid),
     },
   })
 

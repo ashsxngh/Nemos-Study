@@ -26,9 +26,15 @@ function formatDeletedDate(deletedAt: string): string {
 }
 
 function TypeIcon({ type }: { type: TrashEntry['type'] }) {
-  if (type === 'deck') return <BookOpen size={14} className="text-[var(--accent)] shrink-0" />
-  if (type === 'note') return <FileText size={14} className="text-[var(--warning)] shrink-0" />
-  return <CreditCard size={14} className="text-[var(--text-muted)] shrink-0" />
+  const icon =
+    type === 'deck' ? <BookOpen size={18} className="text-[var(--accent)]" />
+    : type === 'note' ? <FileText size={18} className="text-[var(--warning)]" />
+    : <CreditCard size={18} className="text-[var(--text-muted)]" />
+  return (
+    <div className="w-11 h-11 rounded-[var(--radius)] bg-[var(--bg-active)] flex items-center justify-center shrink-0">
+      {icon}
+    </div>
+  )
 }
 
 function TypeBadge({ type }: { type: TrashEntry['type'] }) {
@@ -55,7 +61,7 @@ function TrashItemRow({ entry, onRestore, onDelete }: TrashItemRowProps) {
   const urgent = days <= 3
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors group">
+    <div className="flex items-center gap-4 card-surface card-hover px-5 py-4 group">
       <TypeIcon type={entry.type} />
 
       <div className="flex-1 min-w-0">
@@ -88,22 +94,20 @@ function TrashItemRow({ entry, onRestore, onDelete }: TrashItemRowProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={onRestore}
-          className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-active)] transition-colors"
+          className="flex items-center justify-center w-9 h-9 rounded-[var(--radius)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-active)] transition-colors"
           title="Restore"
         >
-          <RotateCcw size={12} />
-          Restore
+          <RotateCcw size={16} />
         </button>
         <button
           onClick={onDelete}
-          className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
+          className="flex items-center justify-center w-9 h-9 rounded-[var(--radius)] text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
           title="Delete forever"
         >
-          <X size={12} />
-          Delete forever
+          <X size={16} />
         </button>
       </div>
     </div>
@@ -265,7 +269,7 @@ export default function TrashPage() {
         }
       />
 
-      <main className="flex-1 overflow-y-auto p-5">
+      <main className="flex-1 overflow-y-auto px-6 py-6">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
             <div className="w-10 h-10 rounded-full bg-[var(--bg-active)] flex items-center justify-center">
@@ -279,10 +283,10 @@ export default function TrashPage() {
             </div>
           </div>
         ) : (
-          <div className="max-w-2xl mx-auto space-y-6">
+          <div className="max-w-3xl mx-auto space-y-8">
             {/* Info banner */}
-            <div className="flex items-start gap-2.5 p-3 rounded-[var(--radius)] bg-[var(--bg-surface)] border border-[var(--border)] text-xs text-[var(--text-muted)]">
-              <AlertTriangle size={13} className="shrink-0 mt-0.5 text-[var(--warning)]" />
+            <div className="flex items-start gap-2.5 p-4 rounded-[var(--radius-lg)] bg-[var(--warning-subtle)]/40 border border-[var(--warning)]/20 text-xs text-[var(--text-secondary)]">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5 text-[var(--warning)]" />
               <span>
                 Items are automatically deleted after {TRASH_TTL_DAYS} days.
                 Restore them to put them back in your library.
@@ -291,14 +295,14 @@ export default function TrashPage() {
 
             {sections.map(({ label, items: sectionItems, icon }) => (
               <section key={label}>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <span className="text-[var(--text-muted)]">{icon}</span>
-                  <h2 className="meta-label text-[var(--text-muted)]">
+                  <h2 className="meta-label text-[var(--text-secondary)]">
                     {label}
                   </h2>
-                  <span className="text-xs text-[var(--text-muted)]">({sectionItems.length})</span>
+                  <span className="font-mono text-[11px] text-[var(--text-muted)]">({sectionItems.length})</span>
                 </div>
-                <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)] overflow-hidden">
+                <div className="space-y-2.5">
                   {sectionItems.map((entry) => (
                     <TrashItemRow
                       key={entry.id}

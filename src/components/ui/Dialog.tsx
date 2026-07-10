@@ -41,25 +41,25 @@ export function Dialog({ open, onClose, title, description, children, className,
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="fixed inset-0 bg-[#0f0f11]/85 backdrop-blur-[8px]" />
       <div
         className={cn(
-          'relative w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-xl animate-scale-in',
+          'relative w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-popover)] animate-scale-in',
           sizeStyles[size],
           className
         )}
       >
         {(title || description) && (
-          <div className="flex items-start justify-between p-4 border-b border-[var(--border)]">
+          <div className="flex items-start justify-between px-6 pt-6 pb-4">
             <div>
-              {title && <h2 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h2>}
-              {description && <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{description}</p>}
+              {title && <h2 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight">{title}</h2>}
+              {description && <p className="mt-1 text-sm text-[var(--text-secondary)]">{description}</p>}
             </div>
             <button
               onClick={onClose}
-              className="ml-4 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              className="ml-4 w-9 h-9 -mt-1.5 -mr-1.5 flex items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"
             >
-              <X size={16} />
+              <X size={18} />
             </button>
           </div>
         )}

@@ -5,7 +5,6 @@ import { Bell, Sun, Moon, User, WifiOff, CheckCircle2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
-import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { AnchoredMenu } from '@/components/ui/Menu'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
@@ -47,30 +46,33 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
   const notifications: { id: string; message: string; time: string }[] = []
 
   return (
-    <header className="flex items-center h-11 px-5 border-b border-[var(--border)] bg-[var(--bg-surface)] shrink-0 gap-3">
-      <div className="flex-1 min-w-0">
+    <header className="flex items-center h-16 px-6 bg-[var(--bg-base)]/80 backdrop-blur-md shrink-0 gap-4 z-40">
+      <div className="flex-1 min-w-0 flex items-center gap-4">
         {breadcrumbs ?? (
           title && (
-            <h1 className="text-sm font-semibold text-[var(--text-primary)] truncate">{title}</h1>
+            <h1 className="text-[24px] leading-tight font-semibold text-[var(--text-primary)] truncate tracking-tight">{title}</h1>
           )
         )}
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         {actions}
 
         {syncError && (
           <Tooltip content="Sync failed — click to retry" side="bottom">
-            <button onClick={() => manualSync?.()} className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-sm)] hover:bg-[var(--danger-subtle)] transition-colors">
-              <WifiOff size={12} className="text-[var(--danger)]" aria-label="Sync error" />
+            <button onClick={() => manualSync?.()} className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-[var(--danger-subtle)] transition-colors">
+              <WifiOff size={16} className="text-[var(--danger)]" aria-label="Sync error" />
             </button>
           </Tooltip>
         )}
 
         <Tooltip content={isDark ? 'Light mode' : 'Dark mode'} shortcut={['⌘', '⇧', 'L']}>
-          <Button variant="ghost" size="sm" onClick={() => setTheme(isDark ? 'light' : 'dark')} className="w-7 px-0">
-            {isDark ? <Sun size={14} /> : <Moon size={14} />}
-          </Button>
+          <button
+            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            className="w-9 h-9 flex items-center justify-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            {isDark ? <Sun size={17} strokeWidth={1.75} /> : <Moon size={17} strokeWidth={1.75} />}
+          </button>
         </Tooltip>
 
         {/* Notifications */}
@@ -80,11 +82,11 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
             <Tooltip content="Notifications">
               <button
                 onClick={onClick}
-                className="w-7 h-7 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors relative"
+                className="w-9 h-9 flex items-center justify-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors relative"
               >
-                <Bell size={14} />
+                <Bell size={17} strokeWidth={1.75} />
                 {notifications.length > 0 && (
-                  <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[var(--accent)] rounded-full" />
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[var(--accent)] rounded-full" />
                 )}
               </button>
             </Tooltip>
@@ -124,10 +126,10 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
           trigger={({ onClick }) => (
             <button
               onClick={onClick}
-              className="w-6 h-6 rounded-full bg-[var(--bg-active)] flex items-center justify-center hover:bg-[var(--border)] transition-colors"
+              className="w-9 h-9 rounded-full bg-[var(--bg-active)] border-2 border-[var(--accent-subtle)] flex items-center justify-center hover:border-[var(--accent)] transition-colors"
               aria-label="Account menu"
             >
-              <User size={12} className="text-[var(--text-secondary)]" />
+              <User size={15} className="text-[var(--text-secondary)]" />
             </button>
           )}
           panel={() => (

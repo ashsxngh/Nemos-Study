@@ -149,13 +149,15 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
   return (
     <div className="flex h-full">
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
-      <div className="w-60 shrink-0 border-r border-[var(--border)] flex flex-col bg-[var(--bg-surface)]">
-        <div className="p-2.5 border-b border-[var(--border)]">
+      <div className="w-80 shrink-0 border-r border-[var(--border)] flex flex-col bg-[var(--bg-sidebar)]">
+        <div className="px-4 pt-4 pb-2">
+          <p className="meta-label text-[var(--text-secondary)] mb-3">Recent Notes</p>
           <Input
             placeholder="Search notes..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            icon={<Search size={12} />}
+            icon={<Search size={14} />}
+            className="!h-10"
           />
         </div>
 
@@ -195,7 +197,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
         {activeNote ? (
           <>
             {/* Title */}
-            <div className="px-8 pt-7 pb-0 shrink-0">
+            <div className="px-10 pt-9 pb-0 shrink-0 max-w-3xl w-full mx-auto">
               <input
                 type="text"
                 value={title}
@@ -203,18 +205,18 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
                 onChange={(e) => handleTitleChange(e.target.value)}
                 placeholder="Untitled"
                 className={cn(
-                  'w-full text-2xl font-bold bg-transparent border-none outline-none',
+                  'w-full text-[32px] font-semibold tracking-tight bg-transparent border-none outline-none',
                   'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]'
                 )}
               />
             </div>
 
             {/* Tags bar */}
-            <div className="px-8 pt-3 pb-0 flex flex-wrap items-center gap-1.5 shrink-0">
+            <div className="px-10 pt-3 pb-0 flex flex-wrap items-center gap-1.5 shrink-0 max-w-3xl w-full mx-auto">
               {tags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] bg-[var(--bg-hover)] border border-[var(--border)] px-1.5 py-0.5 rounded-full"
+                  className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--text-secondary)] bg-[var(--bg-raised)] border border-[var(--border)] px-2.5 py-1 rounded-full"
                 >
                   <Hash size={9} />
                   {tag}
@@ -241,31 +243,31 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
                 onKeyDown={handleTagKeyDown}
                 onBlur={() => { if (tagInput) handleAddTag(tagInput) }}
                 placeholder="Add tag…"
-                className="text-[10px] bg-transparent border-none outline-none text-[var(--text-muted)] placeholder:text-[var(--text-muted)] w-20 min-w-0"
+                className="font-mono text-[11px] bg-transparent border-none outline-none text-[var(--text-muted)] placeholder:text-[var(--text-muted)] w-24 min-w-0"
               />
             </div>
 
             {/* Toolbar */}
-            <div className="px-8 pt-3 pb-2 flex items-center justify-between shrink-0 border-b border-[var(--border)]">
-              <span className="text-[10px] text-[var(--text-muted)]">
-                {formatRelativeTime(activeNote.updatedAt)}
+            <div className="px-10 pt-4 pb-3 flex items-center justify-between shrink-0 border-b border-[var(--border)] max-w-3xl w-full mx-auto">
+              <span className="font-mono text-[11px] text-[var(--text-muted)]">
+                Saved {formatRelativeTime(activeNote.updatedAt)}
               </span>
               <button
                 onClick={() => setIsPreview((v) => !v)}
                 className={cn(
-                  'inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded transition-colors',
+                  'inline-flex items-center gap-1.5 font-mono text-[11px] px-3 py-1.5 rounded-[var(--radius)] transition-colors',
                   isPreview
                     ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 )}
               >
-                {isPreview ? <Edit2 size={10} /> : <Eye size={10} />}
+                {isPreview ? <Edit2 size={12} /> : <Eye size={12} />}
                 {isPreview ? 'Edit' : 'Preview'}
               </button>
             </div>
 
             {/* Editor / Preview */}
-            <div className="flex-1 overflow-y-auto px-8 py-5 relative">
+            <div className="flex-1 overflow-y-auto px-10 py-6 relative max-w-3xl w-full mx-auto">
               {isPreview ? (
                 <div className="prose prose-sm max-w-none text-[var(--text-primary)] [&_h1]:text-[var(--text-primary)] [&_h2]:text-[var(--text-primary)] [&_h3]:text-[var(--text-primary)] [&_p]:text-[var(--text-secondary)] [&_li]:text-[var(--text-secondary)] [&_code]:bg-[var(--bg-hover)] [&_code]:text-[var(--accent)] [&_pre]:bg-[var(--bg-hover)] [&_blockquote]:border-l-[var(--accent)] [&_a]:text-[var(--accent)]">
                   {content ? (
@@ -288,7 +290,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
                   placeholder="Start writing… (Markdown supported)"
                   className={cn(
                     'w-full resize-none bg-transparent border-none outline-none',
-                    'text-sm text-[var(--text-secondary)] placeholder:text-[var(--text-muted)]',
+                    'text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
                     'font-mono leading-7 min-h-64'
                   )}
                   style={{ height: 'auto' }}
@@ -296,7 +298,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
               )}
 
               {/* Word count */}
-              <div className="absolute bottom-3 right-5 text-[9px] text-[var(--text-muted)] select-none pointer-events-none">
+              <div className="absolute bottom-4 right-6 font-mono text-[10px] text-[var(--text-muted)] select-none pointer-events-none">
                 {wordCount} {wordCount === 1 ? 'word' : 'words'}
               </div>
             </div>
@@ -326,7 +328,7 @@ interface NoteItemProps {
 function NoteItem({ note, isActive, onClick, onDelete }: NoteItemProps) {
   const [hovered, setHovered] = useState(false)
 
-  const preview = note.content.replace(/[#*`>\-_~[\]()!]/g, '').slice(0, 60)
+  const preview = note.content.replace(/[#*`>\-_~[\]()!]/g, '').slice(0, 110)
 
   return (
     <div
@@ -338,20 +340,19 @@ function NoteItem({ note, isActive, onClick, onDelete }: NoteItemProps) {
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(e) => { e.preventDefault(); onDelete() }}
       className={cn(
-        'relative w-full text-left px-3 py-2.5 border-b border-[var(--border)] transition-colors cursor-pointer select-none',
-        isActive ? 'bg-[var(--bg-active)]' : 'hover:bg-[var(--bg-hover)]'
+        'relative w-full text-left px-4 py-4 border-b border-[var(--border)] transition-colors cursor-pointer select-none',
+        isActive ? 'bg-[var(--bg-raised)]' : 'hover:bg-[var(--bg-hover)]'
       )}
     >
-      <div className="flex items-center gap-1.5 mb-1 pr-5">
-        <FileText size={12} className="text-[var(--text-muted)] shrink-0" />
-        <span className="text-xs font-medium text-[var(--text-primary)] truncate">
+      <div className="flex items-center gap-1.5 mb-1.5 pr-5">
+        <span className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
           {note.title || 'Untitled'}
         </span>
       </div>
       {preview && (
-        <p className="text-[10px] text-[var(--text-muted)] truncate mb-1">{preview}</p>
+        <p className="text-[13px] text-[var(--text-secondary)] line-clamp-2 mb-1.5 leading-snug">{preview}</p>
       )}
-      <span className="text-[9px] text-[var(--text-muted)]">
+      <span className="font-mono text-[10px] text-[var(--text-muted)]">
         {formatRelativeTime(note.updatedAt)}
       </span>
 

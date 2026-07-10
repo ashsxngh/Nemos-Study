@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
-  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown,
+  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown, Plus,
 } from 'lucide-react'
 import {
   DndContext,
@@ -178,7 +178,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const router = useRouter()
   const {
     folders, decks, cards, fsrsData,
-    getDeckCards, getDeckMastery, getDueCards,
+    getDeckCards, getDeckMastery, getDueCards, getNewCards,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore(
     useShallow((s) => ({
@@ -189,6 +189,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
       getDeckCards: s.getDeckCards,
       getDeckMastery: s.getDeckMastery,
       getDueCards: s.getDueCards,
+      getNewCards: s.getNewCards,
       updateFolder: s.updateFolder,
       deleteFolder: s.deleteFolder,
       updateDeck: s.updateDeck,
@@ -196,6 +197,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     }))
   )
   const sessions = useHistoryStore((s) => s.sessions)
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
   // The due/new/mastery queries are the most expensive in the app — memoize
   // per-deck results keyed by deck id instead of recomputing (and re-scanning
@@ -218,6 +221,13 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     for (const d of decks) map.set(d.id, getDeckMastery(d.id))
     return map
   }, [decks, cards, fsrsData, getDeckMastery])
+
+  const newCountByDeck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const d of decks) map.set(d.id, getNewCards(d.id).length)
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards])
 
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
@@ -436,81 +446,87 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="p-5">
+      <div className="px-6 py-8 max-w-[1200px] mx-auto">
+        {/* Page intro — Stitch: big title + secondary subtitle */}
+        <div className="mb-6">
+          <h2 className="text-[32px] font-semibold text-[var(--text-primary)] tracking-tight leading-tight">Library</h2>
+          <p className="text-[15px] text-[var(--text-secondary)] mt-1">Organize and master your knowledge base.</p>
+        </div>
+
         {/* Breadcrumb + controls */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex items-center gap-1 text-xs text-[var(--text-muted)] flex-1 flex-wrap">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="flex items-center gap-1.5 font-mono text-[13px] text-[var(--text-muted)] flex-1 flex-wrap">
             {breadcrumbs.map((item, idx) => (
-              <span key={idx} className="flex items-center gap-1">
+              <span key={idx} className="flex items-center gap-1.5">
                 {idx === 0 ? (
                   <button
                     onClick={() => navigateToBreadcrumb(0)}
                     className={cn(
-                      'flex items-center gap-1 hover:text-[var(--text-primary)] transition-colors',
-                      idx === breadcrumbs.length - 1 && 'text-[var(--text-primary)] font-medium'
+                      'flex items-center gap-1.5 hover:text-[var(--text-primary)] transition-colors',
+                      idx === breadcrumbs.length - 1 && 'text-[var(--accent)] font-medium'
                     )}
                   >
-                    <Home size={12} />
-                    <span>All</span>
+                    <Home size={13} />
+                    <span>Root</span>
                   </button>
                 ) : (
                   <button
                     onClick={() => navigateToBreadcrumb(idx)}
                     className={cn(
                       'hover:text-[var(--text-primary)] transition-colors',
-                      idx === breadcrumbs.length - 1 && 'text-[var(--text-primary)] font-medium'
+                      idx === breadcrumbs.length - 1 && 'text-[var(--accent)] font-medium'
                     )}
                   >
                     {item?.name}
                   </button>
                 )}
-                {idx < breadcrumbs.length - 1 && <ChevronRight size={11} />}
+                {idx < breadcrumbs.length - 1 && <ChevronRight size={12} />}
               </span>
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Input
-              placeholder="Search library..."
+              placeholder="Search decks, tags, or folders..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              icon={<Search size={12} />}
-              className="w-48"
+              icon={<Search size={15} />}
+              className="w-64 !h-10 !rounded-[var(--radius-lg)]"
             />
-            <div className="flex border border-[var(--border)] rounded-[var(--radius-sm)] overflow-hidden">
+            <div className="flex bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
               <button
                 onClick={() => setView('grid')}
                 className={cn(
-                  'w-7 h-7 flex items-center justify-center transition-colors',
+                  'w-10 h-10 flex items-center justify-center transition-colors',
                   view === 'grid'
                     ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
                 )}
               >
-                <Grid3X3 size={13} />
+                <Grid3X3 size={16} />
               </button>
               <button
                 onClick={() => setView('list')}
                 className={cn(
-                  'w-7 h-7 flex items-center justify-center transition-colors',
+                  'w-10 h-10 flex items-center justify-center transition-colors',
                   view === 'list'
                     ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
                 )}
               >
-                <List size={13} />
+                <List size={16} />
               </button>
               <button
                 onClick={() => setView('table')}
                 title="Tree table view"
                 className={cn(
-                  'w-7 h-7 flex items-center justify-center transition-colors',
+                  'w-10 h-10 flex items-center justify-center transition-colors',
                   view === 'table'
                     ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
                 )}
               >
-                <Rows3 size={13} />
+                <Rows3 size={16} />
               </button>
             </div>
           </div>
@@ -518,12 +534,12 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
         {/* Sort + tag filter toolbar (shown when there are decks) */}
         {view !== 'table' && visibleDecks.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 mb-5">
+          <div className="flex flex-wrap items-center gap-2.5 mb-6">
             {/* Sort dropdown */}
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortBy)}
-              className="text-xs bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors outline-none cursor-pointer"
+              className="font-mono text-[12px] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] px-3 h-9 text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors outline-none cursor-pointer"
               aria-label="Sort decks"
             >
               <option value="alpha">Name (A – Z)</option>
@@ -540,20 +556,20 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
             <button
               onClick={() => setFilterStarred((v) => !v)}
               className={cn(
-                'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
+                'flex items-center gap-1.5 font-mono text-[12px] px-3 h-9 rounded-[var(--radius)] border transition-colors',
                 filterStarred
                   ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
               )}
               aria-pressed={filterStarred}
             >
-              <Star size={11} className={filterStarred ? 'fill-current' : ''} />
+              <Star size={13} className={filterStarred ? 'fill-current' : ''} />
               Starred
             </button>
             <button
               onClick={() => setFilterHasDue((v) => !v)}
               className={cn(
-                'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
+                'flex items-center gap-1.5 font-mono text-[12px] px-3 h-9 rounded-[var(--radius)] border transition-colors',
                 filterHasDue
                   ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
@@ -565,13 +581,13 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
             {/* Tag chips */}
             {allTags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {allTags.map((tag) => (
                   <button
                     key={tag}
                     onClick={() => toggleTag(tag)}
                     className={cn(
-                      'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
+                      'font-mono text-[11px] px-2.5 py-1 rounded-full border transition-colors',
                       activeTags.includes(tag)
                         ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                         : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
@@ -583,7 +599,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                 {activeTags.length > 0 && (
                   <button
                     onClick={() => setActiveTags([])}
-                    className="text-[10px] text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors px-1"
+                    className="font-mono text-[11px] text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors px-1"
                     aria-label="Clear tag filters"
                   >
                     ✕ clear
@@ -640,7 +656,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
             <div
               className={cn(
                 view === 'grid'
-                  ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3'
+                  ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6'
                   : 'space-y-1'
               )}
             >
@@ -719,7 +735,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
             <div
               className={cn(
                 view === 'grid'
-                  ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3'
+                  ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6'
                   : 'space-y-1'
               )}
             >
@@ -757,6 +773,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     deck={deck}
                     cardCount={cardCount}
                     mastery={mastery}
+                    dueCount={dueCountByDeck.get(deck.id) ?? 0}
+                    newCount={newCountByDeck.get(deck.id) ?? 0}
                     onClick={() => openDeck(deck.id)}
                     onStudyClick={setStudyPopupDeck}
                     menuItems={deckMenuItems}
@@ -777,6 +795,23 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                   />
                 )
               })}
+
+              {/* Stitch: dashed "Create New Deck" tile at the end of the grid —
+                  same action as the header's New Deck button. */}
+              {view === 'grid' && onNewDeck && !search && (
+                <button
+                  onClick={() => onNewDeck(currentFolderId)}
+                  className="min-h-[220px] rounded-[var(--radius-lg)] border-2 border-dashed border-[var(--border-strong)] flex flex-col items-center justify-center gap-4 text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--text-secondary)] transition-colors group/create"
+                >
+                  <span className="w-14 h-14 rounded-[var(--radius)] bg-[var(--bg-raised)] flex items-center justify-center group-hover/create:bg-[var(--accent-subtle)] transition-colors">
+                    <Plus size={22} className="group-hover/create:text-[var(--accent)] transition-colors" />
+                  </span>
+                  <span className="font-mono text-[13px] font-medium tracking-wide text-[var(--text-secondary)]">Create New Deck</span>
+                  <span className="text-[13px] text-[var(--text-muted)] px-6">
+                    {currentFolder ? `Start organizing a new subject in ${currentFolder.name}.` : 'Start organizing a new subject.'}
+                  </span>
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -1139,36 +1174,44 @@ function FolderCardGrid({
       ref={setDropRef}
       style={style}
       className={cn(
-        'relative text-left bg-[var(--bg-surface)] border rounded-[var(--radius)] p-3.5 hover:bg-[var(--bg-hover)] transition-colors group cursor-pointer',
+        'relative text-left card-surface rounded-[var(--radius-lg)] p-5 flex flex-col transition-colors group cursor-pointer',
         isOver
-          ? 'border-[var(--accent)] ring-2 ring-[var(--accent)] ring-opacity-40 bg-[var(--accent-subtle)]'
-          : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+          ? '!border-[var(--accent)] ring-2 ring-[var(--accent)] ring-opacity-40 bg-[var(--accent-subtle)]'
+          : 'card-hover'
       )}
       onClick={onClick}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-2">
           <button
             ref={setDragRef}
             {...listeners}
             {...attributes}
-            className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 rounded shrink-0"
+            className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0"
             onClick={(e) => e.stopPropagation()}
             aria-label="Drag to reorder folder"
           >
-            <GripVertical size={13} />
+            <GripVertical size={14} />
           </button>
-          <Folder size={20} className={FOLDER_COLORS[folder.color]} />
+          <div className="w-10 h-10 rounded-[var(--radius)] bg-[var(--bg-active)] flex items-center justify-center shrink-0">
+            <Folder size={18} className={FOLDER_COLORS[folder.color]} />
+          </div>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {folder.isStarred && <Star size={12} className="text-[var(--warning)] fill-[var(--warning)]" />}
-          <ItemDropdown items={menuItems} />
+        <div className="flex items-center gap-1.5">
+          {folder.isStarred && <Star size={13} className="text-[var(--warning)] fill-[var(--warning)] mt-0.5" />}
+          <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--bg-active)] text-[var(--text-secondary)] tracking-wide">
+            {childCount} {childCount === 1 ? 'Folder' : 'Folders'}
+          </span>
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <ItemDropdown items={menuItems} />
+          </div>
         </div>
       </div>
-      <p className="text-sm font-medium text-[var(--text-primary)] truncate mb-1">{folder.name}</p>
-      <p className="text-[10px] text-[var(--text-muted)]">
-        {childCount} folders · {cardCount} cards
-      </p>
+      <p className="text-[17px] font-semibold text-[var(--text-primary)] truncate mb-1 leading-snug">{folder.name}</p>
+      <div className="flex items-center justify-between mt-auto pt-3 border-t border-[var(--border)]">
+        <span className="font-mono text-[11px] text-[var(--text-muted)]">{cardCount} cards</span>
+        <ChevronRight size={15} className="text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors" />
+      </div>
     </div>
   )
 }
@@ -1233,9 +1276,9 @@ function FolderCardList({
 }
 
 function DeckCardGrid({
-  deck, cardCount, mastery, onClick, onStudyClick, menuItems, checked, onToggleCheck,
+  deck, cardCount, mastery, dueCount, newCount, onClick, onStudyClick, menuItems, checked, onToggleCheck,
 }: {
-  deck: DeckType; cardCount: number; mastery: number
+  deck: DeckType; cardCount: number; mastery: number; dueCount: number; newCount: number
   onClick: () => void; onStudyClick: (deck: DeckType) => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
@@ -1249,15 +1292,17 @@ function DeckCardGrid({
     opacity: isDragging ? 0.5 : 1,
   }
 
+  const masteryColor = mastery >= 70 ? 'var(--success)' : mastery >= 40 ? 'var(--accent)' : 'var(--warning)'
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="relative text-left bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-3.5 hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] transition-colors group"
+      className="relative text-left card-surface card-hover rounded-[var(--radius-lg)] p-5 flex flex-col group"
     >
-      {/* Top row: drag handle + icon + actions */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1.5">
+      {/* Top row: icon tile + drag handle · due/new chips */}
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-2">
           {onToggleCheck && (
             <input
               type="checkbox"
@@ -1265,45 +1310,71 @@ function DeckCardGrid({
               onClick={(e) => e.stopPropagation()}
               onChange={() => onToggleCheck(deck.id)}
               className={cn(
-                'w-3.5 h-3.5 accent-[var(--accent)] transition-opacity',
+                'w-4 h-4 accent-[var(--accent)] transition-opacity',
                 checked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
               )}
               aria-label="Select deck"
             />
           )}
-          {/* Drag handle — left of icon, not overlapping */}
           <button
             {...listeners}
             {...attributes}
-            className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] p-0.5 rounded shrink-0"
+            className="opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-primary)] shrink-0"
             onClick={(e) => e.stopPropagation()}
             aria-label="Drag to move deck"
           >
-            <GripVertical size={13} />
+            <GripVertical size={14} />
           </button>
-          <BookOpen size={16} className="text-[var(--accent)] shrink-0" />
+          <div className="w-10 h-10 rounded-[var(--radius)] bg-[var(--bg-active)] flex items-center justify-center shrink-0">
+            <BookOpen size={18} className="text-[var(--accent)]" />
+          </div>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onStudyClick(deck)
-            }}
-            className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-[var(--accent-fg)] transition-colors"
-          >
-            <Play size={9} /> Study
-          </button>
-          <ItemDropdown items={menuItems} />
+        <div className="flex items-center gap-1.5">
+          {deck.isStarred && <Star size={13} className="text-[var(--warning)] fill-[var(--warning)] mt-0.5" />}
+          {dueCount > 0 && (
+            <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--danger-subtle)] text-[var(--danger)] tracking-wide">
+              {dueCount} Due
+            </span>
+          )}
+          {newCount > 0 && (
+            <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--accent-subtle)] text-[var(--accent)] tracking-wide">
+              {newCount} New
+            </span>
+          )}
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <ItemDropdown items={menuItems} />
+          </div>
         </div>
       </div>
 
       {/* Clickable body */}
-      <div className="cursor-pointer" onClick={onClick}>
-        <p className="text-sm font-medium text-[var(--text-primary)] truncate mb-1">{deck.name}</p>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[10px] text-[var(--text-muted)]">{cardCount} cards</span>
+      <div className="cursor-pointer flex-1 flex flex-col" onClick={onClick}>
+        <p className="text-[17px] font-semibold text-[var(--text-primary)] truncate mb-1 leading-snug">{deck.name}</p>
+        {deck.description && (
+          <p className="text-[13px] text-[var(--text-secondary)] line-clamp-2 mb-4">{deck.description}</p>
+        )}
+
+        {/* Progress row — Stitch: label left, "% Learned" right, then bar */}
+        <div className="mt-auto">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="meta-label-sm text-[var(--text-muted)]">Progress</span>
+            <span className="font-mono text-[11px] font-semibold" style={{ color: masteryColor }}>
+              {mastery}% Learned
+            </span>
+          </div>
+          <Progress value={mastery} size="sm" color={mastery >= 70 ? 'success' : mastery >= 40 ? 'accent' : 'warning'} />
         </div>
-        <Progress value={mastery} size="sm" color={mastery >= 70 ? 'success' : mastery >= 40 ? 'accent' : 'warning'} />
+      </div>
+
+      {/* Footer meta — total cards · updated */}
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--border)]">
+        <span className="font-mono text-[11px] text-[var(--text-muted)]">{cardCount} total cards</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onStudyClick(deck) }}
+          className="flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+        >
+          <Play size={11} /> Study
+        </button>
       </div>
     </div>
   )

@@ -746,7 +746,13 @@ export function StatsPage() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-[1200px] mx-auto space-y-6">
+
+      {/* Page intro — Stitch: big title + secondary subtitle */}
+      <div>
+        <h2 className="text-[32px] font-semibold text-[var(--text-primary)] tracking-tight leading-tight">Insights &amp; Mastery</h2>
+        <p className="text-[15px] text-[var(--text-secondary)] mt-1">FSRS algorithm tracking across your whole library.</p>
+      </div>
 
       {/* Burnout banner */}
       {burnoutWarningEnabled && todayDueCount > burnoutThresholdCards && (
@@ -778,24 +784,24 @@ export function StatsPage() {
 
       {/* ── Overview tab ── */}
       {activeTab === 'overview' && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             {overallStats.map(({ label, value, sub, icon: Icon, color }) => (
-              <div key={label} className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-[var(--text-muted)]">{label}</span>
-                  <Icon size={14} className={color} />
+              <div key={label} className="card-surface card-hover p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="meta-label text-[var(--text-secondary)]">{label}</span>
+                  <Icon size={15} className={color} />
                 </div>
-                <div className="text-2xl font-bold text-[var(--text-primary)]">{value}</div>
-                {sub && <div className="text-xs text-[var(--text-muted)] mt-0.5">{sub}</div>}
+                <div className="text-[2.5rem] font-semibold tracking-tight text-[var(--text-primary)] leading-none">{value}</div>
+                {sub && <div className="font-mono text-[11px] text-[var(--text-muted)] mt-2">{sub}</div>}
               </div>
             ))}
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <TrendingUp size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Retention Rate — Last 30 Days</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Retention Rate — Last 30 Days</h2>
             </div>
             {retentionData.every((d) => d.retention === null) ? (
               <EmptyState message="No reviews yet" />
@@ -811,11 +817,11 @@ export function StatsPage() {
             )}
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <TrendingUp size={14} className="text-[var(--text-muted)]" />
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">Review Forecast</h2>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Review Forecast</h2>
               </div>
               <Badge variant="outline">Next 14 days</Badge>
             </div>
@@ -837,10 +843,10 @@ export function StatsPage() {
       {/* ── Decks tab ── */}
       {activeTab === 'decks' && (
         <div className="space-y-5">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <TrendingUp size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Deck Mastery</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Deck Mastery</h2>
             </div>
             {subjectMastery.length === 0 ? <EmptyState message="No decks yet" /> : (
               <div className="space-y-3">
@@ -860,10 +866,10 @@ export function StatsPage() {
             )}
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Cards per Deck</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Cards per Deck</h2>
               <span className="text-xs text-[var(--text-muted)] ml-auto">Click to open deck</span>
             </div>
             {deckStats.length === 0 ? <EmptyState message="No decks yet" /> : (
@@ -891,10 +897,10 @@ export function StatsPage() {
       {/* ── Reviews tab ── */}
       {activeTab === 'reviews' && (
         <div className="space-y-5">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Reviews This Week</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Reviews This Week</h2>
             </div>
             {weeklyData.every((d) => d.cards === 0) ? <EmptyState message="No reviews yet this week" /> : (
               <div className="flex items-end gap-2 h-32">
@@ -910,10 +916,10 @@ export function StatsPage() {
             )}
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <Clock size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Average Response Time</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Average Response Time</h2>
             </div>
             {Object.values(avgResponseByRating).every((v) => v === null) ? <EmptyState message="No timed reviews yet" /> : (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -936,16 +942,16 @@ export function StatsPage() {
       {/* ── Habits tab ── */}
       {activeTab === 'habits' && (
         <div className="space-y-5">
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <Target size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Study Consistency</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Study Consistency</h2>
               <span className="text-xs text-[var(--text-muted)] ml-auto">Last 30 days</span>
             </div>
             <div className="flex items-center gap-8">
               <CircleRing value={consistencyScore} size={88} stroke={7} />
               <div className="space-y-1">
-                <p className="text-sm font-semibold text-[var(--text-primary)]">{consistencyScore}% consistent</p>
+                <p className="text-base font-semibold text-[var(--text-primary)]">{consistencyScore}% consistent</p>
                 <p className="text-xs text-[var(--text-muted)]">You studied on {Math.round((consistencyScore / 100) * 30)} out of the last 30 days.</p>
                 {consistencyScore >= 80 && <p className="text-xs text-[var(--success)]">Excellent habit — keep it up!</p>}
                 {consistencyScore >= 50 && consistencyScore < 80 && <p className="text-xs text-[var(--warning)]">Good progress — try to be more consistent.</p>}
@@ -954,10 +960,10 @@ export function StatsPage() {
             </div>
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-3">
               <Flame size={14} className="text-[var(--warning)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Current Streak</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Current Streak</h2>
             </div>
             <div className="flex items-end gap-2">
               <span className="text-4xl font-bold text-[var(--warning)]">{streak}</span>
@@ -968,10 +974,10 @@ export function StatsPage() {
             </p>
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-3">
               <Bug size={14} className="text-[var(--danger)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Leech Cards</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Leech Cards</h2>
               {leechCards.length > 0 && (
                 <span className="ml-auto text-xs font-semibold bg-[var(--danger-subtle)] text-[var(--danger)] px-2 py-0.5 rounded-full">
                   {leechCards.length} {leechCards.length === 1 ? 'leech' : 'leeches'}
@@ -1008,10 +1014,10 @@ export function StatsPage() {
           <SectionDivider label="Model & Calibration" />
 
           {/* Model calibration: predicted R bucket → actual recall */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Target size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">FSRS Calibration Chart</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">FSRS Calibration Chart</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Predicted retrievability at review time vs. your actual recall. Bars should align — divergence shows model miscalibration for your brain.
@@ -1048,10 +1054,10 @@ export function StatsPage() {
           </div>
 
           {/* R at lapse distribution */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Brain size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">R at Lapse Distribution</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">R at Lapse Distribution</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               What retrievability were your cards at when they actually failed? Tells you whether your 0.9 retention target is too high, too low, or right.
@@ -1080,10 +1086,10 @@ export function StatsPage() {
           <SectionDivider label="Review Timing Behavior" />
 
           {/* Early / late review rates + per-timing pass rates */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Clock size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Early vs. Late Review Rates</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Early vs. Late Review Rates</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               How often you review before or after the due date, and how timing affects your pass rate.
@@ -1118,10 +1124,10 @@ export function StatsPage() {
           </div>
 
           {/* Optimal review window */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Target size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Optimal Review Window</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Optimal Review Window</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Your pass rate broken down by how far off your due date you were. Reveals whether you actually do better 1 day late vs. 3 days early.
@@ -1150,10 +1156,10 @@ export function StatsPage() {
           <SectionDivider label="Card Health" />
 
           {/* Stability loss per lapse */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <TrendingUp size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Stability Recovery After a Lapse</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Stability Recovery After a Lapse</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               After forgetting, how much of the pre-lapse interval does a card recover to on the next successful review? Do young vs. mature cards recover differently?
@@ -1183,10 +1189,10 @@ export function StatsPage() {
           </div>
 
           {/* Overdue but remembered */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Clock size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Overdue But Remembered</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Overdue But Remembered</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Cards reviewed 15%+ past their due date that you still got right. High rate = FSRS is being too conservative with your intervals.
@@ -1206,10 +1212,10 @@ export function StatsPage() {
           </div>
 
           {/* Lapse clustering */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Activity size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Lapse Clustering</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Lapse Clustering</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Are your lapses random (genuine forgetting) or bursty (clustering from fatigue or bad sessions)? CV &gt; 1.2 = bursty.
@@ -1225,7 +1231,7 @@ export function StatsPage() {
                     {lapseCluster.isBursty ? 'Bursty — lapses cluster in sessions' : 'Random — lapses spread evenly'}
                   </div>
                   <div className="ml-auto text-right">
-                    <p className="text-sm font-semibold text-[var(--text-primary)]">{lapseCluster.totalLapses}</p>
+                    <p className="text-base font-semibold text-[var(--text-primary)]">{lapseCluster.totalLapses}</p>
                     <p className="text-xs text-[var(--text-muted)]">total lapses</p>
                   </div>
                 </div>
@@ -1242,10 +1248,10 @@ export function StatsPage() {
           </div>
 
           {/* Stability flatliners */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Zap size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Stability Flatliners</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Stability Flatliners</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Cards with 5+ reviews but stability &lt; 10 days — never making it to long-term memory.
@@ -1270,10 +1276,10 @@ export function StatsPage() {
           <SectionDivider label="Long-term Memory Architecture" />
 
           {/* Mature card attrition */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <TrendingUp size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Mature Card Attrition</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Mature Card Attrition</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Of cards that hit a 21+ day interval, what % eventually lapsed back? And at what stability does that usually happen?
@@ -1311,10 +1317,10 @@ export function StatsPage() {
           </div>
 
           {/* Asymptotic learners */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Target size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Asymptotic Learners</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Asymptotic Learners</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Cards with zero lapses and a 30+ day interval. These are "permanently known" — your deck's solid foundation.
@@ -1334,10 +1340,10 @@ export function StatsPage() {
           </div>
 
           {/* Irreducible leeches */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Bug size={14} className="text-[var(--danger)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Irreducible Leeches</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Irreducible Leeches</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Cards with 5+ lapses, never broke a 14-day interval, and D &gt; 7. True cognitive dead weight — worth deleting or rewriting.
@@ -1360,10 +1366,10 @@ export function StatsPage() {
           </div>
 
           {/* Memory consolidation events */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Zap size={14} className="text-sky-400" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Memory Consolidation Events</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Memory Consolidation Events</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Reviews where a card's interval jumped 3x or more in one go. These correlate with good sleep, active recall, or spacing hitting the sweet spot.
@@ -1388,10 +1394,10 @@ export function StatsPage() {
           <SectionDivider label="Deck & Session Analytics" />
 
           {/* Per-deck retention drift */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <BarChart3 size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Per-Deck Retention Drift</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Per-Deck Retention Drift</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Is a deck's recall rate trending up or down over the last 3 months? Sorted worst drift first.
@@ -1419,10 +1425,10 @@ export function StatsPage() {
           </div>
 
           {/* Difficulty vs lapse rate */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
               <div className="flex items-center gap-2 mb-1">
                 <Brain size={14} className="text-[var(--text-muted)]" />
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">Difficulty vs. Actual Lapse Rate</h2>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Difficulty vs. Actual Lapse Rate</h2>
               </div>
               <p className="text-xs text-[var(--text-muted)] mb-4">
                 Does FSRS-5's D score predict which cards you forget? Bars should rise left-to-right if well-calibrated.
@@ -1442,10 +1448,10 @@ export function StatsPage() {
             </div>
 
           {/* Session fatigue */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Flame size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Session Fatigue Threshold</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Session Fatigue Threshold</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Your Good/Easy rate by card position within a session. The position where it drops is your fatigue threshold.
@@ -1473,10 +1479,10 @@ export function StatsPage() {
           <SectionDivider label="Interval Distribution" />
 
           {/* First-interval survival */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <Target size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">First-Interval Survival Rate</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">First-Interval Survival Rate</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               What % of cards survive their first review without lapsing, broken down by how long that first interval was.
@@ -1498,10 +1504,10 @@ export function StatsPage() {
           </div>
 
           {/* Maturity cliff */}
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
+          <div className="card-surface p-6">
             <div className="flex items-center gap-2 mb-1">
               <BarChart3 size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Maturity Cliff</h2>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Maturity Cliff</h2>
             </div>
             <p className="text-xs text-[var(--text-muted)] mb-4">
               Distribution of current card intervals. The sharp drop is where cards get "abandoned" as learned-enough.
