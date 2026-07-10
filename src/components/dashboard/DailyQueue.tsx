@@ -51,7 +51,7 @@ export function DailyQueue() {
     <div className="mb-6">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Due now</h3>
+          <h3 className="meta-label text-[var(--text-secondary)]">Due now</h3>
           <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
             {totalNew > 0 && (
               <span className="flex items-center gap-1 text-[var(--accent)]">

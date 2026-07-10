@@ -50,14 +50,14 @@ export function Toggle({ checked, onChange }: ToggleProps) {
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        'w-9 h-5 rounded-full relative transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-1',
+        'w-11 h-6 rounded-full relative transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40',
         checked ? 'bg-[var(--accent)]' : 'bg-[var(--bg-active)]'
       )}
     >
       <div
         className={cn(
-          'absolute top-1 w-3 h-3 bg-white rounded-full transition-transform duration-150',
-          checked ? 'translate-x-5' : 'translate-x-1'
+          'absolute top-1 w-4 h-4 rounded-full transition-all duration-150',
+          checked ? 'translate-x-6 bg-[var(--accent-fg)]' : 'translate-x-1 bg-[var(--text-secondary)]'
         )}
       />
     </button>
@@ -123,10 +123,10 @@ export function FSRSWeightsGrid() {
     <div className="grid grid-cols-4 gap-1.5">
       {fsrsWeights.map((w, i) => (
         <div key={i} className="flex flex-col gap-0.5">
-          <label className="text-[10px] text-[var(--text-muted)]">w{i}</label>
+          <label className="font-mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">w[{i}]</label>
           <Input
             type="number"
-            className="text-right text-xs h-7 px-1.5"
+            className="font-mono text-right text-xs h-7 px-1.5"
             value={w}
             onChange={(e) => {
               const next = [...fsrsWeights]
@@ -458,7 +458,7 @@ export function DataBackupSection() {
           </div>
         </div>
 
-        <div className="bg-[var(--danger-subtle)] border border-[var(--danger)] border-opacity-30 rounded-[var(--radius)] p-4">
+        <div className="bg-[var(--danger-subtle)] border border-[var(--danger)]/30 rounded-[var(--radius)] p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-[var(--danger)]">Delete All Data</p>

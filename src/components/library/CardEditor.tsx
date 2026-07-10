@@ -352,7 +352,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
                   setImagePreview(null)
                   setBack('')
                 }}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[var(--danger)] text-white flex items-center justify-center"
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[var(--danger)] text-[var(--danger-fg)] flex items-center justify-center"
                 aria-label="Remove image"
               >
                 <X size={9} />
@@ -406,7 +406,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
             className={cn(
               'inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded transition-colors',
               showPreview
-                ? 'bg-[var(--accent)] text-white'
+                ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
             )}
           >
@@ -415,7 +415,7 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
           </button>
 
           {showPreview && (front || back) && (
-            <div className="mt-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[#18181b] overflow-hidden">
+            <div className="mt-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-surface)] overflow-hidden">
               <ReviewCard
                 card={{
                   id: '__preview__',

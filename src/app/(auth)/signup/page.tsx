@@ -39,14 +39,17 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
-          <div className="flex items-center justify-center gap-2.5 mb-8">
-            <div className="w-8 h-8 bg-[var(--accent)] rounded-[6px] flex items-center justify-center">
-              <BookOpen size={16} className="text-white" />
+          <div className="flex flex-col items-center gap-3 mb-8">
+            <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
+              <BookOpen size={22} className="text-[var(--accent-fg)]" />
             </div>
-            <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemo</span>
+            <div className="text-center">
+              <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+              <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+            </div>
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 text-center">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8 text-center">
             <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">Check your email!</h1>
             <p className="text-xs text-[var(--text-muted)] mb-1">
               We sent a confirmation link to
@@ -67,20 +70,23 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-8 h-8 bg-[var(--accent)] rounded-[6px] flex items-center justify-center">
-            <BookOpen size={16} className="text-white" />
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
+            <BookOpen size={22} className="text-[var(--accent-fg)]" />
           </div>
-          <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemo</span>
+          <div className="text-center">
+            <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+            <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+          </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6">
+        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8">
           <h1 className="text-base font-semibold text-[var(--text-primary)] mb-1">Create your account</h1>
           <p className="text-xs text-[var(--text-muted)] mb-5">Start studying smarter &mdash; it&apos;s free</p>
 
           <form className="space-y-3" onSubmit={handleSubmit}>
             <div>
-              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">Name</label>
+              <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Name</label>
               <Input
                 placeholder="Your name"
                 required
@@ -89,7 +95,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">Email</label>
+              <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Email</label>
               <Input
                 type="email"
                 placeholder="you@example.com"
@@ -99,7 +105,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">Password</label>
+              <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Password</label>
               <Input
                 type="password"
                 placeholder="Min. 8 characters"
@@ -109,7 +115,7 @@ export default function SignupPage() {
               />
             </div>
             {error && (
-              <p className="text-xs text-red-500">{error}</p>
+              <p className="text-xs text-[var(--danger)]">{error}</p>
             )}
             <Button type="submit" variant="primary" size="md" className="w-full" loading={loading}>
               Create account

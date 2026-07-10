@@ -27,7 +27,7 @@ function formatDeletedDate(deletedAt: string): string {
 
 function TypeIcon({ type }: { type: TrashEntry['type'] }) {
   if (type === 'deck') return <BookOpen size={14} className="text-[var(--accent)] shrink-0" />
-  if (type === 'note') return <FileText size={14} className="text-yellow-400 shrink-0" />
+  if (type === 'note') return <FileText size={14} className="text-[var(--warning)] shrink-0" />
   return <CreditCard size={14} className="text-[var(--text-muted)] shrink-0" />
 }
 
@@ -35,10 +35,10 @@ function TypeBadge({ type }: { type: TrashEntry['type'] }) {
   const map = {
     card: 'bg-[var(--bg-active)] text-[var(--text-muted)]',
     deck: 'bg-[var(--accent-subtle)] text-[var(--accent)]',
-    note: 'bg-yellow-950/40 text-yellow-400',
+    note: 'bg-[var(--warning-subtle)] text-[var(--warning)]',
   }
   return (
-    <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded', map[type])}>
+    <span className={cn('font-mono text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide', map[type])}>
       {type}
     </span>
   )
@@ -75,11 +75,11 @@ function TrashItemRow({ entry, onRestore, onDelete }: TrashItemRowProps) {
           <p className="text-xs text-[var(--text-muted)] truncate opacity-70">{entry.snippet}</p>
         )}
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-[10px] text-[var(--text-muted)]">
+          <span className="font-mono text-[10px] text-[var(--text-muted)]">
             Deleted {formatDeletedDate(entry.deletedAt)}
           </span>
           <span className={cn(
-            'text-[10px] font-medium',
+            'font-mono text-[10px] font-medium',
             urgent ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]'
           )}>
             {urgent && <span className="mr-0.5">⚠</span>}
@@ -293,7 +293,7 @@ export default function TrashPage() {
               <section key={label}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[var(--text-muted)]">{icon}</span>
-                  <h2 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+                  <h2 className="meta-label text-[var(--text-muted)]">
                     {label}
                   </h2>
                   <span className="text-xs text-[var(--text-muted)]">({sectionItems.length})</span>

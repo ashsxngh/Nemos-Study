@@ -112,7 +112,7 @@ function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 pt-3">
       <div className="flex-1 h-px bg-[var(--border)]" />
-      <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest whitespace-nowrap">{label}</span>
+      <span className="meta-label text-[var(--text-muted)] whitespace-nowrap">{label}</span>
       <div className="flex-1 h-px bg-[var(--border)]" />
     </div>
   )
@@ -272,7 +272,8 @@ export function StatsPage() {
       // Date-only strings parse as UTC midnight per spec — force local-time
       // parsing so getDay() below reflects the actual local day of week.
       const d = new Date(ds + 'T00:00:00')
-      const count = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === ds).length
+      // Repeat reviews only — wasNew graduations are new cards, not reviews
+      const count = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === ds && !l.wasNew).length
       return { day: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()], cards: count }
     })
   }, [reviewLogs])
@@ -303,12 +304,12 @@ export function StatsPage() {
   const overallStats = [
     { label: 'Total cards', value: String(animatedTotalCards), icon: Brain, color: 'text-[var(--accent)]' },
     { label: 'Cards mastered', value: String(animatedMastered), sub: totalCards > 0 ? `${Math.round((masteredCards / totalCards) * 100)}%` : '0%', icon: Target, color: 'text-[var(--success)]' },
-    { label: 'Study time', value: studyTimeStr, sub: 'this month', icon: Clock, color: 'text-sky-400' },
-    { label: 'Current streak', value: String(animatedStreak), sub: 'days', icon: Flame, color: 'text-orange-400' },
+    { label: 'Study time', value: studyTimeStr, sub: 'this month', icon: Clock, color: 'text-[var(--accent)]' },
+    { label: 'Current streak', value: String(animatedStreak), sub: 'days', icon: Flame, color: 'text-[var(--warning)]' },
   ]
 
   const ratingLabels = ['Again', 'Hard', 'Good', 'Easy']
-  const ratingTextColors = ['text-red-400', 'text-orange-400', 'text-[var(--accent)]', 'text-[var(--success)]']
+  const ratingTextColors = ['text-[var(--danger)]', 'text-[var(--warning)]', 'text-[var(--accent)]', 'text-[var(--success)]']
 
   // ════════════════════════════════════════════════════════════════════════════
   // INSIGHTS — Model & Calibration
@@ -749,9 +750,9 @@ export function StatsPage() {
 
       {/* Burnout banner */}
       {burnoutWarningEnabled && todayDueCount > burnoutThresholdCards && (
-        <div className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/30 rounded-[var(--radius)] px-4 py-3">
-          <AlertTriangle size={16} className="text-yellow-400 shrink-0" />
-          <p className="text-sm text-yellow-300">
+        <div className="flex items-center gap-3 bg-[var(--warning-subtle)] border border-[var(--warning)]/30 rounded-[var(--radius)] px-4 py-3">
+          <AlertTriangle size={16} className="text-[var(--warning)] shrink-0" />
+          <p className="text-sm text-[var(--warning)]">
             Heavy day ahead — <strong>{todayDueCount} cards due</strong>. Consider splitting across days.
           </p>
         </div>
@@ -893,7 +894,7 @@ export function StatsPage() {
           <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 size={14} className="text-[var(--text-muted)]" />
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Cards This Week</h2>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Reviews This Week</h2>
             </div>
             {weeklyData.every((d) => d.cards === 0) ? <EmptyState message="No reviews yet this week" /> : (
               <div className="flex items-end gap-2 h-32">
@@ -955,11 +956,11 @@ export function StatsPage() {
 
           <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Flame size={14} className="text-orange-400" />
+              <Flame size={14} className="text-[var(--warning)]" />
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Current Streak</h2>
             </div>
             <div className="flex items-end gap-2">
-              <span className="text-4xl font-bold text-orange-400">{streak}</span>
+              <span className="text-4xl font-bold text-[var(--warning)]">{streak}</span>
               <span className="text-sm text-[var(--text-muted)] mb-1">days</span>
             </div>
             <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -1032,7 +1033,7 @@ export function StatsPage() {
                         <div className="flex items-center gap-1.5">
                           <span className="text-[9px] text-[var(--text-muted)] w-12">Actual</span>
                           <div className="flex-1 h-1.5 bg-[var(--bg-active)] rounded-full overflow-hidden">
-                            <div className={cn('h-full rounded-full', Math.abs(actual - predicted) <= 5 ? 'bg-[var(--success)]' : actual < predicted - 10 ? 'bg-[var(--danger)]' : 'bg-orange-500')} style={{ width: `${actual}%` }} />
+                            <div className={cn('h-full rounded-full', Math.abs(actual - predicted) <= 5 ? 'bg-[var(--success)]' : actual < predicted - 10 ? 'bg-[var(--danger)]' : 'bg-[var(--warning)]')} style={{ width: `${actual}%` }} />
                           </div>
                           <span className="text-[9px] text-[var(--text-secondary)] w-7 text-right">{actual}%</span>
                         </div>
@@ -1062,7 +1063,7 @@ export function StatsPage() {
                     <div key={label} className="flex items-center gap-3">
                       <span className="text-xs text-[var(--text-muted)] w-14 shrink-0">{label}</span>
                       <div className="flex-1 h-2 bg-[var(--bg-active)] rounded-full overflow-hidden">
-                        <div className={cn('h-full rounded-full', pct >= 30 ? 'bg-[var(--danger)]' : pct >= 15 ? 'bg-orange-500' : 'bg-[var(--accent)]')} style={{ width: `${pct}%` }} />
+                        <div className={cn('h-full rounded-full', pct >= 30 ? 'bg-[var(--danger)]' : pct >= 15 ? 'bg-[var(--warning)]' : 'bg-[var(--accent)]')} style={{ width: `${pct}%` }} />
                       </div>
                       <span className="text-xs text-[var(--text-secondary)] w-16 text-right shrink-0">{count} ({pct}%)</span>
                     </div>
@@ -1093,7 +1094,7 @@ export function StatsPage() {
                   {[
                     { label: 'Early', rate: reviewTiming.earlyRate, passRate: reviewTiming.earlyPassRate, detail: `avg ${reviewTiming.avgDaysEarly}d early`, icon: ArrowUp, color: 'text-sky-400' },
                     { label: 'On time', rate: reviewTiming.onTimeRate, passRate: reviewTiming.onTimePassRate, detail: '±1.5 days', icon: Target, color: 'text-[var(--success)]' },
-                    { label: 'Late', rate: reviewTiming.lateRate, passRate: reviewTiming.latePassRate, detail: `avg ${reviewTiming.avgDaysLate}d late`, icon: ArrowDown, color: 'text-orange-400' },
+                    { label: 'Late', rate: reviewTiming.lateRate, passRate: reviewTiming.latePassRate, detail: `avg ${reviewTiming.avgDaysLate}d late`, icon: ArrowDown, color: 'text-[var(--warning)]' },
                   ].map(({ label, rate, passRate, detail, icon: Icon, color }) => (
                     <div key={label} className="bg-[var(--bg-hover)] rounded-[var(--radius-sm)] p-3 text-center">
                       <Icon size={12} className={cn('mx-auto mb-1', color)} />
@@ -1133,7 +1134,7 @@ export function StatsPage() {
                     <div key={label} className="flex items-center gap-3">
                       <span className={cn('text-xs w-24 shrink-0', isOptimal ? 'text-[var(--accent)] font-semibold' : 'text-[var(--text-muted)]')}>{label}</span>
                       <div className="flex-1 h-2 bg-[var(--bg-active)] rounded-full overflow-hidden">
-                        <div className={cn('h-full rounded-full', isOptimal ? 'bg-[var(--accent)]' : 'bg-[var(--bg-active)] border-0', rate >= 85 ? 'bg-[var(--success)]' : rate >= 70 ? 'bg-[var(--accent)]' : rate >= 50 ? 'bg-orange-500' : 'bg-[var(--danger)]')} style={{ width: `${rate}%` }} />
+                        <div className={cn('h-full rounded-full', isOptimal ? 'bg-[var(--accent)]' : 'bg-[var(--bg-active)] border-0', rate >= 85 ? 'bg-[var(--success)]' : rate >= 70 ? 'bg-[var(--accent)]' : rate >= 50 ? 'bg-[var(--warning)]' : 'bg-[var(--danger)]')} style={{ width: `${rate}%` }} />
                       </div>
                       <span className={cn('text-xs font-semibold w-10 text-right shrink-0', isOptimal ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]')}>{rate}%</span>
                       <span className="text-[10px] text-[var(--text-muted)] w-14 text-right shrink-0">{total} reviews</span>
@@ -1165,14 +1166,14 @@ export function StatsPage() {
                       <span className="text-xs text-[var(--text-primary)]">{label}</span>
                       <div className="flex items-center gap-2 shrink-0 ml-3">
                         <span className="text-xs text-[var(--text-muted)]">{count} lapses</span>
-                        <span className={cn('text-xs font-semibold', avgRecovery === null ? 'text-[var(--text-muted)]' : avgRecovery >= 70 ? 'text-[var(--success)]' : avgRecovery >= 40 ? 'text-orange-400' : 'text-[var(--danger)]')}>
+                        <span className={cn('text-xs font-semibold', avgRecovery === null ? 'text-[var(--text-muted)]' : avgRecovery >= 70 ? 'text-[var(--success)]' : avgRecovery >= 40 ? 'text-[var(--warning)]' : 'text-[var(--danger)]')}>
                           {avgRecovery !== null ? `${avgRecovery}%` : '—'}
                         </span>
                       </div>
                     </div>
                     {avgRecovery !== null && (
                       <div className="h-1.5 w-full bg-[var(--bg-active)] rounded-full overflow-hidden">
-                        <div className={cn('h-full rounded-full', avgRecovery >= 70 ? 'bg-[var(--success)]' : avgRecovery >= 40 ? 'bg-orange-500' : 'bg-[var(--danger)]')} style={{ width: `${avgRecovery}%` }} />
+                        <div className={cn('h-full rounded-full', avgRecovery >= 70 ? 'bg-[var(--success)]' : avgRecovery >= 40 ? 'bg-[var(--warning)]' : 'bg-[var(--danger)]')} style={{ width: `${avgRecovery}%` }} />
                       </div>
                     )}
                   </div>
@@ -1220,7 +1221,7 @@ export function StatsPage() {
                     <p className="text-2xl font-bold text-[var(--text-primary)]">{lapseCluster.cv}</p>
                     <p className="text-xs text-[var(--text-muted)]">coefficient of variation</p>
                   </div>
-                  <div className={cn('px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold', lapseCluster.isBursty ? 'bg-orange-500/15 text-orange-400' : 'bg-[var(--success-subtle)] text-[var(--success)]')}>
+                  <div className={cn('px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold', lapseCluster.isBursty ? 'bg-[var(--warning-subtle)] text-[var(--warning)]' : 'bg-[var(--success-subtle)] text-[var(--success)]')}>
                     {lapseCluster.isBursty ? 'Bursty — lapses cluster in sessions' : 'Random — lapses spread evenly'}
                   </div>
                   <div className="ml-auto text-right">
@@ -1256,7 +1257,7 @@ export function StatsPage() {
                     <span className="text-xs text-[var(--text-primary)] truncate max-w-[55%]">{card.front.length > 55 ? card.front.slice(0, 55) + '…' : card.front}</span>
                     <div className="flex items-center gap-3 shrink-0 ml-2">
                       <span className="text-[10px] text-[var(--text-muted)]">{card.reps} reps</span>
-                      <span className="text-xs text-orange-400 font-semibold">{card.metric}d</span>
+                      <span className="text-xs text-[var(--warning)] font-semibold">{card.metric}d</span>
                     </div>
                   </div>
                 ))}
@@ -1348,7 +1349,7 @@ export function StatsPage() {
                     <span className="text-xs text-[var(--text-primary)] truncate max-w-[55%]">{card.front.length > 55 ? card.front.slice(0, 55) + '…' : card.front}</span>
                     <div className="flex items-center gap-3 shrink-0 ml-2">
                       <span className="text-[10px] text-[var(--text-muted)]">max {card.maxInterval}d</span>
-                      {card.difficulty && <span className="text-[10px] text-orange-400">D={card.difficulty}</span>}
+                      {card.difficulty && <span className="text-[10px] text-[var(--warning)]">D={card.difficulty}</span>}
                       <span className="text-xs text-[var(--danger)] font-semibold">{card.lapses} lapses</span>
                     </div>
                   </div>
@@ -1457,9 +1458,9 @@ export function StatsPage() {
                     <div key={label} className="flex items-center gap-3">
                       <span className="text-xs text-[var(--text-muted)] w-14 shrink-0">Card {label}</span>
                       <div className="flex-1 h-2 bg-[var(--bg-active)] rounded-full overflow-hidden">
-                        <div className={cn('h-full rounded-full transition-all', isDropping ? 'bg-orange-500' : rate >= 80 ? 'bg-[var(--success)]' : 'bg-[var(--accent)]')} style={{ width: `${rate}%` }} />
+                        <div className={cn('h-full rounded-full transition-all', isDropping ? 'bg-[var(--warning)]' : rate >= 80 ? 'bg-[var(--success)]' : 'bg-[var(--accent)]')} style={{ width: `${rate}%` }} />
                       </div>
-                      <span className={cn('text-xs font-semibold w-10 text-right shrink-0', isDropping ? 'text-orange-400' : 'text-[var(--text-secondary)]')}>{rate}%</span>
+                      <span className={cn('text-xs font-semibold w-10 text-right shrink-0', isDropping ? 'text-[var(--warning)]' : 'text-[var(--text-secondary)]')}>{rate}%</span>
                     </div>
                   )
                 })}

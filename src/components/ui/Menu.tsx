@@ -84,7 +84,7 @@ export function AnchoredMenu({ trigger, panel, panelClassName, align = 'right' }
       {open && (
         <div
           className={cn(
-            'absolute top-full mt-1 z-50 bg-[var(--bg-surface)] border border-[var(--border)] shadow-lg overflow-hidden animate-scale-in',
+            'absolute top-full mt-1 z-50 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_24px_rgba(0,0,0,0.4)] overflow-hidden animate-scale-in',
             align === 'right' ? 'right-0' : 'left-0',
             panelClassName,
           )}

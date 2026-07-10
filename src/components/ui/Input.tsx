@@ -20,11 +20,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           className={cn(
-            'w-full h-8 bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)]',
+            'w-full h-8 bg-[var(--bg-base)] border border-[var(--border)] rounded-[var(--radius)]',
             'text-[var(--text-primary)] text-sm placeholder:text-[var(--text-muted)]',
             'px-3 transition-colors duration-100',
             'hover:border-[var(--border-strong)]',
-            'focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]',
+            'focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20',
             icon && 'pl-8',
             error && 'border-[var(--danger)] focus:border-[var(--danger)] focus:ring-[var(--danger)]',
             className

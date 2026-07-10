@@ -542,11 +542,11 @@ export const useLibraryStore = create<LibraryState>()(
         const logSet     = new Set(processed.reviewLogs)
         set((s) => ({
           pendingDeletes: {
-            folders:    s.pendingDeletes.folders.filter((id) => !folderSet.has(id)),
-            decks:      s.pendingDeletes.decks.filter((id) => !deckSet.has(id)),
-            cards:      s.pendingDeletes.cards.filter((id) => !cardSet.has(id)),
-            sessions:   s.pendingDeletes.sessions.filter((id) => !sessionSet.has(id)),
-            reviewLogs: s.pendingDeletes.reviewLogs.filter((id) => !logSet.has(id)),
+            folders:    (s.pendingDeletes.folders ?? []).filter((id) => !folderSet.has(id)),
+            decks:      (s.pendingDeletes.decks ?? []).filter((id) => !deckSet.has(id)),
+            cards:      (s.pendingDeletes.cards ?? []).filter((id) => !cardSet.has(id)),
+            sessions:   (s.pendingDeletes.sessions ?? []).filter((id) => !sessionSet.has(id)),
+            reviewLogs: (s.pendingDeletes.reviewLogs ?? []).filter((id) => !logSet.has(id)),
           },
         }))
       },

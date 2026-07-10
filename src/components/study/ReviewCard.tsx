@@ -74,28 +74,28 @@ function CardContent({ content }: { content: string }) {
       rehypePlugins={[[rehypeKatex, { strict: false }]]}
       components={{
         p: ({ children }) => (
-          <p className="leading-relaxed text-base text-[#e8e8ea]">{children}</p>
+          <p className="leading-relaxed text-base text-[var(--text-primary)]">{children}</p>
         ),
         code: ({ children, className }) => {
           const isBlock = className?.includes('language-')
           return isBlock ? (
-            <pre className="bg-[#0f0f11] rounded-[var(--radius-sm)] p-3 overflow-x-auto my-2 text-left">
-              <code className="text-sm font-mono text-[#e8e8ea]">{children}</code>
+            <pre className="bg-[var(--bg-base)] rounded-[var(--radius-sm)] p-3 overflow-x-auto my-2 text-left">
+              <code className="text-sm font-mono text-[var(--text-primary)]">{children}</code>
             </pre>
           ) : (
-            <code className="bg-[#0f0f11] text-[var(--accent)] px-1.5 py-0.5 rounded text-sm font-mono">
+            <code className="bg-[var(--bg-base)] text-[var(--accent)] px-1.5 py-0.5 rounded text-sm font-mono">
               {children}
             </code>
           )
         },
-        strong: ({ children }) => <strong className="font-bold text-[#e8e8ea]">{children}</strong>,
-        em: ({ children }) => <em className="italic text-[#9b9ba4]">{children}</em>,
+        strong: ({ children }) => <strong className="font-bold text-[var(--text-primary)]">{children}</strong>,
+        em: ({ children }) => <em className="italic text-[var(--text-secondary)]">{children}</em>,
         ul: ({ children }) => <ul className="list-disc list-inside space-y-1 text-left my-1">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 text-left my-1">{children}</ol>,
-        h1: ({ children }) => <h1 className="text-xl font-bold text-[#e8e8ea] mb-1">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-lg font-semibold text-[#e8e8ea] mb-1">{children}</h2>,
+        h1: ({ children }) => <h1 className="text-xl font-bold text-[var(--text-primary)] mb-1">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">{children}</h2>,
         blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-[var(--accent)] pl-3 text-[#9b9ba4] italic my-2">
+          <blockquote className="border-l-2 border-[var(--accent)] pl-3 text-[var(--text-secondary)] italic my-2">
             {children}
           </blockquote>
         ),
@@ -105,10 +105,10 @@ function CardContent({ content }: { content: string }) {
           </div>
         ),
         th: ({ children }) => (
-          <th className="px-3 py-1.5 border border-[#2a2a30] bg-[#0f0f11] font-semibold text-[#e8e8ea]">{children}</th>
+          <th className="px-3 py-1.5 border border-[var(--border)] bg-[var(--bg-base)] font-semibold text-[var(--text-primary)]">{children}</th>
         ),
         td: ({ children }) => (
-          <td className="px-3 py-1.5 border border-[#2a2a30] text-[#c8c8cc]">{children}</td>
+          <td className="px-3 py-1.5 border border-[var(--border)] text-[var(--text-secondary)]">{children}</td>
         ),
       }}
     >
@@ -177,7 +177,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
   return (
     <div className={cn('w-full', className)}>
       {/* Question section */}
-      <div className="p-6 text-[#e8e8ea]">
+      <div className="p-6 text-[var(--text-primary)]">
         {card.type === 'cloze' ? (
           <>
             <p className="text-lg leading-relaxed mb-4">
@@ -189,7 +189,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
               <div className="space-y-2.5 mt-4">
                 {clozeAnswers.map((_, i) => (
                   <div key={i} className="flex items-center gap-2.5">
-                    <span className="text-xs text-[#6b6b72] shrink-0 w-14">Blank {i + 1}</span>
+                    <span className="text-xs text-[var(--text-muted)] shrink-0 w-14">Blank {i + 1}</span>
                     <input
                       ref={i === 0 ? firstClozeRef : undefined}
                       type="text"
@@ -212,7 +212,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
                         }
                       }}
                       data-cloze-input
-                      className="flex-1 h-8 px-2.5 text-sm bg-[#161618] border border-[#2a2a30] rounded-[var(--radius-sm)] text-[#e8e8ea] placeholder:text-[#4a4a55] outline-none focus:border-[var(--accent)] transition-colors"
+                      className="flex-1 h-8 px-2.5 text-sm bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] transition-colors"
                     />
                   </div>
                 ))}
@@ -256,7 +256,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
 
       {/* Answer section */}
       {showAnswer && (
-        <div className="animate-fade-in border-t border-[#2a2a30] bg-[#161618] p-6">
+        <div className="animate-fade-in border-t border-[var(--border)] bg-[var(--bg-surface)] p-6">
 
           {/* Typed result feedback */}
           {card.type === 'typed' && answerChecked && (
@@ -294,7 +294,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
                 </div>
               ))}
               {clozeResults.length > 0 && !allClozeCorrect && (
-                <p className="text-[10px] text-[#4a4a55] pt-1">
+                <p className="text-[10px] text-[var(--text-muted)] pt-1">
                   Use the rating buttons to override if you think you had it right.
                 </p>
               )}
@@ -302,7 +302,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
           )}
 
           {card.type === 'cloze' ? (
-            <p className="text-base leading-relaxed text-[#e8e8ea]">
+            <p className="text-base leading-relaxed text-[var(--text-primary)]">
               {parseCloze(card.back?.trim() ? card.back : card.front, true)}
             </p>
           ) : isImage ? (
@@ -313,7 +313,7 @@ export function ReviewCard({ card, showAnswer, className, onTypedCheck }: Review
               className="max-h-64 max-w-full rounded-[var(--radius)] object-contain"
             />
           ) : (
-            <div className="text-[#e8e8ea]">
+            <div className="text-[var(--text-primary)]">
               <CardContent content={card.back} />
             </div>
           )}

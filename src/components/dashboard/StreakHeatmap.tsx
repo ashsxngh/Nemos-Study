@@ -88,7 +88,12 @@ export function StreakHeatmap() {
       .filter((l) => new Date(l.reviewedAt).getFullYear() === year)
       .map((l) => toLocalDateStr(new Date(l.reviewedAt)))
   ).size
-  const totalReviews = reviewLogs.filter((l) => new Date(l.reviewedAt).getFullYear() === year).length
+  // Repeat reviews only — new-card graduations aren't reviews. The day cells
+  // above deliberately still count all activity (learning new cards keeps a
+  // streak day alive), so they're labeled "cards", not "reviews".
+  const totalReviews = reviewLogs.filter(
+    (l) => !l.wasNew && new Date(l.reviewedAt).getFullYear() === year
+  ).length
 
   return (
     <div className="mb-6">
@@ -134,7 +139,7 @@ export function StreakHeatmap() {
                   {week.map(({ date, count }, di) => (
                     <div
                       key={di}
-                      title={count >= 0 ? `${formatDate(date)}: ${count} reviews` : ''}
+                      title={count >= 0 ? `${formatDate(date)}: ${count} cards` : ''}
                       className={cn(
                         'rounded-[2px] transition-opacity',
                         count < 0

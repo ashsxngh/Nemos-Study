@@ -367,7 +367,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
             className={cn(
               'px-4 py-1.5 text-xs font-semibold rounded-[var(--radius-sm)] transition-colors',
               pendingRating > 0
-                ? 'bg-[var(--accent)] text-white hover:opacity-90'
+                ? 'bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90'
                 : 'bg-[var(--bg-hover)] text-[var(--text-muted)] cursor-not-allowed'
             )}
           >
@@ -445,20 +445,20 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
             {/* Countdown pulse */}
             <div className={cn('mb-2', pulse && 'animate-pulse')}>
               <span
-                className="text-4xl font-black tabular-nums leading-none"
+                className="font-mono text-4xl font-bold tabular-nums leading-none"
                 style={{
                   color: days <= 7 ? 'var(--danger)' : days <= 14 ? 'var(--warning)' : 'var(--text-primary)',
                 }}
               >
                 {days}
               </span>
-              <span className="text-[10px] text-[var(--text-muted)] ml-1.5">days left</span>
+              <span className="meta-label text-[var(--text-muted)] ml-1.5">days left</span>
             </div>
 
             {/* Target + status badge */}
             <div className="flex items-center gap-1.5 flex-wrap">
               <Target size={10} className="text-[var(--text-muted)]" />
-              <span className="text-[10px] text-[var(--text-muted)]">Target {targetPct}%</span>
+              <span className="font-mono text-[10px] text-[var(--text-muted)]">Target {targetPct}%</span>
               {stats.reviewedCards > 0 && behind && (
                 <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--danger-subtle)] text-[var(--danger)]">
                   Behind
@@ -509,7 +509,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
                       }
                       <span className="text-[10px] text-[var(--text-secondary)] truncate">{t.name}</span>
                     </div>
-                    <span className="text-[10px] font-semibold shrink-0 ml-2" style={{ color: barColor }}>
+                    <span className="font-mono text-[10px] font-semibold shrink-0 ml-2" style={{ color: barColor }}>
                       {t.cardCount > 0 ? `${t.readiness}%` : '—'}
                     </span>
                   </div>
@@ -539,7 +539,7 @@ function ExamCard({ exam, isEditOpen, onToggleEdit }: {
           className={cn(
             'w-full flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-[var(--radius-sm)] transition-all',
             stats.totalCards > 0
-              ? 'bg-[var(--accent)] text-white hover:opacity-90 active:scale-[0.98]'
+              ? 'bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 active:scale-[0.98]'
               : 'bg-[var(--bg-hover)] text-[var(--text-muted)] cursor-not-allowed'
           )}
         >
@@ -665,7 +665,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
               <option value="high">High priority</option>
             </select>
             <div className="flex gap-2">
-              <button type="submit" className="flex-1 text-sm font-medium py-2 rounded-[var(--radius-sm)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity">
+              <button type="submit" className="flex-1 text-sm font-medium py-2 rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 transition-opacity">
                 Save Exam
               </button>
               <button type="button" onClick={() => { setShowExamForm(false); onExamAdded?.() }}
@@ -712,7 +712,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
                 return (
                   <button key={day}
                     className={cn('h-8 w-full flex flex-col items-center justify-center rounded-[var(--radius-sm)] text-xs transition-colors relative',
-                      isToday ? 'bg-[var(--accent)] text-white font-semibold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]')}
+                      isToday ? 'bg-[var(--accent)] text-[var(--accent-fg)] font-semibold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]')}
                     onClick={() => dayExams.length > 0 ? setSelectedExamId(dayExams[0].id) : undefined}
                   >
                     {day}
@@ -730,7 +730,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Calendar size={12} className="text-[var(--text-muted)]" />
-                <h3 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Upcoming Exams</h3>
+                <h3 className="meta-label text-[var(--text-secondary)]">Upcoming Exams</h3>
               </div>
               {upcomingExams.map((exam) => (
                 <div key={exam.id} className="space-y-2">
@@ -750,7 +750,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
           {/* Past exam cards */}
           {pastExams.length > 0 && (
             <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Past Exams</h3>
+              <h3 className="meta-label text-[var(--text-muted)]">Past Exams</h3>
               {pastExams.map((exam) => (
                 <ExamCard key={exam.id} exam={exam} isEditOpen={false} onToggleEdit={() => {}} />
               ))}
@@ -803,7 +803,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
                   <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center shrink-0',
                     task.done ? 'bg-[var(--success)] border-[var(--success)]' : 'border-[var(--border-strong)]')}>
                     {task.done && (
-                      <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
+                      <svg className="w-2.5 h-2.5 text-[var(--accent-fg)]" viewBox="0 0 10 10" fill="none">
                         <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                       </svg>
                     )}

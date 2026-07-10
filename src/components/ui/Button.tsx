@@ -15,13 +15,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<Variant, string> = {
   primary:
-    'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] shadow-sm',
+    'bg-[var(--accent)] text-[var(--accent-fg)] font-semibold hover:bg-[var(--accent-hover)]',
   secondary:
-    'bg-[var(--bg-active)] text-[var(--text-primary)] hover:bg-[var(--border-strong)]',
+    'bg-[var(--bg-surface)] border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
   ghost:
     'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
   danger:
-    'bg-[var(--danger-subtle)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white',
+    'bg-[var(--danger-subtle)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-[var(--danger-fg)]',
   outline:
     'border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
 }
@@ -40,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         className={cn(
-          'inline-flex items-center justify-center font-medium rounded-[var(--radius-sm)] transition-colors duration-100 select-none whitespace-nowrap',
+          'inline-flex items-center justify-center font-medium rounded-[var(--radius)] transition-colors duration-100 select-none whitespace-nowrap',
           'disabled:opacity-40 disabled:cursor-not-allowed',
           variantStyles[variant],
           sizeStyles[size],

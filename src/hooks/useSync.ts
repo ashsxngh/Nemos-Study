@@ -1069,11 +1069,11 @@ export function useSync(): SyncStatus {
         cards:   s.cards.filter((c)   => !cSet.has(c.id)),
         fsrsData: Object.fromEntries(Object.entries(s.fsrsData).filter(([id]) => !cSet.has(id))),
         pendingDeletes: {
-          folders:    s.pendingDeletes.folders.filter((id) => !fSet.has(id)),
-          decks:      s.pendingDeletes.decks.filter((id)   => !dSet.has(id)),
-          cards:      s.pendingDeletes.cards.filter((id)   => !cSet.has(id)),
-          sessions:   s.pendingDeletes.sessions.filter((id) => !sSet.has(id)),
-          reviewLogs: s.pendingDeletes.reviewLogs.filter((id) => !lSet.has(id)),
+          folders:    (s.pendingDeletes.folders ?? []).filter((id) => !fSet.has(id)),
+          decks:      (s.pendingDeletes.decks ?? []).filter((id)   => !dSet.has(id)),
+          cards:      (s.pendingDeletes.cards ?? []).filter((id)   => !cSet.has(id)),
+          sessions:   (s.pendingDeletes.sessions ?? []).filter((id) => !sSet.has(id)),
+          reviewLogs: (s.pendingDeletes.reviewLogs ?? []).filter((id) => !lSet.has(id)),
         },
       }))
       if (deletedSessions.length || deletedReviewLogs.length) {
@@ -1130,7 +1130,7 @@ export function useSync(): SyncStatus {
           mountedRef.current = true
           // Push any local changes that existed before pull completed (e.g. cards created during load)
           const state = useLibraryStore.getState()
-          if (state.folders.length || state.decks.length || state.cards.length || state.pendingDeletes.folders.length || state.pendingDeletes.decks.length || state.pendingDeletes.cards.length || state.pendingDeletes.sessions.length || state.pendingDeletes.reviewLogs.length) {
+          if (state.folders.length || state.decks.length || state.cards.length || (state.pendingDeletes.folders ?? []).length || (state.pendingDeletes.decks ?? []).length || (state.pendingDeletes.cards ?? []).length || (state.pendingDeletes.sessions ?? []).length || (state.pendingDeletes.reviewLogs ?? []).length) {
             handlePush()
           }
           // Seed exams/settings to Supabase even if nothing changes after

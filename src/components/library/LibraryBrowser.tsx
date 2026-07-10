@@ -542,7 +542,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               className={cn(
                 'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
                 filterStarred
-                  ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
               )}
               aria-pressed={filterStarred}
@@ -555,7 +555,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               className={cn(
                 'flex items-center gap-1 text-[11px] px-2 py-1 rounded-[var(--radius-sm)] border transition-colors',
                 filterHasDue
-                  ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
               )}
               aria-pressed={filterHasDue}
@@ -573,7 +573,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     className={cn(
                       'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
                       activeTags.includes(tag)
-                        ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                        ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                         : 'bg-[var(--bg-surface)] border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
                     )}
                   >
@@ -634,7 +634,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         {/* Folders section */}
         {view !== 'table' && visibleFolders.length > 0 && (
           <section className="mb-6">
-            <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-3">
+            <h3 className="meta-label text-[var(--text-muted)] mb-3">
               Folders
             </h3>
             <div
@@ -699,7 +699,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
         {view !== 'table' && sortedDecks.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+              <h3 className="meta-label text-[var(--text-muted)]">
                 Decks
               </h3>
               {selectedDeckIds.size > 0 && (
@@ -1018,7 +1018,7 @@ function LibraryTreeTable({
             )}
             <Folder size={15} className={cn('shrink-0', FOLDER_COLORS[folder.color])} />
             <span className="text-sm font-medium text-[var(--text-primary)] truncate">{folder.name}</span>
-            {folder.isStarred && <Star size={11} className="text-yellow-400 fill-yellow-400 shrink-0" />}
+            {folder.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)] shrink-0" />}
           </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">
             {counts.newCount > 0 ? counts.newCount : '–'}
@@ -1048,7 +1048,7 @@ function LibraryTreeTable({
             <span className="text-sm text-[var(--text-primary)] truncate group-hover:text-[var(--accent)] transition-colors">
               {deck.name}
             </span>
-            {deck.isStarred && <Star size={11} className="text-yellow-400 fill-yellow-400 shrink-0" />}
+            {deck.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)] shrink-0" />}
           </div>
           <div className={cn('col-span-1 text-center text-xs', counts.newCount > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]')}>
             {counts.newCount > 0 ? counts.newCount : '–'}
@@ -1060,7 +1060,7 @@ function LibraryTreeTable({
                 e.stopPropagation()
                 onStudyClick(deck)
               }}
-              className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
+              className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-[var(--accent-fg)] transition-colors"
             >
               <Play size={9} /> Study
             </button>
@@ -1078,7 +1078,7 @@ function LibraryTreeTable({
   return (
     <div className="border border-[var(--border)] rounded-[var(--radius)] overflow-hidden bg-[var(--bg-surface)]">
       {/* Header */}
-      <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-hover)] text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">
+      <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-hover)] meta-label text-[var(--text-muted)]">
         <div className="col-span-7">Name</div>
         <div className="col-span-1 text-center">New</div>
         <div className="col-span-1 text-center">Total</div>
@@ -1161,7 +1161,7 @@ function FolderCardGrid({
           <Folder size={20} className={FOLDER_COLORS[folder.color]} />
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {folder.isStarred && <Star size={12} className="text-yellow-400 fill-yellow-400" />}
+          {folder.isStarred && <Star size={12} className="text-[var(--warning)] fill-[var(--warning)]" />}
           <ItemDropdown items={menuItems} />
         </div>
       </div>
@@ -1223,7 +1223,7 @@ function FolderCardList({
       <Folder size={15} className={FOLDER_COLORS[folder.color]} />
       <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{folder.name}</span>
       <span className="text-xs text-[var(--text-muted)]">{cardCount} cards</span>
-      {folder.isStarred && <Star size={11} className="text-yellow-400 fill-yellow-400" />}
+      {folder.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)]" />}
       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
         <ItemDropdown items={menuItems} />
       </div>
@@ -1289,7 +1289,7 @@ function DeckCardGrid({
               e.stopPropagation()
               onStudyClick(deck)
             }}
-            className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white transition-colors"
+            className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-[var(--accent-fg)] transition-colors"
           >
             <Play size={9} /> Study
           </button>
@@ -1370,7 +1370,7 @@ function DeckCardList({
           e.stopPropagation()
           onStudyClick(deck)
         }}
-        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-white flex-shrink-0"
+        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded-full hover:bg-[var(--accent)] hover:text-[var(--accent-fg)] flex-shrink-0"
       >
         <Play size={9} /> Study
       </button>

@@ -80,7 +80,7 @@ function formatKey(key: string): string {
 
 const RATING_LABELS: Record<number, string> = { 1: 'Missed', 2: 'Hard', 3: 'Good', 4: 'Easy' }
 const RATING_COLORS: Record<number, string> = {
-  1: '#9b9ba4', 2: '#fbbf24', 3: '#818cf8', 4: '#4ade80',
+  1: 'var(--text-muted)', 2: 'var(--warning)', 3: 'var(--accent)', 4: 'var(--success)',
 }
 
 function SessionContent() {
@@ -189,7 +189,10 @@ function SessionContent() {
   const endLibrarySession = useCallback(() => {
     const sessionId = librarySessionIdRef.current
     if (!sessionId) return
-    const sessionLogs = useStudyStore.getState().logs
+    // Reviews only — wasNew graduations are new cards being learned, not
+    // reviews, so they don't count toward the session's reviewed/accuracy
+    // numbers (shown in RecentActivity).
+    const sessionLogs = useStudyStore.getState().logs.filter((l) => !l.wasNew)
     const cardsReviewed = sessionLogs.length
     const cardsCorrect = sessionLogs.filter((l) => l.rating >= 2).length
     useHistoryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
@@ -548,6 +551,7 @@ function SessionContent() {
         reviewedAt: new Date().toISOString(),
         scheduledInterval: 0,
         ease: 0,
+        wasNew: isNew,
       })
 
       reviewCard(card.id, rating, responseMs)
@@ -801,8 +805,8 @@ function SessionContent() {
       <div className="flex flex-col items-center justify-center flex-1 p-6" style={{ background: 'var(--bg-base)' }}>
         <div className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <div className="p-6 text-center space-y-2">
-            <p className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Resume your session?</p>
-            <p className="text-sm" style={{ color: '#6b6b72' }}>
+            <p className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Resume your session?</p>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               You left off with {remaining} {remaining === 1 ? 'card' : 'cards'} still to go.
             </p>
           </div>
@@ -810,7 +814,7 @@ function SessionContent() {
             <button
               onClick={handleDiscardRecovery}
               className="flex-1 py-3 text-sm font-medium border-r transition-colors hover:bg-[var(--bg-hover)]"
-              style={{ borderColor: 'var(--border)', color: '#6b6b72' }}
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
             >
               Start fresh
             </button>
@@ -858,10 +862,10 @@ function SessionContent() {
         <div className="w-full max-w-sm animate-fade-in space-y-4">
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="p-7 text-center space-y-2">
-              <p className="text-xl font-semibold" style={{ color: '#e8e8ea' }}>
+              <p className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
                 You remembered {rememberedPct}% of cards.
               </p>
-              <p className="text-sm" style={{ color: '#6b6b72' }}>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
                 Review the cards you missed again.
               </p>
             </div>
@@ -873,14 +877,14 @@ function SessionContent() {
               setMissedReviewCount(0)
             }}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-            style={{ background: 'var(--accent)', color: '#fff' }}
+            style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
           >
             Review missed cards ({missedN})
           </button>
           <button
             onClick={() => setSessionPhase('retry')}
             className="w-full text-center text-sm py-1"
-            style={{ color: '#6b6b72', background: 'none', border: 'none', cursor: 'pointer' }}
+            style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
           >
             Skip and finish
           </button>
@@ -904,8 +908,8 @@ function SessionContent() {
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="p-6 text-center space-y-1">
               <div className="text-3xl mb-3">🎉</div>
-              <h1 className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>Session Complete</h1>
-              <p className="text-sm" style={{ color: '#6b6b72' }}>
+              <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Session Complete</h1>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
                 Great work!
               </p>
             </div>
@@ -917,15 +921,15 @@ function SessionContent() {
                 { label: 'Time', value: formatDuration(elapsed) },
               ].map(({ label, value }, i) => (
                 <div key={label} className={cn('p-4', i % 2 === 0 ? 'border-r' : '', i < 2 ? 'border-b' : '')} style={{ borderColor: 'var(--border)' }}>
-                  <p className="text-xl font-bold" style={{ color: '#e8e8ea' }}>{value}</p>
-                  <p className="text-xs mt-0.5" style={{ color: '#6b6b72' }}>{label}</p>
+                  <p className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{value}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{label}</p>
                 </div>
               ))}
             </div>
             <div className="p-4 border-t" style={{ borderColor: 'var(--border)' }}>
               <div className="flex justify-between mb-1.5">
-                <span className="text-xs" style={{ color: '#6b6b72' }}>Accuracy</span>
-                <span className="text-xs font-semibold" style={{ color: '#e8e8ea' }}>{accuracy}%</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Accuracy</span>
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{accuracy}%</span>
               </div>
               <Progress value={accuracy} max={100} color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
             </div>
@@ -951,7 +955,7 @@ function SessionContent() {
                 setSessionPhase('first')
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
             >
               <RotateCcw size={14} />
               Review Again
@@ -959,7 +963,7 @@ function SessionContent() {
             <button
               onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
             >
               <ArrowLeft size={14} />
               Back to Study
@@ -984,12 +988,12 @@ function SessionContent() {
         ) : (
           <div className="w-full max-w-sm rounded-xl overflow-hidden animate-fade-in" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="p-8 text-center space-y-3">
-              <p className="text-lg font-semibold" style={{ color: '#e8e8ea' }}>All caught up!</p>
-              <p className="text-sm" style={{ color: '#6b6b72' }}>No cards due. Come back later.</p>
+              <p className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>All caught up!</p>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No cards due. Come back later.</p>
               <Link href="/study">
                 <button
                   className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                  style={{ background: 'var(--accent)', color: '#fff' }}
+                  style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
                 >
                   <ArrowLeft size={14} />
                   Back
@@ -1024,11 +1028,11 @@ function SessionContent() {
         <div className="h-[3px] w-full shrink-0 flex" style={{ background: 'var(--border)' }}>
           <div
             className="h-full transition-all duration-300"
-            style={{ width: `${greenPct}%`, background: '#4ade80' }}
+            style={{ width: `${greenPct}%`, background: 'var(--success)' }}
           />
           <div
             className="h-full transition-all duration-300"
-            style={{ width: `${missPct}%`, background: '#7a3535' }}
+            style={{ width: `${missPct}%`, background: 'color-mix(in srgb, var(--danger) 45%, var(--bg-base))' }}
           />
         </div>
       )}
@@ -1042,19 +1046,19 @@ function SessionContent() {
         <button
           onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: '#6b6b72' }}
+          style={{ color: 'var(--text-muted)' }}
           title="Exit session"
         >
           <ArrowLeft size={15} />
         </button>
-        <span className="text-sm font-medium" style={{ color: '#e8e8ea' }}>
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
           {deckName}
         </span>
 
         {isCurrentCardNew && (
           <span
-            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-            style={{ background: '#1c1c2e', color: '#818cf8', border: '1px solid #2a2a50' }}
+            className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
           >
             NEW
           </span>
@@ -1065,8 +1069,8 @@ function SessionContent() {
         {/* Mistake counter badge — hidden until first miss */}
         {missedReviewCount > 0 && (
           <span
-            className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded"
-            style={{ background: '#1c1212', color: '#b87070', border: '1px solid #3a1e1e' }}
+            className="font-mono text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
           >
             ✕ {missedReviewCount}
           </span>
@@ -1075,18 +1079,18 @@ function SessionContent() {
         {/* Daily progress */}
         <div
           className="hidden md:flex items-center gap-2 mr-1"
-          title={`${todayReviewCount} of ${dailyCardTarget} cards reviewed today`}
+          title={`${todayReviewCount} of ${dailyCardTarget} cards studied today`}
         >
-          <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: '#6b6b72' }}>
+          <span className="font-mono text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--text-muted)' }}>
             Today
           </span>
           <div className="w-20 h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
             <div
               className="h-full rounded-full transition-all duration-300"
-              style={{ width: `${dailyPct}%`, background: '#818cf8' }}
+              style={{ width: `${dailyPct}%`, background: 'var(--accent)' }}
             />
           </div>
-          <span className="text-[10px] tabular-nums font-semibold" style={{ color: '#818cf8' }}>
+          <span className="text-[10px] tabular-nums font-semibold" style={{ color: 'var(--accent)' }}>
             {dailyPct}%
           </span>
         </div>
@@ -1094,7 +1098,7 @@ function SessionContent() {
         <button
           onClick={() => setZenMode(true)}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: '#6b6b72' }}
+          style={{ color: 'var(--text-muted)' }}
           title="Zen mode (Z)"
         >
           <Focus size={14} />
@@ -1103,14 +1107,14 @@ function SessionContent() {
         <button
           onClick={handleShuffle}
           className="flex items-center justify-center w-7 h-7 rounded-md transition-colors hover:bg-[var(--bg-surface)]"
-          style={{ color: '#6b6b72' }}
+          style={{ color: 'var(--text-muted)' }}
           title="Shuffle remaining"
         >
           <Shuffle size={14} />
         </button>
 
         {deckId && (
-          <span className="text-xs tabular-nums font-medium" style={{ color: '#6b6b72' }}>
+          <span className="text-xs tabular-nums font-medium" style={{ color: 'var(--text-muted)' }}>
             {currentIndex + 1} / {queue.length}
           </span>
         )}
@@ -1122,7 +1126,7 @@ function SessionContent() {
         <button
           onClick={() => setZenMode(false)}
           className="absolute top-4 right-4 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
           title="Exit Zen mode (Esc)"
         >
           <X size={12} />
@@ -1138,13 +1142,13 @@ function SessionContent() {
           {zenMode && (
             <div className="flex flex-col items-center gap-2 mb-8 animate-fade-in">
               <span
-                className="text-[10px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
-                style={{ background: '#1c1c2e', color: '#818cf8', border: '1px solid #2a2a50' }}
+                className="font-mono text-[10px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
+                style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
               >
                 {deckName}
               </span>
               {deckId && (
-                <span className="text-xs tabular-nums" style={{ color: '#6b6b72' }}>
+                <span className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
                   Card {currentIndex + 1} of {queue.length}
                 </span>
               )}
@@ -1157,13 +1161,13 @@ function SessionContent() {
               className="flex items-center gap-2.5 mb-3 px-3.5 py-2.5 rounded-lg animate-fade-in"
               style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
             >
-              <span className="text-xs flex-1" style={{ color: '#a0a0b0' }}>
+              <span className="text-xs flex-1" style={{ color: 'var(--text-secondary)' }}>
                 This one keeps coming back — want to edit the card or add a hint?
               </span>
               <button
                 onClick={() => setShowEditDialog(true)}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded-md font-medium transition-colors hover:brightness-110"
-                style={{ background: 'var(--accent)', color: '#fff' }}
+                style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
               >
                 <Pencil size={11} />
                 Edit
@@ -1171,7 +1175,7 @@ function SessionContent() {
               <button
                 onClick={() => setDismissedStruggleIds((s) => new Set(s).add(currentCard!.id))}
                 className="text-xs px-2 py-1 rounded-md transition-colors hover:bg-[var(--bg-hover)]"
-                style={{ color: '#6b6b72' }}
+                style={{ color: 'var(--text-muted)' }}
               >
                 Dismiss
               </button>
@@ -1196,8 +1200,8 @@ function SessionContent() {
             >
               {/* Subtle deck name — corner of the card, not the page chrome */}
               <span
-                className="absolute top-2.5 right-3.5 text-[10px] font-medium truncate max-w-[40%] pointer-events-none select-none"
-                style={{ color: '#6b6b72', opacity: 0.7 }}
+                className="absolute top-2.5 right-3.5 font-mono text-[10px] uppercase tracking-wider truncate max-w-[40%] pointer-events-none select-none"
+                style={{ color: 'var(--text-muted)', opacity: 0.7 }}
               >
                 {currentCardDeckName}
               </span>
@@ -1210,7 +1214,7 @@ function SessionContent() {
                   className="flex items-center justify-between px-4 py-2 border-t"
                   style={{ borderColor: 'var(--border)' }}
                 >
-                  <span className="text-[11px]" style={{ color: '#6b6b72' }}>
+                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
                     Last seen {cardMeta.lastSeen}
                   </span>
                 </div>
@@ -1221,24 +1225,24 @@ function SessionContent() {
                 <div className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <div className="grid grid-cols-4 gap-2 px-4 py-2.5">
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Stability</p>
-                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.stability.toFixed(1)}d</p>
+                      <p className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Stability</p>
+                      <p className="font-mono text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{retentionInfo.stability.toFixed(1)}d</p>
                     </div>
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>Retrievability</p>
-                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>{retentionInfo.retrievability}%</p>
+                      <p className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Retrievability</p>
+                      <p className="font-mono text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{retentionInfo.retrievability}%</p>
                     </div>
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>
+                      <p className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                         {retentionInfo.daysDiff <= 0 ? 'Overdue' : 'Due in'}
                       </p>
-                      <p className="text-xs font-medium" style={{ color: '#a0a0b0' }}>
+                      <p className="font-mono text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
                         {retentionInfo.daysDiff === 0 ? 'Today' : `${Math.abs(retentionInfo.daysDiff)}d`}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[9px] uppercase tracking-wider" style={{ color: '#5a5a62' }}>State</p>
-                      <p className="text-xs font-medium capitalize" style={{ color: '#a0a0b0' }}>{retentionInfo.state}</p>
+                      <p className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>State</p>
+                      <p className="font-mono text-xs font-medium capitalize" style={{ color: 'var(--text-secondary)' }}>{retentionInfo.state}</p>
                     </div>
                   </div>
                 </div>
@@ -1248,11 +1252,11 @@ function SessionContent() {
                 <button
                   onClick={flipCard}
                   className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors border-t hover:brightness-110 select-none"
-                  style={{ background: '#1e1e20', borderColor: 'var(--border)', color: '#6b6b72' }}
+                  style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', color: 'var(--text-muted)' }}
                 >
                   <span style={{ fontSize: '1rem', lineHeight: 1 }}>↓</span>
                   Show Answer
-                  <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: '#0f0f11', border: '1px solid var(--border)', color: '#6b6b72' }}>
+                  <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                     SPACE
                   </kbd>
                 </button>
@@ -1266,7 +1270,7 @@ function SessionContent() {
               <button
                 onClick={() => setShowMoreRatings((v) => !v)}
                 className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors hover:bg-[var(--bg-surface)] mx-auto"
-                style={{ color: '#6b6b72' }}
+                style={{ color: 'var(--text-muted)' }}
               >
                 <MoreHorizontal size={12} />
                 {showMoreRatings ? 'Fewer options' : 'More rating options'}
@@ -1295,7 +1299,7 @@ function SessionContent() {
           style={{
             background: 'var(--bg-surface)',
             border: '1px solid var(--border)',
-            color: canGoBack ? '#e8e8ea' : '#3a3a42',
+            color: canGoBack ? 'var(--text-primary)' : 'var(--border-strong)',
             cursor: canGoBack ? 'pointer' : 'not-allowed',
           }}
           title="Previous card"
@@ -1309,7 +1313,7 @@ function SessionContent() {
           <button
             onClick={handleUndo}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#a0a0b0' }}
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             title="Undo last review (Ctrl+Z)"
           >
             <Undo2 size={12} />
@@ -1322,7 +1326,7 @@ function SessionContent() {
         <button
           onClick={handleSkip}
           className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:brightness-110"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: '#6b6b72' }}
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
           title="Skip card"
         >
           <ArrowRight size={15} />
@@ -1331,20 +1335,20 @@ function SessionContent() {
 
         <div className="flex-1" />
 
-        {/* ↻ Missed (rating 1 — neutral, informational framing) */}
+        {/* ✕ Missed (rating 1) — Stitch idiom: ghost button with a red border */}
         <button
           onClick={() => answerReady && !isAnimating && handleRate(1)}
           disabled={!answerReady || isAnimating}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
+          className="flex items-center gap-2 px-8 py-3 rounded-[var(--radius-lg)] text-sm font-semibold transition-all duration-150 select-none active:scale-[0.98]"
           style={{
-            background: 'var(--bg-surface)',
-            border: `1px solid ${answerReady ? '#3a3a42' : 'var(--border)'}`,
-            color: answerReady ? '#a0a0b0' : '#3a3a42',
+            background: answerReady ? 'var(--danger-subtle)' : 'var(--bg-surface)',
+            border: `1px solid ${answerReady ? 'color-mix(in srgb, var(--danger) 40%, transparent)' : 'var(--border)'}`,
+            color: answerReady ? 'var(--danger)' : 'var(--border-strong)',
             cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
           }}
           title={`Missed (${formatKey(studyShortcuts.forgot)})`}
         >
-          <span>↻</span>
+          <span>✕</span>
           Missed
           {answerReady && (
             <kbd className="text-[10px] font-mono opacity-60 ml-0.5">
@@ -1353,15 +1357,15 @@ function SessionContent() {
           )}
         </button>
 
-        {/* ✓ Remembered */}
+        {/* ✓ Remembered — Stitch idiom: periwinkle fill, dark text */}
         <button
           onClick={() => answerReady && !isAnimating && handleRate(4)}
           disabled={!answerReady || isAnimating}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all select-none"
+          className="flex items-center gap-2 px-8 py-3 rounded-[var(--radius-lg)] text-sm font-semibold transition-all duration-150 select-none active:scale-[0.98]"
           style={{
-            background: answerReady ? '#0a2a15' : 'var(--bg-surface)',
-            border: `1px solid ${answerReady ? '#1a5a30' : 'var(--border)'}`,
-            color: answerReady ? '#4ade80' : '#3a3a42',
+            background: answerReady ? 'var(--accent)' : 'var(--bg-surface)',
+            border: `1px solid ${answerReady ? 'var(--accent)' : 'var(--border)'}`,
+            color: answerReady ? 'var(--accent-fg)' : 'var(--border-strong)',
             cursor: answerReady && !isAnimating ? 'pointer' : 'not-allowed',
           }}
           title={`Remembered (${formatKey(studyShortcuts.remembered)})`}
@@ -1383,7 +1387,7 @@ function SessionContent() {
             ref={optionsButtonRef}
             onClick={() => setShowOptionsMenu((v) => !v)}
             className="flex items-center justify-center w-9 h-9 rounded-lg transition-colors hover:bg-[var(--bg-surface)]"
-            style={{ color: showOptionsMenu ? '#818cf8' : '#6b6b72' }}
+            style={{ color: showOptionsMenu ? 'var(--accent)' : 'var(--text-muted)' }}
             title="Options"
           >
             <MoreHorizontal size={16} />
@@ -1395,45 +1399,45 @@ function SessionContent() {
               className="absolute bottom-12 right-0 w-52 rounded-xl overflow-hidden animate-scale-in"
               style={{
                 background: 'var(--bg-surface)',
-                border: '1px solid #333338',
+                border: '1px solid var(--border-strong)',
                 boxShadow: '0 8px 24px -4px rgba(0,0,0,0.5)',
                 zIndex: 10,
               }}
             >
               <button
                 onClick={() => { setShowOptionsMenu(false); setShowEditDialog(true) }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[#2a2a2e] transition-colors"
-                style={{ color: '#e8e8ea' }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"
+                style={{ color: 'var(--text-primary)' }}
               >
-                <Pencil size={13} style={{ color: '#8e8ea0' }} />
+                <Pencil size={13} style={{ color: 'var(--text-secondary)' }} />
                 Edit card
               </button>
               <button
                 onClick={handleResetSRS}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[#2a2a2e] transition-colors"
-                style={{ color: '#e8e8ea' }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"
+                style={{ color: 'var(--text-primary)' }}
               >
-                <RefreshCw size={13} style={{ color: '#8e8ea0' }} />
+                <RefreshCw size={13} style={{ color: 'var(--text-secondary)' }} />
                 Reset review history
               </button>
               <button
                 onClick={() => { setShowOptionsMenu(false); setShowHistoryDialog(true) }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[#2a2a2e] transition-colors"
-                style={{ color: '#e8e8ea' }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"
+                style={{ color: 'var(--text-primary)' }}
               >
-                <History size={13} style={{ color: '#8e8ea0' }} />
+                <History size={13} style={{ color: 'var(--text-secondary)' }} />
                 Review history
               </button>
-              <div className="border-t mx-3" style={{ borderColor: '#333338' }} />
+              <div className="border-t mx-3" style={{ borderColor: 'var(--border-strong)' }} />
               <div className="w-full flex items-center justify-between gap-2.5 px-3 py-2.5 text-xs">
-                <span style={{ color: '#e8e8ea' }}>Show card details</span>
+                <span style={{ color: 'var(--text-primary)' }}>Show card details</span>
                 <button
                   type="button"
                   role="switch"
                   aria-checked={showCardDetailsEnabled}
                   onClick={() => setShowCardDetailsEnabled((v) => !v)}
                   className="w-8 h-[18px] rounded-full relative transition-colors duration-150 shrink-0"
-                  style={{ background: showCardDetailsEnabled ? '#818cf8' : '#3a3a42' }}
+                  style={{ background: showCardDetailsEnabled ? 'var(--accent)' : 'var(--border-strong)' }}
                 >
                   <div
                     className="absolute top-0.5 w-3.5 h-3.5 rounded-full transition-transform duration-150"
@@ -1441,11 +1445,11 @@ function SessionContent() {
                   />
                 </button>
               </div>
-              <div className="border-t mx-3" style={{ borderColor: '#333338' }} />
+              <div className="border-t mx-3" style={{ borderColor: 'var(--border-strong)' }} />
               <button
                 onClick={() => { setShowOptionsMenu(false); setShowDeleteConfirm(true) }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[#2d1515] transition-colors"
-                style={{ color: '#f87171' }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--danger-subtle)] transition-colors"
+                style={{ color: 'var(--danger)' }}
               >
                 <Trash2 size={13} />
                 Delete card
@@ -1472,17 +1476,17 @@ function SessionContent() {
       <Dialog open={showHistoryDialog} onClose={() => setShowHistoryDialog(false)} title="Review History" size="md">
         <div className="overflow-y-auto max-h-96">
           {cardLogs.length === 0 ? (
-            <div className="p-6 text-center text-sm" style={{ color: '#6b6b72' }}>
+            <div className="p-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
               No review history yet.
             </div>
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b" style={{ borderColor: '#333338', background: 'var(--bg-surface)' }}>
-                  <th className="text-left px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Date</th>
-                  <th className="text-left px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Rating</th>
-                  <th className="text-right px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Response</th>
-                  <th className="text-right px-4 py-2.5 font-medium" style={{ color: '#8e8ea0' }}>Interval</th>
+                <tr className="border-b" style={{ borderColor: 'var(--border-strong)', background: 'var(--bg-surface)' }}>
+                  <th className="text-left px-4 py-2.5 font-medium" style={{ color: 'var(--text-secondary)' }}>Date</th>
+                  <th className="text-left px-4 py-2.5 font-medium" style={{ color: 'var(--text-secondary)' }}>Rating</th>
+                  <th className="text-right px-4 py-2.5 font-medium" style={{ color: 'var(--text-secondary)' }}>Response</th>
+                  <th className="text-right px-4 py-2.5 font-medium" style={{ color: 'var(--text-secondary)' }}>Interval</th>
                 </tr>
               </thead>
               <tbody>
@@ -1490,18 +1494,18 @@ function SessionContent() {
                   <tr
                     key={log.id ?? i}
                     className="border-b last:border-0"
-                    style={{ borderColor: '#2a2a2e' }}
+                    style={{ borderColor: 'var(--border)' }}
                   >
-                    <td className="px-4 py-2.5" style={{ color: '#8e8ea0' }}>
+                    <td className="px-4 py-2.5" style={{ color: 'var(--text-secondary)' }}>
                       {formatDate(log.reviewedAt)}
                     </td>
                     <td className="px-4 py-2.5 font-medium" style={{ color: RATING_COLORS[log.rating] }}>
                       {RATING_LABELS[log.rating] ?? log.rating}
                     </td>
-                    <td className="px-4 py-2.5 text-right" style={{ color: '#8e8ea0' }}>
+                    <td className="px-4 py-2.5 text-right" style={{ color: 'var(--text-secondary)' }}>
                       {log.responseMs > 0 ? `${(log.responseMs / 1000).toFixed(1)}s` : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-right" style={{ color: '#8e8ea0' }}>
+                    <td className="px-4 py-2.5 text-right" style={{ color: 'var(--text-secondary)' }}>
                       {log.scheduledInterval > 0 ? `${log.scheduledInterval}d` : '—'}
                     </td>
                   </tr>
@@ -1520,14 +1524,14 @@ function SessionContent() {
         size="sm"
       >
         <div className="p-4 space-y-3">
-          <p className="text-sm" style={{ color: '#a0a0b0' }}>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             Your retention is lower than usual — a shorter session today is totally fine.
           </p>
           <div className="flex justify-end">
             <button
               onClick={() => setShowBurnoutNudge(false)}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
             >
               Got it
             </button>
@@ -1546,15 +1550,15 @@ function SessionContent() {
         <div className="p-4 flex justify-end gap-2">
           <button
             onClick={() => setShowDeleteConfirm(false)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-[#2a2a2e]"
-            style={{ color: '#8e8ea0' }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-[var(--bg-hover)]"
+            style={{ color: 'var(--text-secondary)' }}
           >
             Cancel
           </button>
           <button
             onClick={handleDeleteCard}
             className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            style={{ background: '#2d1515', border: '1px solid #5a2020', color: '#f87171' }}
+            style={{ background: 'var(--danger-subtle)', border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)', color: 'var(--danger)' }}
           >
             Delete
           </button>

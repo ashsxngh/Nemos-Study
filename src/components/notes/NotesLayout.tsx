@@ -255,7 +255,7 @@ export function NotesLayout({ initialNoteId }: NotesLayoutProps) {
                 className={cn(
                   'inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded transition-colors',
                   isPreview
-                    ? 'bg-[var(--accent)] text-white'
+                    ? 'bg-[var(--accent)] text-[var(--accent-fg)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 )}
               >

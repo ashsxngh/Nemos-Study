@@ -125,7 +125,7 @@ export function Sidebar() {
 
         <div className="flex items-center justify-center h-12 border-b border-[var(--border)]">
           <div className="w-6 h-6 rounded-md bg-[var(--accent)] flex items-center justify-center">
-            <span className="text-white text-[10px] font-bold">N</span>
+            <span className="text-[var(--accent-fg)] text-[10px] font-bold">N</span>
           </div>
         </div>
 
@@ -198,11 +198,11 @@ export function Sidebar() {
       {/* Logo / Brand */}
       <div className="flex items-center gap-3 h-14 px-4 border-b border-[var(--border)] shrink-0">
         <div className="w-7 h-7 rounded-lg bg-[var(--accent)] flex items-center justify-center shrink-0">
-          <span className="text-white text-xs font-bold tracking-tight">N</span>
+          <span className="text-[var(--accent-fg)] text-xs font-bold tracking-tight">N</span>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
-          <p className="text-[10px] text-[var(--text-muted)] leading-none mt-0.5">Deep Focus Learning</p>
+          <p className="meta-label text-[var(--text-muted)] leading-none mt-0.5">Deep Focus Learning</p>
         </div>
         <ChevronDown size={12} className="text-[var(--text-muted)] shrink-0" />
       </div>
@@ -223,7 +223,7 @@ export function Sidebar() {
 
       {/* Study section */}
       <div className="px-3 pb-1 shrink-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] px-1 mb-1.5">Study</p>
+        <p className="meta-label text-[var(--text-muted)] px-1 mb-1.5">Study</p>
         <nav className="space-y-0.5">
           {STUDY_ITEMS.map(({ id, label, href, icon: Icon, countKey }) => (
             <Link
@@ -239,8 +239,8 @@ export function Sidebar() {
               <span className="flex-1">{label}</span>
               {counts[countKey] > 0 && (
                 <span className={cn(
-                  'text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none min-w-[18px] text-center',
-                  countKey === 'inbox'   ? 'bg-[var(--accent)] text-white' :
+                  'font-mono text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none min-w-[18px] text-center',
+                  countKey === 'inbox'   ? 'bg-[var(--accent)] text-[var(--accent-fg)]' :
                   countKey === 'new'     ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
                                            'bg-[var(--success-subtle)] text-[var(--success)]'
                 )}>
@@ -278,7 +278,7 @@ export function Sidebar() {
 
       {/* Decks tree */}
       <div className="flex-1 overflow-y-auto px-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] px-1 mb-1.5">Decks</p>
+        <p className="meta-label text-[var(--text-muted)] px-1 mb-1.5">Decks</p>
         <div className="space-y-0.5">
           {rootFolders.map((folder) => {
             const isExpanded = expandedFolders.has(folder.id)

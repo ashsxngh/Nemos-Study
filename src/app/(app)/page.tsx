@@ -29,7 +29,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 overflow-y-auto px-8 py-6">
-      <p className="text-xs text-[var(--text-muted)] mb-1">Dashboard</p>
+      <p className="meta-label text-[var(--text-muted)] mb-1">Dashboard</p>
 
       {/* Title + period picker */}
       <div className="flex items-center gap-2 mb-6" ref={dropRef}>
@@ -73,7 +73,7 @@ export default function DashboardPage() {
       {/* Overview */}
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--text-primary)] mb-4">Overview</h2>
-        <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-2">Review Activity</h3>
+        <h3 className="meta-label text-[var(--text-secondary)] mb-2">Review Activity</h3>
         <StreakHeatmap />
         <PeriodStats period={period} />
 

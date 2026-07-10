@@ -32,16 +32,21 @@ export function StatsOverview({ period }: StatsOverviewProps) {
   const periodLogs = logsInRange(reviewLogs, start, end)
   const reviewOnlyLogs = periodLogs.filter((l) => !l.wasNew)
 
-  // Cards reviewed in period (unique cards, not total review events — see Total Reviews below)
-  const cardsReviewed = new Set(periodLogs.map((l) => l.cardId)).size
+  // Cards reviewed in period (unique cards, not total review events — see Total
+  // Reviews below). wasNew logs excluded: a first exposure is a card being
+  // learned, not a review.
+  const cardsReviewed = new Set(reviewOnlyLogs.map((l) => l.cardId)).size
 
   // Retention rate — new card graduation events excluded (wasNew logs skew accuracy down)
   const retention = reviewOnlyLogs.length > 0
     ? Math.round((reviewOnlyLogs.filter((l) => l.rating >= 2).length / reviewOnlyLogs.length) * 100)
     : 0
 
-  // Total reviews (cumulative if "all time", else period)
-  const totalReviews = period === 'all' ? reviewLogs.length : periodLogs.length
+  // Total reviews (cumulative if "all time", else period) — repeat reviews
+  // only, new-card graduations excluded
+  const totalReviews = period === 'all'
+    ? reviewLogs.filter((l) => !l.wasNew).length
+    : reviewOnlyLogs.length
 
   // Study time in period
   const periodSessions = sessions.filter((s) => {
@@ -78,7 +83,7 @@ export function StatsOverview({ period }: StatsOverviewProps) {
     <div className="flex items-stretch divide-x divide-[var(--border)] mb-8">
       {stats.map(({ label, value }, i) => (
         <div key={label} className={i === 0 ? 'pr-8' : 'px-8'}>
-          <p className="text-xs text-[var(--text-muted)] mb-1">{label}</p>
+          <p className="meta-label text-[var(--text-muted)] mb-1.5">{label}</p>
           <p className="text-3xl font-bold text-[var(--text-primary)] leading-none">{value}</p>
         </div>
       ))}

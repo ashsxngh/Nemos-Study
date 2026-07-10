@@ -112,7 +112,7 @@ export function SettingsPage() {
           {/* ── Appearance ── */}
           {activeSection === 'appearance' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Appearance</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Appearance</h2>
               <div className="space-y-6">
                 <div>
                   <label className="text-xs font-medium text-[var(--text-secondary)] block mb-2">Theme</label>
@@ -206,7 +206,7 @@ export function SettingsPage() {
           {/* ── SRS Algorithm ── */}
           {activeSection === 'srs' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">SRS Algorithm</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">SRS Algorithm</h2>
 
               <>
                   <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
@@ -287,7 +287,7 @@ export function SettingsPage() {
           {/* ── FSRS Simulator ── */}
           {activeSection === 'fsrs-sim' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">FSRS Simulator</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">FSRS Simulator</h2>
               <FSRSSimulator />
             </section>
           )}
@@ -295,7 +295,7 @@ export function SettingsPage() {
           {/* ── Burnout & Workload ── */}
           {activeSection === 'burnout' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Burnout &amp; Workload</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Burnout &amp; Workload</h2>
 
               {/* Projected daily load */}
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4 mb-3 flex items-center gap-5">
@@ -371,7 +371,7 @@ export function SettingsPage() {
           {/* ── Notifications ── */}
           {activeSection === 'notifications' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Notifications</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Notifications</h2>
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
 
                 {/* Daily reminder */}
@@ -418,7 +418,7 @@ export function SettingsPage() {
           {/* ── Keyboard Shortcuts ── */}
           {activeSection === 'shortcuts' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Keyboard Shortcuts</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Keyboard Shortcuts</h2>
               <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">
                 {shortcuts.map(({ action, keys }) => (
                   <div key={action} className="flex items-center justify-between px-4 py-2.5">
@@ -439,7 +439,7 @@ export function SettingsPage() {
           {/* ── Data & Backup ── */}
           {activeSection === 'data' && (
             <section>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Data & Backup</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Data & Backup</h2>
               <DataBackupSection />
             </section>
           )}

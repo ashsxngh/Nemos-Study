@@ -89,9 +89,9 @@ export function StudyHub() {
       {/* ── Today's Queue ─────────────────────────────────────── */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Today&apos;s Queue</h2>
+          <h2 className="meta-label text-[var(--text-secondary)]">Today&apos;s Queue</h2>
           {inboxTotal > 0 && (
-            <span className="text-[10px] bg-[var(--accent-subtle)] text-[var(--accent)] font-bold rounded-full px-2 py-0.5">
+            <span className="font-mono text-[10px] bg-[var(--accent-subtle)] text-[var(--accent)] font-bold rounded-full px-2 py-0.5">
               {inboxTotal} cards
             </span>
           )}
@@ -179,12 +179,12 @@ export function StudyHub() {
 
       {/* ── Other Modes ───────────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">Other Modes</h2>
+        <h2 className="meta-label text-[var(--text-secondary)] mb-4">Other Modes</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Link href="/study/session?mode=cram">
             <div className="rounded-xl p-4 border border-[var(--border)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] transition-all duration-200 cursor-pointer h-full">
-              <div className="w-8 h-8 rounded-lg bg-yellow-950/40 flex items-center justify-center mb-3">
-                <Zap size={15} className="text-yellow-400" />
+              <div className="w-8 h-8 rounded-lg bg-[var(--warning-subtle)] flex items-center justify-center mb-3">
+                <Zap size={15} className="text-[var(--warning)]" />
               </div>
               <p className="text-sm font-semibold text-[var(--text-primary)] mb-1">Exam Cram</p>
               <p className="text-xs text-[var(--text-muted)]">Review everything regardless of due date</p>
@@ -201,8 +201,8 @@ export function StudyHub() {
           </Link>
           <Link href="/study/session?mode=random">
             <div className="rounded-xl p-4 border border-[var(--border)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] transition-all duration-200 cursor-pointer h-full">
-              <div className="w-8 h-8 rounded-lg bg-emerald-950/40 flex items-center justify-center mb-3">
-                <Shuffle size={15} className="text-emerald-400" />
+              <div className="w-8 h-8 rounded-lg bg-[var(--success-subtle)] flex items-center justify-center mb-3">
+                <Shuffle size={15} className="text-[var(--success)]" />
               </div>
               <p className="text-sm font-semibold text-[var(--text-primary)] mb-1">Random Mix</p>
               <p className="text-xs text-[var(--text-muted)]">Shuffled cards from all decks</p>
@@ -214,7 +214,7 @@ export function StudyHub() {
       {/* ── Study by Deck ─────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Study by Deck</h2>
+          <h2 className="meta-label text-[var(--text-secondary)]">Study by Deck</h2>
           <Input placeholder="Search decks…" value={search} onChange={(e) => setSearch(e.target.value)} icon={<Search size={12} />} className="w-44 h-7" />
         </div>
 
@@ -273,7 +273,7 @@ export function StudyHub() {
       {/* ── Today's Goals ─────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Today&apos;s Goals</h2>
+          <h2 className="meta-label text-[var(--text-secondary)]">Today&apos;s Goals</h2>
           <Button variant="ghost" size="xs" onClick={() => setEditingGoals(!editingGoals)}>
             {editingGoals ? 'Done' : 'Edit'}
           </Button>
@@ -281,7 +281,10 @@ export function StudyHub() {
         <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
           <div className="grid grid-cols-3 gap-6">
             {[
-              { label: 'Cards reviewed', current: todayLogs.length, target: goalTargets.cards, unit: 'cards', key: 'cards' as const, icon: Target },
+              // Deliberately counts all cards studied today (new + reviews) —
+              // it's a daily volume goal, so the label says "studied", not
+              // "reviewed" (which elsewhere means repeat reviews only).
+              { label: 'Cards studied', current: todayLogs.length, target: goalTargets.cards, unit: 'cards', key: 'cards' as const, icon: Target },
               { label: 'Study time',     current: todayMinutes,     target: goalTargets.minutes, unit: 'min', key: 'minutes' as const, icon: Flame },
               { label: 'Accuracy',       current: todayAccuracy,    target: goalTargets.accuracy, unit: '%', key: 'accuracy' as const, icon: Sparkles },
             ].map(({ label, current, target, unit, key, icon: Icon }) => (

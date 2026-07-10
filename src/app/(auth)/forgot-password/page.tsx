@@ -35,14 +35,17 @@ export default function ForgotPasswordPage() {
     return (
       <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
-          <div className="flex items-center justify-center gap-2.5 mb-8">
-            <div className="w-8 h-8 bg-[var(--accent)] rounded-[6px] flex items-center justify-center">
-              <BookOpen size={16} className="text-white" />
+          <div className="flex flex-col items-center gap-3 mb-8">
+            <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
+              <BookOpen size={22} className="text-[var(--accent-fg)]" />
             </div>
-            <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemo</span>
+            <div className="text-center">
+              <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+              <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+            </div>
           </div>
 
-          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 text-center">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8 text-center">
             <h1 className="text-base font-semibold text-[var(--text-primary)] mb-2">Check your email!</h1>
             <p className="text-xs text-[var(--text-muted)] mb-1">
               If an account exists for
@@ -63,14 +66,17 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-8 h-8 bg-[var(--accent)] rounded-[6px] flex items-center justify-center">
-            <BookOpen size={16} className="text-white" />
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
+            <BookOpen size={22} className="text-[var(--accent-fg)]" />
           </div>
-          <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemo</span>
+          <div className="text-center">
+            <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+            <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+          </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6">
+        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8">
           <h1 className="text-base font-semibold text-[var(--text-primary)] mb-1">Reset your password</h1>
           <p className="text-xs text-[var(--text-muted)] mb-5">
             Enter your email and we&apos;ll send you a link to reset it
@@ -78,7 +84,7 @@ export default function ForgotPasswordPage() {
 
           <form className="space-y-3" onSubmit={handleSubmit}>
             <div>
-              <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">Email</label>
+              <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Email</label>
               <Input
                 type="email"
                 placeholder="you@example.com"
@@ -88,7 +94,7 @@ export default function ForgotPasswordPage() {
               />
             </div>
             {error && (
-              <p className="text-xs text-red-500">{error}</p>
+              <p className="text-xs text-[var(--danger)]">{error}</p>
             )}
             <Button type="submit" variant="primary" size="md" className="w-full" loading={loading}>
               Send reset link

@@ -212,7 +212,7 @@ function SortableCardRow({ card, isDueCard, fsrs, masteryPct, selected, onEdit, 
                 onResetSRS(card.id)
                 setConfirmReset(false)
               }}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning-subtle,#2a2000)] text-[var(--warning,#f59e0b)] border border-[var(--warning,#f59e0b)] hover:opacity-80 transition-opacity"
+              className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)] hover:opacity-80 transition-opacity"
             >
               Confirm
             </button>

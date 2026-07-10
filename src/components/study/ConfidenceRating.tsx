@@ -27,10 +27,10 @@ const RATINGS: RatingOption[] = [
     rating: 2,
     label: 'Hard',
     interval: '3 days',
-    colorClass: 'text-orange-400',
-    bgClass: 'bg-orange-950/30',
-    borderClass: 'border-orange-400',
-    hoverClass: 'hover:bg-orange-400 hover:text-white',
+    colorClass: 'text-[var(--warning)]',
+    bgClass: 'bg-[var(--warning-subtle)]',
+    borderClass: 'border-[var(--warning)]',
+    hoverClass: 'hover:bg-[var(--warning)] hover:text-[var(--warning-fg)]',
   },
   {
     rating: 3,
@@ -39,7 +39,7 @@ const RATINGS: RatingOption[] = [
     colorClass: 'text-[var(--accent)]',
     bgClass: 'bg-[var(--accent-subtle)]',
     borderClass: 'border-[var(--accent)]',
-    hoverClass: 'hover:bg-[var(--accent)] hover:text-white',
+    hoverClass: 'hover:bg-[var(--accent)] hover:text-[var(--accent-fg)]',
   },
   {
     rating: 4,
@@ -48,7 +48,7 @@ const RATINGS: RatingOption[] = [
     colorClass: 'text-[var(--success)]',
     bgClass: 'bg-[var(--success-subtle)]',
     borderClass: 'border-[var(--success)]',
-    hoverClass: 'hover:bg-[var(--success)] hover:text-white',
+    hoverClass: 'hover:bg-[var(--success)] hover:text-[var(--success-fg)]',
   },
 ]
 

@@ -74,14 +74,17 @@ export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-8 h-8 bg-[var(--accent)] rounded-[6px] flex items-center justify-center">
-            <BookOpen size={16} className="text-white" />
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="w-12 h-12 bg-[var(--accent)] rounded-[var(--radius-lg)] flex items-center justify-center">
+            <BookOpen size={22} className="text-[var(--accent-fg)]" />
           </div>
-          <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemo</span>
+          <div className="text-center">
+            <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Nemos Study</p>
+            <p className="meta-label text-[var(--text-muted)] mt-0.5">Deep Focus Learning</p>
+          </div>
         </div>
 
-        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6">
+        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8">
           {!ready ? (
             <p className="text-xs text-[var(--text-muted)] text-center py-4">Verifying link…</p>
           ) : !validLink ? (
@@ -101,7 +104,7 @@ export default function ResetPasswordPage() {
 
               <form className="space-y-3" onSubmit={handleSubmit}>
                 <div>
-                  <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">New password</label>
+                  <label className="meta-label text-[var(--text-secondary)] block mb-1.5">New password</label>
                   <Input
                     type="password"
                     placeholder="Min. 8 characters"
@@ -111,7 +114,7 @@ export default function ResetPasswordPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-[var(--text-secondary)] block mb-1">Confirm password</label>
+                  <label className="meta-label text-[var(--text-secondary)] block mb-1.5">Confirm password</label>
                   <Input
                     type="password"
                     placeholder="Re-enter password"
@@ -121,7 +124,7 @@ export default function ResetPasswordPage() {
                   />
                 </div>
                 {error && (
-                  <p className="text-xs text-red-500">{error}</p>
+                  <p className="text-xs text-[var(--danger)]">{error}</p>
                 )}
                 <Button type="submit" variant="primary" size="md" className="w-full" loading={loading}>
                   Reset password

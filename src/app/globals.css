@@ -1,50 +1,60 @@
 @import "tailwindcss";
 
+/* Warm Obsidian — warm-black surfaces, periwinkle accent, amber tertiary.
+   Filled accent surfaces must pair with --accent-fg (dark indigo), not white. */
 :root {
-  --bg-base: #0e0e10;
-  --bg-surface: #16161a;
-  --bg-hover: #1e1e24;
-  --bg-active: #26262e;
-  --border: #27272f;
-  --border-strong: #38383f;
-  --text-primary: #eeeef2;
-  --text-secondary: #8888a0;
-  --text-muted: #50506a;
-  --accent: #818cf8;
-  --accent-hover: #6366f1;
-  --accent-subtle: #18182c;
-  --danger: #f87171;
-  --danger-subtle: #2a1212;
+  --bg-base: #131315;
+  --bg-surface: #1a191c;
+  --bg-hover: #232227;
+  --bg-active: #2b2a30;
+  --border: #262529;
+  --border-strong: #3a393f;
+  --text-primary: #e5e1e4;
+  --text-secondary: #908f9e;
+  --text-muted: #605f6d;
+  --accent: #bdc2ff;
+  --accent-hover: #a8aeff;
+  --accent-fg: #131e8c;
+  --accent-subtle: #24263c;
+  --danger: #ffb4ab;
+  --danger-fg: #690005;
+  --danger-subtle: #2b1512;
   --success: #4ade80;
-  --success-subtle: #061e10;
-  --warning: #fbbf24;
-  --warning-subtle: #281c04;
+  --success-fg: #052e16;
+  --success-subtle: #0b2415;
+  --warning: #f7bd3e;
+  --warning-fg: #402d00;
+  --warning-subtle: #2b2104;
   --sidebar-width: 240px;
   --header-height: 44px;
   --radius: 8px;
-  --radius-sm: 5px;
+  --radius-sm: 6px;
   --radius-lg: 12px;
 }
 
 .dark {
-  --bg-base: #0e0e10;
-  --bg-surface: #16161a;
-  --bg-hover: #1e1e24;
-  --bg-active: #26262e;
-  --border: #27272f;
-  --border-strong: #38383f;
-  --text-primary: #eeeef2;
-  --text-secondary: #8888a0;
-  --text-muted: #50506a;
-  --accent: #818cf8;
-  --accent-hover: #6366f1;
-  --accent-subtle: #18182c;
-  --danger: #f87171;
-  --danger-subtle: #2a1212;
+  --bg-base: #131315;
+  --bg-surface: #1a191c;
+  --bg-hover: #232227;
+  --bg-active: #2b2a30;
+  --border: #262529;
+  --border-strong: #3a393f;
+  --text-primary: #e5e1e4;
+  --text-secondary: #908f9e;
+  --text-muted: #605f6d;
+  --accent: #bdc2ff;
+  --accent-hover: #a8aeff;
+  --accent-fg: #131e8c;
+  --accent-subtle: #24263c;
+  --danger: #ffb4ab;
+  --danger-fg: #690005;
+  --danger-subtle: #2b1512;
   --success: #4ade80;
-  --success-subtle: #061e10;
-  --warning: #fbbf24;
-  --warning-subtle: #281c04;
+  --success-fg: #052e16;
+  --success-subtle: #0b2415;
+  --warning: #f7bd3e;
+  --warning-fg: #402d00;
+  --warning-subtle: #2b2104;
 }
 
 @theme inline {
@@ -62,6 +72,8 @@
   --color-accent-subtle: var(--accent-subtle);
   --color-danger: var(--danger);
   --color-success: var(--success);
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -75,7 +87,7 @@ html {
 body {
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   line-height: 1.5;
   margin: 0;
 }
@@ -145,15 +157,26 @@ button { cursor: pointer; }
 }
 
 /* ── Sidebar nav item active ─────────────────────────────── */
+/* Tonal, Stitch-style: near-transparent wash + 3px periwinkle left bar. */
 .nav-active {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-hover));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
   color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* ── Glass surface ───────────────────────────────────────── */
 .glass {
-  background: rgba(22, 22, 26, 0.7);
+  background: rgba(26, 25, 28, 0.7);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+
+/* ── Meta label (Warm Obsidian idiom) ────────────────────── */
+/* Mono uppercase micro-labels for section headers, metrics, and chips. */
+.meta-label {
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }

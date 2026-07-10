@@ -104,7 +104,7 @@ function SectionHeading({ icon: Icon, label }: SectionHeadingProps) {
     <div>
       <div className="flex items-center gap-2 mb-1">
         <Icon size={14} className="text-[var(--text-muted)]" />
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">{label}</h3>
+        <h3 className="meta-label text-[var(--text-secondary)]">{label}</h3>
       </div>
       <hr className="border-[var(--border)]" />
     </div>

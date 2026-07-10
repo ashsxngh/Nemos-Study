@@ -17,7 +17,7 @@ export function RecentActivity() {
     <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
         <Clock size={13} className="text-[var(--text-muted)]" />
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Recent Activity</h2>
+        <h2 className="meta-label text-[var(--text-secondary)]">Recent Activity</h2>
       </div>
 
       {recentSessions.length === 0 ? (
