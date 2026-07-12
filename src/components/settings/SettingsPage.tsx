@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 
 const sections = [
   { id: 'appearance', label: 'Appearance', icon: Sun },
-  { id: 'srs', label: 'SRS Algorithm', icon: Brain },
+  { id: 'srs', label: 'Review Algorithm', icon: Brain },
   { id: 'fsrs-sim', label: 'FSRS Simulator', icon: Activity },
   { id: 'burnout', label: 'Burnout & Workload', icon: AlertTriangle },
   { id: 'notifications', label: 'Notifications', icon: Bell },
@@ -203,10 +203,10 @@ export function SettingsPage() {
             </section>
           )}
 
-          {/* ── SRS Algorithm ── */}
+          {/* ── Review Algorithm (FSRS) ── */}
           {activeSection === 'srs' && (
             <section>
-              <h2 className="meta-label text-[var(--text-secondary)] mb-4">SRS Algorithm</h2>
+              <h2 className="meta-label text-[var(--text-secondary)] mb-4">Review Algorithm</h2>
 
               <>
                   <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">

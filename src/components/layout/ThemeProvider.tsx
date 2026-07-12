@@ -36,8 +36,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Additional keyboard shortcuts: Cmd+Shift+L, Alt+←, and G-then-X vim jumps
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      if (!e.key) return
+      const target = e.target as HTMLElement | null
+      const inInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || !!target?.isContentEditable
 
       // Alt+← — back navigation
       if (e.altKey && e.key === 'ArrowLeft') {

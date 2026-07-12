@@ -201,6 +201,37 @@ function mergeIncremental<T extends { id: string }>(serverRows: T[], currentRows
   return [...updated, ...added]
 }
 
+// Pick the fresher of a local and a server fsrs_data row for the pull merge.
+// The old merge was unconditional server-wins ({ ...local, ...fetched }),
+// which silently and permanently reverted local review progress whenever a
+// push failed (offline, tab closed mid-debounce, transient error): the next
+// pull clobbered the local row with the stale server copy AND reseeded
+// lastPushedFsrs from it, so nothing even looked dirty for a retry.
+// Local rows are client-stamped with updatedAt on every write (review/init/
+// reset/undo — see useLibraryStore); server rows get updated_at from the
+// fsrs_data DB trigger on every upsert. fsrs rows are written wholesale on
+// each review (fsrsSchedule returns a complete new object), so whole-row
+// comparison is sufficient — no per-field merge needed.
+function pickFresherFsrs(local: FSRSState | undefined, server: FSRSState): FSRSState {
+  if (!local) return server // no local row — server data is simply new, adopt it
+  const localTs = local.updatedAt ? Date.parse(local.updatedAt) : NaN
+  const serverTs = server.updatedAt ? Date.parse(server.updatedAt) : NaN
+  // Legacy local row persisted before updatedAt existed — can't prove it's
+  // newer, so keep the old server-wins behavior (safe default; every write
+  // after this deploy stamps it, so the window closes on first review).
+  if (Number.isNaN(localTs)) return server
+  // Server row without updated_at shouldn't exist (DB trigger + column
+  // default), but if it does, the stamped local row is the only side with
+  // provable recency.
+  if (Number.isNaN(serverTs)) return local
+  // Ties → server: after a successful push the trigger-stamped server copy is
+  // the canonical one (content-identical), keeping lastPushedFsrs seeding
+  // consistent. Strictly-newer local (un-pushed review) survives the pull and
+  // stays dirty vs the reseeded lastPushedFsrs snapshot, so the next push
+  // cycle retries it.
+  return localTs > serverTs ? local : server
+}
+
 // ─── Pull ─────────────────────────────────────────────────────────────────────
 
 // The first pull of a browser session is always a full pull (needed to catch
@@ -209,6 +240,16 @@ function mergeIncremental<T extends { id: string }>(serverRows: T[], currentRows
 // sessionStorage (not localStorage) is deliberate: a new tab/session should
 // always start with a full pull.
 const LAST_FULL_PULL_KEY = 'nemos-last-pull-at'
+
+// True once a full pull has completed in THIS JS lifetime. sessionStorage
+// survives page reloads (it only clears on tab/window close), so the watermark
+// alone would let a *reloaded* tab keep pulling incrementally forever — and
+// incremental pulls can never represent deletions (mergeIncremental never
+// drops rows), so a reload could permanently miss deletes made on another
+// device while this tab wasn't looking. A module-level variable resets on
+// every page load (new tab AND plain reload), giving a reliable "first pull
+// since JS re-initialized" signal: until it flips, every pull is forced full.
+let fullPullDoneThisLoad = false
 
 function getLastPullAt(): string | null {
   if (typeof sessionStorage === 'undefined') return null
@@ -235,7 +276,10 @@ async function pullFromSupabase(): Promise<void> {
   const userId = await getCachedUserId(supabase)
   if (!userId) return
 
-  const since = getLastPullAt()
+  // Force a full pull on the first pull of every page load — the watermark is
+  // only trusted once this JS lifetime has done one full pull (see
+  // fullPullDoneThisLoad above).
+  const since = fullPullDoneThisLoad ? getLastPullAt() : null
   try {
     await runPull(supabase, userId, since)
   } catch (err) {
@@ -352,15 +396,18 @@ async function runPull(
     (examsRes.data ?? []).map((r) => toCamel(r) as Exam).filter((e) => !pendingExamSet.has(e.id))
 
   // Build fsrsData record from server rows. null on error — preserve local.
-  // Pre-filter to fetched card IDs to avoid re-upserting orphaned rows; the
-  // setState merge below does a final pass using the full merged card set.
+  // Orphan filtering (fsrs rows whose card no longer exists) happens in the
+  // setState merge below against the FULL merged card set — deliberately NOT
+  // against the fetched card ids here: an incremental pull returns fsrs rows
+  // for cards whose card row didn't change (a review on another device touches
+  // fsrs_data but not cards), so pre-filtering to fetched card ids silently
+  // dropped exactly the rows the periodic/visibility pull exists to bring in.
   let fetchedFsrsData: Record<string, FSRSState> | null = null
   if (!fsrsRes.error) {
     fetchedFsrsData = {}
-    const fetchedCardSet = new Set((cards ?? []).map((c) => c.id))
     for (const row of fsrsRes.data ?? []) {
       const f = toCamel(row) as FSRSState
-      if (!pendingCardSet.has(f.cardId) && (cards === null || fetchedCardSet.has(f.cardId))) {
+      if (!pendingCardSet.has(f.cardId)) {
         fetchedFsrsData[f.cardId] = f
       }
     }
@@ -394,12 +441,20 @@ async function runPull(
       (id) => !current.pendingDeletes.cards.includes(id),
     )
 
-    // Merge fsrsData: server wins for existing entries, prune orphans.
-    const mergedFsrsData = fetchedFsrsData !== null
-      ? Object.fromEntries(
-          Object.entries({ ...current.fsrsData, ...fetchedFsrsData }).filter(([id]) => mergedCardSet.has(id))
-        )
-      : Object.fromEntries(Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id)))
+    // Merge fsrsData per card id, recency-aware (see pickFresherFsrs): the
+    // fresher of local vs server wins, so a pull can no longer revert local
+    // review progress that failed to push. Orphans (no matching card in the
+    // merged card set) are pruned either way.
+    let mergedFsrsData: Record<string, FSRSState>
+    if (fetchedFsrsData !== null) {
+      const combined: Record<string, FSRSState> = { ...current.fsrsData }
+      for (const [id, serverRow] of Object.entries(fetchedFsrsData)) {
+        combined[id] = pickFresherFsrs(current.fsrsData[id], serverRow)
+      }
+      mergedFsrsData = Object.fromEntries(Object.entries(combined).filter(([id]) => mergedCardSet.has(id)))
+    } else {
+      mergedFsrsData = Object.fromEntries(Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id)))
+    }
 
     return {
       ...(folders !== null ? {
@@ -477,6 +532,7 @@ async function runPull(
   for (const d of decks ?? [])    lastPushedDecks.set(d.id, JSON.stringify(d))
   for (const c of cards ?? [])    lastPushedCards.set(c.id, JSON.stringify(c))
   for (const s of sessions ?? []) lastPushedSessions.set(s.id, JSON.stringify(s))
+  for (const n of notes ?? [])    lastPushedNotes.set(n.id, JSON.stringify(n))
   if (!incremental) pushedLogIds.clear()
   for (const row of logsRes.data ?? []) {
     pushedLogIds.add((row as { id: string }).id)
@@ -490,6 +546,7 @@ async function runPull(
   // missed during this error window.
   if (!anyError) {
     setLastPullAt(pullStartedAt)
+    if (!incremental) fullPullDoneThisLoad = true
   } else {
     console.error('[SYNC] runPull: one or more tables errored during full pull — watermark not advanced')
   }
@@ -512,6 +569,7 @@ const lastPushedFolders  = new Map<string, string>()
 const lastPushedDecks    = new Map<string, string>()
 const lastPushedCards    = new Map<string, string>()
 const lastPushedSessions = new Map<string, string>()
+const lastPushedNotes    = new Map<string, string>()
 const pushedLogIds       = new Set<string>()
 
 // Compare-and-swap guard — a device that was offline for a while must not
@@ -520,11 +578,17 @@ const pushedLogIds       = new Set<string>()
 // server currently has for that id; rows dropped here stay "dirty" in the
 // lastPushedX maps (never marked as pushed), so the next pull picks up the
 // server's newer copy and the next push cycle naturally stops retrying.
+// `knownSyncedIds` is the table's lastPushedX dirty-tracking map: an id is
+// present iff the row has been seen on the server at some point this JS
+// lifetime (seeded from every pulled row, added to after every successful
+// push). That lets the "no server row" case below distinguish genuinely-new
+// rows from rows that were deleted on another device.
 async function dropStaleOverwrites<T extends { id: string; updatedAt: string }>(
   supabase: ReturnType<typeof createClient>,
   userId: string,
-  table: 'folders' | 'decks' | 'cards',
+  table: 'folders' | 'decks' | 'cards' | 'notes',
   rows: T[],
+  knownSyncedIds: Map<string, string>,
 ): Promise<T[]> {
   if (!rows.length) return rows
   const BATCH = 100
@@ -544,7 +608,27 @@ async function dropStaleOverwrites<T extends { id: string; updatedAt: string }>(
   }
   return rows.filter((r) => {
     const serverTs = serverUpdatedAt.get(r.id)
-    if (!serverTs) return true // no server row yet — nothing to clobber
+    if (!serverTs) {
+      // No server row for this id — two very different cases:
+      // - Never seen in the dirty-tracking map → genuinely new (created this
+      //   session, not yet synced) → push it.
+      // - Present in the map → the server had this row at some point this
+      //   session (we pulled it or pushed it) and it's gone now → it was
+      //   deleted on another device. Pushing would resurrect it — drop it.
+      //   Deliberately LEAVE it in the map: deleting the map entry would make
+      //   the next push cycle classify it as "new" and resurrect it after
+      //   all. The local copy disappears on the next full pull (mergeKeepLocal
+      //   + preExistingIds) or realtime DELETE.
+      // The map resets on reload, but that's safe: the first pull of every
+      // page load is a full pull (fullPullDoneThisLoad) which both re-seeds
+      // this map from every server row and drops deleted-elsewhere rows from
+      // the store before any push can run (handlePush is gated on mountedRef).
+      if (knownSyncedIds.has(r.id)) {
+        if (DEBUG_SYNC) console.log(`[SYNC] dropStaleOverwrites: "${table}" row ${r.id} was previously synced but no longer exists on the server — dropping push to avoid resurrecting a remote delete`)
+        return false
+      }
+      return true
+    }
     return new Date(r.updatedAt).getTime() >= new Date(serverTs).getTime()
   })
 }
@@ -619,9 +703,9 @@ async function pushToSupabase(
   // CAS guard: drop any of the above whose server copy is newer than our
   // local one (see dropStaleOverwrites doc comment).
   const [foldersToUpsert, decksToUpsert, cardsToUpsert] = await Promise.all([
-    dropStaleOverwrites(supabase, userId, 'folders', foldersDirty),
-    dropStaleOverwrites(supabase, userId, 'decks', decksDirty),
-    dropStaleOverwrites(supabase, userId, 'cards', cardsDirty),
+    dropStaleOverwrites(supabase, userId, 'folders', foldersDirty, lastPushedFolders),
+    dropStaleOverwrites(supabase, userId, 'decks', decksDirty, lastPushedDecks),
+    dropStaleOverwrites(supabase, userId, 'cards', cardsDirty, lastPushedCards),
   ])
 
   const sessionsToUpsert = sessions.filter((s) => !sessionDeleteSet.has(s.id) && lastPushedSessions.get(s.id) !== JSON.stringify(s))
@@ -764,6 +848,9 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
 
   const BATCH = 100
 
+  // Clean up dirty tracking for deleted notes so the map doesn't grow unbounded.
+  for (const id of pendingDeletedNotes) lastPushedNotes.delete(id)
+
   if (pendingDeletedNotes.length) {
     for (let i = 0; i < pendingDeletedNotes.length; i += BATCH) {
       const chunk = pendingDeletedNotes.slice(i, i + BATCH)
@@ -775,15 +862,35 @@ async function pushNotesToSupabase(notes: Note[], pendingDeletedNotes: string[])
     }
   }
 
-  if (!notes.length) return
-  const res = await supabase.from('notes').upsert(
-    notes.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: userId })),
-    { onConflict: 'id' },
+  // Deadlock avoidance (same as cards in pushToSupabase): never upsert a note
+  // queued for deletion in this same push cycle.
+  const noteDeleteSet = new Set(pendingDeletedNotes)
+  // Dirty filter: only upsert a note if its serialized contents differ from
+  // what we last successfully pushed for that id — the same JSON-snapshot
+  // pattern folders/decks/cards use, so repeated debounced pushes don't
+  // re-upload the entire notes table every cycle.
+  const notesDirty = notes.filter(
+    (n) => !noteDeleteSet.has(n.id) && lastPushedNotes.get(n.id) !== JSON.stringify(n),
   )
-  if (res.error) {
-    console.error('[SYNC] pushNotesToSupabase error:', formatPgError(res.error))
-    throw new Error(`notes: ${res.error.message} (code ${res.error.code})`)
+  // CAS guard: drop any note whose server copy is newer than our local one
+  // (see dropStaleOverwrites doc comment) — a device offline for a while must
+  // not clobber an edit another device already pushed.
+  const notesToUpsert = await dropStaleOverwrites(supabase, userId, 'notes', notesDirty, lastPushedNotes)
+
+  if (!notesToUpsert.length) return
+  for (let i = 0; i < notesToUpsert.length; i += BATCH) {
+    const chunk = notesToUpsert.slice(i, i + BATCH)
+    const res = await supabase.from('notes').upsert(
+      chunk.map((r) => ({ ...(toSnake(r) as PlainObject), user_id: userId })),
+      { onConflict: 'id' },
+    )
+    if (res.error) {
+      console.error('[SYNC] pushNotesToSupabase error:', formatPgError(res.error))
+      throw new Error(`notes: ${res.error.message} (code ${res.error.code})`)
+    }
   }
+  // Record what we just pushed so the next cycle can skip unchanged rows.
+  for (const n of notesToUpsert) lastPushedNotes.set(n.id, JSON.stringify(n))
 }
 
 async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[]): Promise<void> {
@@ -886,6 +993,16 @@ export function useSync(): SyncStatus {
   const isLeaderRef = useRef(false)
 
   const handlePush = useCallback(async () => {
+    // Never push before the initial (full) pull has completed: rehydrated
+    // local state may still contain rows deleted on another device, and the
+    // dirty-tracking maps the CAS guard relies on aren't seeded yet — pushing
+    // now is exactly the resurrection vector dropStaleOverwrites exists to
+    // stop. The store subscribers are already gated on this ref; this extends
+    // the same gate to the online-retry listener and manualPush.
+    if (!mountedRef.current) {
+      if (DEBUG_SYNC) console.log('[SYNC] handlePush: initial pull not complete yet, skipping push')
+      return
+    }
     // Offline: skip the push attempt entirely rather than letting it fail and
     // surface as a sync error. The 'online' listener below retries automatically.
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1142,6 +1259,16 @@ export function useSync(): SyncStatus {
           if (examState.exams.length || examState.pendingDeletedExams.length) {
             handleExamsPush(examState.exams, examState.pendingDeletedExams)
           }
+          // Same seed for notes — without this, notes that already existed
+          // locally (created before notes sync was wired up, or while sync was
+          // unavailable) only ever reach the server on the *next* local note
+          // edit, so they'd never appear on another device. The dirty filter
+          // in pushNotesToSupabase makes this a no-op when the server already
+          // has every note (the pull above seeded lastPushedNotes).
+          const notesState = useNotesStore.getState()
+          if (notesState.notes.length || notesState.pendingDeletedNotes.length) {
+            handleNotesPush(notesState.notes, notesState.pendingDeletedNotes)
+          }
           const settingsState = useSettingsStore.getState()
           handleSettingsPush({
             newCardsPerDay: settingsState.newCardsPerDay,
@@ -1322,11 +1449,24 @@ export function useSync(): SyncStatus {
   }, [handleSettingsPush])
 
   // Supabase Realtime subscriptions — merge individual rows instead of full pull.
-  // Subscriptions are filtered to this user's rows (without the filter, every
-  // table broadcast — including other users' writes under permissive publication
-  // configs — reaches every client), and each handler drops echo events (our own
-  // writes broadcast back) by deep-comparing the incoming row to local state
-  // before touching the store.
+  //
+  // Filtering is CLIENT-side, not a server-side `filter: 'user_id=eq.…'`, and
+  // that's load-bearing for DELETEs: under the default REPLICA IDENTITY
+  // (primary-key only), a DELETE event's `old` payload contains ONLY the
+  // primary key — no user_id — so a server-side user_id filter can never match
+  // a DELETE and the event is silently dropped. INSERT/UPDATE could keep the
+  // server filter, but we unify on client-side checks so all three event types
+  // flow through one subscription per table with one consistent rule:
+  // - INSERT/UPDATE payloads carry the full row → check payload user_id
+  //   against ours (RLS already scopes delivery to rows we can SELECT; this is
+  //   defense-in-depth against permissive policies/publication configs).
+  // - DELETE payloads carry only the id → check whether that id exists in our
+  //   local store. If it isn't there, it either isn't ours (uuid PKs don't
+  //   collide across users) or is already gone — a safe no-op either way.
+  //   (Supabase delivers DELETE events to every subscriber of the table —
+  //   they bypass RLS — hence the early return matters for noise too.)
+  // Each handler also drops echo events (our own writes broadcast back) by
+  // deep-comparing the incoming row to local state before touching the store.
   useEffect(() => {
     if (!isSupabaseConfigured()) return
     const supabase = createClient()
@@ -1342,16 +1482,19 @@ export function useSync(): SyncStatus {
         return
       }
       if (!userId || cancelled) return
-      const userFilter = `user_id=eq.${userId}`
+      // Payload rows are raw snake_case DB rows (pre-toCamel).
+      const isOwnRow = (row: unknown): boolean =>
+        (row as { user_id?: string } | null)?.user_id === userId
 
       channel = supabase.channel(`nemos-realtime-${Math.random().toString(36).slice(2)}`)
 
       channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'folders', filter: userFilter },
+        { event: '*', schema: 'public', table: 'folders' },
         (payload) => {
           const { eventType, new: newRow, old: oldRow } = payload
           if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            if (!isOwnRow(newRow)) return
             const folder = toCamel(newRow) as Folder
             // Echo of our own push — local state already matches, skip the
             // setState so the store subscriber never fires.
@@ -1371,7 +1514,10 @@ export function useSync(): SyncStatus {
             })
             applyingRemoteRef.current = false
           } else if (eventType === 'DELETE') {
-            const id = (oldRow as { id: string }).id
+            // DELETE payload = primary key only (see effect doc comment) —
+            // ownership check is "does this id exist in our local store".
+            const id = (oldRow as { id?: string }).id
+            if (!id || !useLibraryStore.getState().folders.some((f) => f.id === id)) return
             lastPushedFolders.delete(id)
             applyingRemoteRef.current = true
             useLibraryStore.setState((state) => ({
@@ -1384,10 +1530,11 @@ export function useSync(): SyncStatus {
 
       channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'decks', filter: userFilter },
+        { event: '*', schema: 'public', table: 'decks' },
         (payload) => {
           const { eventType, new: newRow, old: oldRow } = payload
           if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            if (!isOwnRow(newRow)) return
             const deck = toCamel(newRow) as Deck
             const existing = useLibraryStore.getState().decks.find((d) => d.id === deck.id)
             if (existing && deepEqual(existing, deck)) return
@@ -1404,7 +1551,8 @@ export function useSync(): SyncStatus {
             })
             applyingRemoteRef.current = false
           } else if (eventType === 'DELETE') {
-            const id = (oldRow as { id: string }).id
+            const id = (oldRow as { id?: string }).id
+            if (!id || !useLibraryStore.getState().decks.some((d) => d.id === id)) return
             lastPushedDecks.delete(id)
             applyingRemoteRef.current = true
             useLibraryStore.setState((state) => ({
@@ -1417,10 +1565,11 @@ export function useSync(): SyncStatus {
 
       channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'cards', filter: userFilter },
+        { event: '*', schema: 'public', table: 'cards' },
         (payload) => {
           const { eventType, new: newRow, old: oldRow } = payload
           if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            if (!isOwnRow(newRow)) return
             const card = toCamel(newRow) as Card
             const existing = useLibraryStore.getState().cards.find((c) => c.id === card.id)
             if (existing && deepEqual(existing, card)) return
@@ -1437,11 +1586,17 @@ export function useSync(): SyncStatus {
             })
             applyingRemoteRef.current = false
           } else if (eventType === 'DELETE') {
-            const id = (oldRow as { id: string }).id
+            const id = (oldRow as { id?: string }).id
+            if (!id || !useLibraryStore.getState().cards.some((c) => c.id === id)) return
             lastPushedCards.delete(id)
+            // Prune the card's scheduling state too — otherwise the fsrsData
+            // entry lingers as a local orphan until the next full pull (the
+            // cross-tab BroadcastChannel delete handler already does this).
+            lastPushedFsrs.delete(id)
             applyingRemoteRef.current = true
             useLibraryStore.setState((state) => ({
               cards: state.cards.filter((c) => c.id !== id),
+              fsrsData: Object.fromEntries(Object.entries(state.fsrsData).filter(([fid]) => fid !== id)),
             }))
             applyingRemoteRef.current = false
           }
@@ -1450,10 +1605,11 @@ export function useSync(): SyncStatus {
 
       channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'review_logs', filter: userFilter },
+        { event: '*', schema: 'public', table: 'review_logs' },
         (payload) => {
           const { eventType, new: newRow, old: oldRow } = payload
           if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            if (!isOwnRow(newRow)) return
             const log = toCamel(newRow) as ReviewLog
             const existing = useHistoryStore.getState().reviewLogs.find((l) => l.id === log.id)
             if (existing && deepEqual(existing, log)) return
@@ -1469,7 +1625,8 @@ export function useSync(): SyncStatus {
             })
             applyingRemoteRef.current = false
           } else if (eventType === 'DELETE') {
-            const id = (oldRow as { id: string }).id
+            const id = (oldRow as { id?: string }).id
+            if (!id || !useHistoryStore.getState().reviewLogs.some((l) => l.id === id)) return
             applyingRemoteRef.current = true
             useHistoryStore.setState((state) => ({
               reviewLogs: state.reviewLogs.filter((l) => l.id !== id),

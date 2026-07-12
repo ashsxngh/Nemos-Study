@@ -194,6 +194,30 @@ create trigger trg_exams_updated_at before insert or update on exams
   for each row execute function set_updated_at();
 
 -- ────────────────────────────────────────────────────────────
+-- REALTIME PUBLICATION
+-- ────────────────────────────────────────────────────────────
+-- useSync.ts subscribes to postgres_changes on these tables; without adding
+-- them to the supabase_realtime publication, Postgres never emits change
+-- events for them at all. REPLICA IDENTITY stays DEFAULT (primary key only) —
+-- the client filters DELETE events by checking the id against its local
+-- store, so the old-row payload never needs more than the primary key.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['folders', 'decks', 'cards', 'review_logs'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
+-- ────────────────────────────────────────────────────────────
 -- ROW LEVEL SECURITY
 -- ────────────────────────────────────────────────────────────
 alter table folders        enable row level security;

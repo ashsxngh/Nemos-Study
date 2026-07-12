@@ -462,7 +462,10 @@ export const useLibraryStore = create<LibraryState>()(
       },
 
       setFSRSData: (cardId, fsrs) => {
-        set((s) => ({ fsrsData: { ...s.fsrsData, [cardId]: fsrs } }))
+        // Fresh updatedAt stamp: whatever is being written (e.g. an undo
+        // restoring a pre-review snapshot) is the user's latest local intent,
+        // so it must win the sync pull's recency merge and get re-pushed.
+        set((s) => ({ fsrsData: { ...s.fsrsData, [cardId]: { ...fsrs, updatedAt: new Date().toISOString() } } }))
       },
 
       resetCardSRS: (cardId) => {
@@ -509,6 +512,11 @@ export const useLibraryStore = create<LibraryState>()(
         if (wasNew && rating >= 3) {
           updated.dueDate = new Date().toISOString()
         }
+        // Client recency stamp for the sync pull merge — fsrsSchedule spreads
+        // the previous state, so without this a row pulled from the server
+        // would carry its stale server updated_at forward and the pull merge
+        // couldn't tell this review is newer than the server's copy.
+        updated.updatedAt = new Date().toISOString()
 
         // Derive a whole-day interval for the review log
         const daysDiff =

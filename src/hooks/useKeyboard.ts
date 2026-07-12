@@ -16,13 +16,18 @@ interface Shortcut {
 export function useKeyboard(shortcuts: Shortcut[]) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // e.key is undefined/empty on some real-world events: IME composition,
+      // certain Android/Samsung keyboards, and browser-extension-synthesized
+      // keydown events all omit it. Nothing below can match without it.
+      if (!e.key) return
+
       // Must be checked before preventDefault: a plain keypress ('/', '[' …)
       // inside a field is the user typing that character — swallowing it here
       // would block it from ever reaching the input. Modifier combos
       // (Ctrl+K etc.) are still allowed through while typing.
-      const target = e.target as HTMLElement
+      const target = e.target as HTMLElement | null
       const inEditable =
-        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || !!target?.isContentEditable
       const plainKeypress = !e.ctrlKey && !e.metaKey && !e.altKey
 
       for (const shortcut of shortcuts) {

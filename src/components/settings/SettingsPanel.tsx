@@ -188,9 +188,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               </div>
             </section>
 
-            {/* ── SRS Algorithm ── */}
+            {/* ── Review Algorithm (FSRS) ── */}
             <section className="space-y-4">
-              <SectionHeading icon={Brain} label="SRS Algorithm" />
+              <SectionHeading icon={Brain} label="Review Algorithm" />
 
               <>
                   <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] divide-y divide-[var(--border)]">

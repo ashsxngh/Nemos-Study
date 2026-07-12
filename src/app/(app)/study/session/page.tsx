@@ -1318,7 +1318,7 @@ function SessionContent() {
               </button>
               {showMoreRatings && (
                 <div className="mt-3 animate-fade-in">
-                  <ConfidenceRating onRate={handleRate} />
+                  <ConfidenceRating onRate={handleRate} fsrs={fsrsData[currentCard.id]} />
                 </div>
               )}
             </div>

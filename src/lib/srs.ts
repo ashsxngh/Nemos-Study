@@ -13,6 +13,13 @@ export interface FSRSState {
   repetitions: number
   lapses: number
   state: 'new' | 'learning' | 'review' | 'relearning'
+  // Client-stamped on every local write (init/review/reset/undo — see
+  // useLibraryStore's fsrs actions); overwritten server-side by the fsrs_data
+  // updated_at DB trigger on every upsert. The sync pull merge compares this
+  // against the server row's updated_at so a stale server copy can't revert a
+  // newer local review (push-failure window). Optional because rows persisted
+  // before this field existed lack it — those fall back to server-wins.
+  updatedAt?: string
 }
 
 export interface FSRSParams {
@@ -75,6 +82,7 @@ export function fsrsInitCard(cardId: string, userId: string): FSRSState {
     repetitions: 0,
     lapses: 0,
     state: 'new',
+    updatedAt: new Date().toISOString(),
   }
 }
 
