@@ -555,7 +555,7 @@ function SessionContent() {
         wasNew: isNew,
       })
 
-      reviewCard(card.id, rating, responseMs)
+      reviewCard(card.id, rating, responseMs, librarySessionIdRef.current ?? undefined)
 
       // Update progress bar counters (new cards excluded from review metrics)
       if (isNew) {

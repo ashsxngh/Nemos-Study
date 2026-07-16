@@ -169,17 +169,15 @@ function snapshotPreExistingIds(): void {
 //   and are absent from the server = they were deleted on another device. Drop them.
 // - Local-only items NOT in preExistingSet were created this session before push
 //   completed. Keep them so they get pushed.
-// - When preExistingSet is omitted (review logs), all local-only rows are kept
-//   because review logs are append-only and never deleted by users.
 function mergeKeepLocal<T extends { id: string }>(
   serverRows: T[],
   currentRows: T[],
-  preExistingSet?: Set<string>,
+  preExistingSet: Set<string>,
 ): T[] {
   const serverMap = new Map(serverRows.map((r) => [r.id, r]))
   const localOnly = currentRows.filter((r) => {
     if (serverMap.has(r.id)) return false
-    if (preExistingSet?.has(r.id)) return false
+    if (preExistingSet.has(r.id)) return false
     return true
   })
   if (localOnly.length > 0 && DEBUG_SYNC) {
@@ -497,7 +495,17 @@ async function runPull(
   if (sessions !== null || reviewLogs !== null) {
     useHistoryStore.setState((current) => ({
       ...(sessions !== null ? { sessions } : {}),
-      ...(reviewLogs !== null ? { reviewLogs: mergeKeepLocal(reviewLogs, current.reviewLogs) } : {}),
+      // Same deleted-elsewhere detection as every other table: a full pull
+      // returns ALL server logs, so a pre-existing local log missing from it
+      // was deleted on another device — drop it instead of keeping it around
+      // to be re-pushed (resurrecting the deletion). An incremental pull only
+      // returns logs reviewed since the watermark, so absence means nothing
+      // there — mergeIncremental never drops rows.
+      ...(reviewLogs !== null ? {
+        reviewLogs: incremental
+          ? mergeIncremental(reviewLogs, current.reviewLogs)
+          : mergeKeepLocal(reviewLogs, current.reviewLogs, preExistingIds.reviewLogs),
+      } : {}),
     }))
   }
 

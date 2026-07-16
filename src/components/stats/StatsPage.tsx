@@ -684,7 +684,6 @@ export function StatsPage() {
   const sessionFatigue = useMemo(() => {
     const bySession = new Map<string, typeof reviewLogs>()
     for (const log of reviewLogs) {
-      if (log.sessionId === 'manual') continue
       const list = bySession.get(log.sessionId) ?? []
       list.push(log)
       bySession.set(log.sessionId, list)

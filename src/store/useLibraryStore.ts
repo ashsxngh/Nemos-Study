@@ -62,7 +62,7 @@ interface LibraryState {
 
   // SRS actions
   initCardSRS: (cardId: string) => void
-  reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4, responseMs?: number) => void
+  reviewCard: (cardId: string, rating: 1 | 2 | 3 | 4, responseMs?: number, sessionId?: string) => void
   setFSRSData: (cardId: string, fsrs: FSRSState) => void
   resetCardSRS: (cardId: string) => void
   clearPendingDeletes: (processed: { folders: string[], decks: string[], cards: string[], sessions: string[], reviewLogs: string[] }) => void
@@ -406,12 +406,19 @@ export const useLibraryStore = create<LibraryState>()(
           })
         }
 
+        // Prune this card's review logs (locally + queued for server delete),
+        // same as deleteFolder/deleteDeck. Card-scoped only — the empty deck
+        // set leaves sessions alone, since a session can span cards that
+        // still exist.
+        const { logIds } = useHistoryStore.getState().pruneHistory(new Set([id]), new Set())
+
         set((s) => ({
           cards: s.cards.filter((c) => c.id !== id),
           fsrsData: newFsrsData,
           pendingDeletes: {
             ...s.pendingDeletes,
-            cards: [...s.pendingDeletes.cards, id],
+            cards: [...(s.pendingDeletes.cards ?? []), id],
+            reviewLogs: [...(s.pendingDeletes.reviewLogs ?? []), ...logIds],
           },
         }))
       },
@@ -443,12 +450,16 @@ export const useLibraryStore = create<LibraryState>()(
           })
         })
 
+        // Prune the deleted cards' review logs — see deleteCard.
+        const { logIds } = useHistoryStore.getState().pruneHistory(idSet, new Set())
+
         set((s) => ({
           cards: s.cards.filter((c) => !idSet.has(c.id)),
           fsrsData: newFsrsData,
           pendingDeletes: {
             ...s.pendingDeletes,
-            cards: [...s.pendingDeletes.cards, ...ids],
+            cards: [...(s.pendingDeletes.cards ?? []), ...ids],
+            reviewLogs: [...(s.pendingDeletes.reviewLogs ?? []), ...logIds],
           },
         }))
       },
@@ -474,7 +485,7 @@ export const useLibraryStore = create<LibraryState>()(
         }))
       },
 
-      reviewCard: (cardId, rating, responseMs = 0) => {
+      reviewCard: (cardId, rating, responseMs = 0, sessionId) => {
         const {
           fsrsWeights,
           fsrsTargetRetention,
@@ -523,9 +534,14 @@ export const useLibraryStore = create<LibraryState>()(
           (new Date(updated.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
         const logInterval = Math.max(1, Math.round(daysDiff))
 
+        // The caller's ReviewSession id, so logs are joinable to the session
+        // they were reviewed in (Session Fatigue groups logs by sessionId).
+        // Fallback for a review outside any session: a one-off id, so an
+        // unattributed log forms a harmless singleton group instead of all
+        // unattributed logs merging into one fake mega-session.
         const log: ReviewLog = {
           id: generateId(),
-          sessionId: generateId(),
+          sessionId: sessionId ?? generateId(),
           cardId,
           userId: USER_ID,
           rating,

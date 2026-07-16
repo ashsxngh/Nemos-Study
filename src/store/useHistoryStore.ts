@@ -19,8 +19,10 @@ interface HistoryState {
   addReviewLog: (log: ReviewLog) => void
   removeLastLog: () => void
   // Drops history belonging to deleted cards/decks (called by the library
-  // store's deleteFolder/deleteDeck). Returns the ids removed so the caller
-  // can queue them for remote deletion (see PendingDeletes.sessions/reviewLogs).
+  // store's deleteFolder/deleteDeck/deleteCard/deleteCardsBatch — card-only
+  // deletes pass an empty deck set so sessions are left alone). Returns the
+  // ids removed so the caller can queue them for remote deletion (see
+  // PendingDeletes.sessions/reviewLogs).
   pruneHistory: (cardIds: Set<string>, deckIds: Set<string>) => { sessionIds: string[]; logIds: string[] }
 
   startSession: (deckId?: string, mode?: ReviewSession['mode']) => ReviewSession
