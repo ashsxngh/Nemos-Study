@@ -1,5 +1,5 @@
 import type { Folder, Deck, Card, CardType } from '@/lib/types'
-import { fsrsInitCard } from '@/lib/srs'
+import { fsrsInitCard, fsrsBackfillCard } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 
 /**
@@ -380,12 +380,20 @@ export function importFromJSON(jsonText: string): ImportedBackup {
       fsrsData[cardId] = legacySrsToFsrs({ ...srs, cardId: srs.cardId ?? cardId })
     }
   }
+  const cards = Array.isArray(parsed.cards)
+    ? parsed.cards.map((c: Card) => ({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' }))
+    : []
+  // Every card must have an fsrs entry. Backups exported before fsrs export
+  // existed carry none at all, and legacy srsData conversion only covers
+  // cards that had an SM-2 entry — fill the gaps so a restored card can't
+  // land without a scheduling row.
+  for (const c of cards) {
+    if (!fsrsData[c.id]) fsrsData[c.id] = fsrsBackfillCard(c.id, c.userId)
+  }
   return {
     folders: Array.isArray(parsed.folders) ? parsed.folders : [],
     decks: Array.isArray(parsed.decks) ? parsed.decks : [],
-    cards: Array.isArray(parsed.cards)
-      ? parsed.cards.map((c: Card) => ({ ...c, hint: c.hint ?? '', front: c.front ?? '', back: c.back ?? '' }))
-      : [],
+    cards,
     fsrsData,
   }
 }

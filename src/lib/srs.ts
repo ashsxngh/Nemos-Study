@@ -86,6 +86,20 @@ export function fsrsInitCard(cardId: string, userId: string): FSRSState {
   }
 }
 
+// Init state for a card that should already have one but doesn't — a trash
+// restore whose entry carried no FSRS snapshot, a legacy backup that predates
+// FSRS export, or a card whose fsrs row was lost. Identical to fsrsInitCard
+// minus the updatedAt stamp: an unstamped row is the weakest possible claim
+// in the sync layer — the pull merge (pickFresherFsrs) lets any server row
+// win over it, and the push sends unstamped rows insert-only (never
+// overwriting) — so if the card's real scheduling state still exists
+// anywhere (server, another device), it always beats this placeholder.
+export function fsrsBackfillCard(cardId: string, userId: string): FSRSState {
+  const init = fsrsInitCard(cardId, userId)
+  delete init.updatedAt
+  return init
+}
+
 export function fsrsSchedule(
   state: FSRSState,
   grade: 1 | 2 | 3 | 4,

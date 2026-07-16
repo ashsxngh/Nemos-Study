@@ -17,6 +17,7 @@ import type {
   Note,
   Exam,
 } from '@/lib/types'
+import { fsrsBackfillCard } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 
 const DEBUG_SYNC = false
@@ -456,6 +457,25 @@ async function runPull(
       mergedFsrsData = Object.fromEntries(Object.entries(current.fsrsData).filter(([id]) => mergedCardSet.has(id)))
     }
 
+    // Backfill: every card must have an fsrs entry. Cards can arrive without
+    // one — historical restore paths (trash/undo/backup) re-added cards while
+    // skipping FSRS init, so their fsrs_data row never existed server-side and
+    // the gap propagated to every device that pulled the card. A missing entry
+    // makes the card ride the New queue forever with nothing to sync. The
+    // backfill is unstamped (no updatedAt — see fsrsBackfillCard), so it loses
+    // to any real row in pickFresherFsrs and is pushed insert-only; it's also
+    // absent from lastPushedFsrs, so the next push cycle sends it to the server.
+    let backfilled = 0
+    for (const c of mergedCards) {
+      if (!mergedFsrsData[c.id]) {
+        mergedFsrsData[c.id] = fsrsBackfillCard(c.id, c.userId)
+        backfilled++
+      }
+    }
+    if (backfilled > 0 && DEBUG_SYNC) {
+      console.log('[SYNC] pullFromSupabase: backfilled', backfilled, 'missing fsrs_data entr(ies)')
+    }
+
     return {
       ...(folders !== null ? {
         folders: incremental
@@ -714,13 +734,21 @@ async function pushToSupabase(
     const serialized = JSON.stringify(f)
     return lastPushedFsrs.get(f.cardId) !== serialized
   })
+  // Unstamped rows (no updatedAt: backfilled placeholders and legacy
+  // pre-updatedAt local rows) can't prove they're newer than anything, so they
+  // push insert-only (ignoreDuplicates) — create the missing server row, never
+  // overwrite a real one. Mirrors pickFresherFsrs, which already lets any
+  // server row beat an unstamped local one on pull. Every genuine local write
+  // (review/init/reset/undo) stamps updatedAt and takes the normal upsert path.
+  const fsrsStamped   = fsrsToUpsert.filter((f) => f.updatedAt)
+  const fsrsUnstamped = fsrsToUpsert.filter((f) => !f.updatedAt)
   const reviewLogsToUpsert = reviewLogs.filter((l) => !logDeleteSet.has(l.id) && !pushedLogIds.has(l.id))
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
   async function upsertBatched<T>(
     table: 'folders' | 'decks' | 'cards' | 'fsrs_data' | 'review_sessions' | 'review_logs',
     rows: T[],
-    opts: { onConflict: string },
+    opts: { onConflict: string; ignoreDuplicates?: boolean },
   ): Promise<void> {
     for (let i = 0; i < rows.length; i += BATCH) {
       const chunk = rows.slice(i, i + BATCH)
@@ -746,8 +774,11 @@ async function pushToSupabase(
           upsertOpts,
         )
       : null,
-    fsrsToUpsert.length
-      ? upsertBatched('fsrs_data', fsrsToUpsert.map(withUserId), { onConflict: 'card_id' })
+    fsrsStamped.length
+      ? upsertBatched('fsrs_data', fsrsStamped.map(withUserId), { onConflict: 'card_id' })
+      : null,
+    fsrsUnstamped.length
+      ? upsertBatched('fsrs_data', fsrsUnstamped.map(withUserId), { onConflict: 'card_id', ignoreDuplicates: true })
       : null,
     sessionsToUpsert.length
       ? upsertBatched('review_sessions', sessionsToUpsert.map(withUserId), upsertOpts)

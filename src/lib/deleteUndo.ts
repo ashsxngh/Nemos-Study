@@ -1,5 +1,6 @@
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useTrashStore } from '@/store/useTrashStore'
+import { fsrsBackfillCard } from '@/lib/srs'
 import type { Card } from '@/lib/types'
 
 const UNDO_WINDOW_MS = 5000
@@ -21,7 +22,11 @@ export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string,
       const card = entry?.card ?? fallbackCards?.get(id)
       if (!card) continue
       newCards.push(card)
-      if (entry?.cardFSRS) newFsrsData[id] = entry.cardFSRS
+      // Never restore a card without an fsrs entry — a missing snapshot (or
+      // the fallbackCards path, which carries no FSRS at all) previously left
+      // the card with no scheduling row, so it never synced one and
+      // misclassified as "new" everywhere.
+      newFsrsData[id] = entry?.cardFSRS ?? newFsrsData[id] ?? fsrsBackfillCard(id, card.userId)
       restoredIds.add(id)
     }
     return {

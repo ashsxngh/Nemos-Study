@@ -11,6 +11,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useAppStore } from '@/store/useAppStore'
 import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
+import { fsrsBackfillCard } from '@/lib/srs'
 import { cn, formatDate } from '@/lib/utils'
 
 const TRASH_TTL_DAYS = 14
@@ -187,7 +188,14 @@ export default function TrashPage() {
     if (entry.type === 'card' && entry.card) {
       useLibraryStore.setState((s) => ({
         cards: [...s.cards, entry.card!],
-        fsrsData: entry.cardFSRS ? { ...s.fsrsData, [entry.card!.id]: entry.cardFSRS } : s.fsrsData,
+        // Every card must come back with an fsrs entry — an entry without a
+        // snapshot (e.g. trashed before the snapshot existed) previously
+        // restored the card with no scheduling row at all, so it never synced
+        // an fsrs_data row and misclassified as "new" everywhere.
+        fsrsData: {
+          ...s.fsrsData,
+          [entry.card!.id]: entry.cardFSRS ?? s.fsrsData[entry.card!.id] ?? fsrsBackfillCard(entry.card!.id, entry.card!.userId),
+        },
         // Remove from pendingDeletes in case it was queued for Supabase DELETE
         pendingDeletes: {
           ...s.pendingDeletes,
@@ -198,7 +206,15 @@ export default function TrashPage() {
       useLibraryStore.setState((s) => ({
         decks: [...s.decks, entry.deck!],
         cards: [...s.cards, ...(entry.deckCards ?? [])],
-        fsrsData: { ...s.fsrsData, ...(entry.deckFSRS ?? {}) },
+        // deckFSRS only snapshots cards that had an fsrs entry at delete time
+        // — backfill the rest so no restored card lands without one.
+        fsrsData: {
+          ...s.fsrsData,
+          ...Object.fromEntries((entry.deckCards ?? []).map((c) => [
+            c.id,
+            entry.deckFSRS?.[c.id] ?? s.fsrsData[c.id] ?? fsrsBackfillCard(c.id, c.userId),
+          ])),
+        },
         pendingDeletes: {
           ...s.pendingDeletes,
           decks: s.pendingDeletes.decks.filter((id) => id !== entry.deck!.id),
