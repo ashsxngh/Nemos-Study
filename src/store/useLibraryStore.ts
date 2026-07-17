@@ -201,6 +201,7 @@ export const useLibraryStore = create<LibraryState>()(
           delete newFsrsData[cid]
         })
         const { sessionIds, logIds } = useHistoryStore.getState().pruneHistory(cardIdSet, deckIdSet)
+        useExamStore.getState().pruneRefs(deckIdsToDelete, allFolderIds)
         set({
           folders: folders.filter((f) => !allFolderIds.includes(f.id)),
           decks: decks.filter((d) => !deckIdsToDelete.includes(d.id)),
@@ -279,6 +280,7 @@ export const useLibraryStore = create<LibraryState>()(
         }
 
         const { sessionIds, logIds } = useHistoryStore.getState().pruneHistory(cardIdSet, new Set([id]))
+        useExamStore.getState().pruneRefs([id], [])
         set((s) => ({
           decks: s.decks.filter((d) => d.id !== id),
           cards: s.cards.filter((c) => c.deckId !== id),

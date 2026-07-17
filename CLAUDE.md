@@ -351,3 +351,135 @@ Bug report: rate a card in the New Cards flow correctly and it visibly "stays in
 **Not migrated (deliberate, same rationale as the 25-card decision above):** the 3 already-graduated `learning` cards keep their `due_date = last_reviewed_at` server rows — they show as due now, and their first real review assigns a proper interval, self-healing without touching the sync-critical fsrs path. A one-off SQL heal (recompute `due_date` from stored stability for rows where `due_date = last_reviewed_at and state = 'learning'`) is possible if wanted.
 
 Verified via `tsc --noEmit` and `next build` (both clean). A live local-only repro was prepared (build + Playwright script) but skipped at the user's direction; `.env.local` was moved aside for that build and **confirmed restored** (`Test-Path` true), and the stale local-only production build in `.next/` was rebuilt after restoring the env so a future `next start` doesn't serve a Supabase-less bundle. Changes left unstaged for user review.
+
+### Resumed audit: fsrs_data replay, review_sessions merge gap, exam ref orphans, schema-drift/PK/cleanliness report
+
+Continuation of the full schema/data audit via the (now-authorized) Supabase MCP connection — items #1–#8 below were the remaining "not yet addressed" items; #2–#4 from the original audit were already handled in prior sessions and untouched here. MCP connectivity confirmed first (`list_projects` → `list_tables` against project `hmqfbfquunoenzrrltya`).
+
+**#1 — 26 cards (not 25) reset to `state='new'`, fsrs_data reconstructed by log replay.** Re-checked live: the cards had **not** self-healed (still `state='new'`, `stability=0`, real `review_logs` history intact for all of them — the count is 26, one more than the earlier session's estimate). Reconstructed via direct sequential replay of each card's full `review_logs` chain through the actual `fsrsSchedule` function (a faithful port of `src/lib/srs.ts`'s `fsrsInitCard`/`fsrsSchedule`/`withFuzz`/`fuzzDelta` run in a scratch Node script — same weights confirmed live in `user_settings.fsrs_weights`, which match `DEFAULT_FSRS_PARAMS` exactly). Replaying sequentially (not just the last log) matters because FSRS state compounds — each call's `stability`/`difficulty` feed the next. Applied the 26 resulting states directly to `fsrs_data` via a single batched `UPDATE ... FROM (VALUES ...)`; verified 0 rows remain matching the "state=new but has review_logs" query afterward. 24 cards landed in `review`, 1 in `relearning` (had lapses), 5 in `learning` (single Good/Easy review, not yet graduated to `review`) — repetitions/lapses/due_date all consistent with their real rating history. This was a **live-data fix only, no code change** (the merge bug itself was already fixed in the prior `pickFresherFsrs` session). Local IndexedDB copies of these cards will pick up the corrected state on their next pull (server `updated_at` was stamped to the fix time, newer than any pre-fix local copy).
+
+**#5 — review_sessions pull now uses mergeKeepLocal, same as every other table; 96 zero-review rows (not 90) reported, not deleted.**
+- **`src/hooks/useSync.ts`** — `review_sessions` is always fetched in full (no `updated_at` column, no incremental gating), but the pull merge was a bare `{ sessions }` replace — the one table that skipped the `mergeKeepLocal`/`preExistingIds` pattern. A session created locally after the last pull but not yet pushed was silently dropped on the very next pull. Fixed: added a `sessions` bucket to `preExistingIds` (populated from `useHistoryStore.getState().sessions` in `snapshotPreExistingIds`), and the merge now always calls `mergeKeepLocal(sessions, current.sessions, preExistingIds.sessions)` — unconditionally (not gated on `incremental`), since the underlying fetch is always a full fetch regardless of the incremental flag.
+- **Zero-review rows**: live count is **96** (25 with `ended_at IS NULL`, 71 already finalized with `ended_at` set), not the 90 previously estimated, out of 124 total sessions. Listed full id/timestamp set before deciding anything (not deleted). Pattern in the data: most pairs share near-identical `started_at` (sub-10ms to a few seconds apart) with the first of the pair ending almost immediately — consistent with React (Strict Mode double-effect in dev, or a user opening `/study/session` and immediately navigating away before reviewing a card) rather than a sync bug; `endLibrarySession`'s unconditional unmount-cleanup call (`session/page.tsx`, `return () => endLibrarySession()`) is what creates a session row on every mount regardless of whether any card was rated. **No rows were finalized or deleted** — this needs the user's call on whether to backfill `ended_at` on the 25 open ones and/or bulk-delete the 96 as noise; full id list is in this session's tool output, ready to act on.
+
+**#6 — exam deck/folder refs now pruned on delete; 1 live orphan found and cleaned.**
+- **`src/store/useExamStore.ts`** — added `pruneRefs(deckIds, folderIds)`: filters both out of every exam's `deckIds`/`folderIds` arrays in one pass (no-ops if both lists are empty). `removeDeckFromExam`/`removeFolderFromExam` already existed but were never wired to the delete paths.
+- **`src/store/useLibraryStore.ts`** — `deleteFolder` now calls `useExamStore.getState().pruneRefs(deckIdsToDelete, allFolderIds)`; `deleteDeck` calls `pruneRefs([id], [])`. Both fire before the `set()` that actually removes the folder/deck, alongside the existing `pruneHistory` call.
+- **Live orphan**: exam `903ddb7c-9a74-4069-afcc-738687adcc5a` ("Source Analysis") had `folder_ids: ['c43d4c31-...']` referencing a folder that no longer exists in `folders` (confirmed via an `unnest(...) not in (select id from ...)` query — 0 orphan `deck_ids` anywhere, this was the only hit). Cleaned via direct `UPDATE ... array_remove(...)`; confirmed `folder_ids` is now `[]` and `updated_at` was trigger-stamped, so the next pull propagates the fix to local state normally.
+
+**#7 — schema drift: recommend adopting all listed columns into schema.sql, none look droppable.** Confirmed via `list_tables(verbose)` that all named columns exist live, and confirmed zero code references for each (`grep` across `src/` — only unrelated same-named locals/comments matched, e.g. `elapsedDays` in `trash/page.tsx`'s TTL countdown, not `fsrs_data.elapsed_days`):
+  - `fsrs_data.elapsed_days`/`scheduled_days` — always 0, never read/written by any TS code. These look like inert leftovers from an earlier (pre-FSRS-5?) column set. Recommend: **document in schema.sql as legacy/unused** rather than drop — dropping a column already in the live schema needs a migration either way, and there's no cost to leaving two always-zero int columns in place.
+  - `exams.daily_new_card_limit`/`auto_adjust_limits`/`topics` — zero code references (the per-exam new-card-limit/auto-adjust feature described by these column names was never built; `examScheduler.ts`'s "topics" is a doc-comment word, not this column). Recommend: **adopt into schema.sql as documented-but-unused** — same reasoning, no functional risk either way, but schema.sql should at least acknowledge columns that exist live so future audits don't re-flag them as "drift."
+  - `user_settings.id`/`settings`/`show_deck_name` — `id` is in fact the real PK (see #7b), `settings` (jsonb) and `show_deck_name` have zero code references (the app syncs individual typed columns — `new_cards_per_day`, `fsrs_weights`, etc. — never a generic blob). Recommend: **adopt `id` into schema.sql** (it's load-bearing, see #7b) and **document `settings`/`show_deck_name` as legacy/unused**.
+  - No drops performed — all report-only per instructions.
+
+**#7b — user_settings PK is `id`, NOT `user_id`; schema.sql is wrong and should be corrected.** Confirmed via `information_schema.table_constraints`/`key_column_usage`: `user_settings_pkey` (PRIMARY KEY) is on `id`; `user_settings_user_id_key` (UNIQUE) is on `user_id`; `user_settings_user_id_fkey` (FOREIGN KEY) also on `user_id` → `auth.users.id`. `schema.sql` declares `user_id` as the primary key, which does not match the live table. This isn't currently causing a functional bug — `pushSettingsToSupabase`'s upsert uses `onConflict: 'user_id'`, which works fine against a unique constraint regardless of whether it's also the PK — but schema.sql should be corrected to declare `id` as PK and `user_id` as a separate `unique` column so it matches reality. Not changed without confirmation, per instructions.
+
+**#8 — cleanliness items, mostly report-only; one correction to the audit's own premise.**
+  - `review_logs.ease` storing FSRS difficulty under the SM2-era column name — confirmed still intentional: `useLibraryStore.ts`'s `reviewCard` explicitly sets `ease: updated.difficulty` on every persisted log (the unrelated `ease: 0` in `session/page.tsx` is a separate, ephemeral `useStudyStore` undo-log struct that never reaches Supabase). No change.
+  - **`idx_user_settings_user_id` is NOT redundant — correcting the audit's premise.** The audit assumed `user_id` was already the PK (so a separate index on it would be redundant); #7b's catalog query shows the PK is actually `id`, and the live index (`user_settings_user_id_key`) is the UNIQUE constraint backing `pushSettingsToSupabase`'s `onConflict: 'user_id'` upsert — dropping it would break every settings push. **Recommend: do not drop.**
+  - `idx_fsrs_data_due_date` (live name: `fsrs_data_due_idx`) — confirmed unused: grepped `useSync.ts`'s `fsrs_data` queries (both incremental and full) and every other Supabase call in the codebase; none filter or order by `due_date` server-side (all due-date logic runs client-side after pulling full rows keyed by `user_id`/`updated_at`). Genuinely droppable, but **not dropped** — report-only per instructions, awaiting confirmation.
+  - `Card.imageUrl`, `ReviewSession.folderId` — confirmed dead: neither has a backing DB column (`cards`/`review_sessions` schemas confirmed via `list_tables`), and grepping `src/` finds no reference outside the `types.ts` declaration itself. Safe to remove, not removed without confirmation.
+  - `linked_card_ids`/`prerequisite_card_ids`/`linked_note_ids`/`embedded_card_ids` — confirmed always-empty: every write site initializes them to `[]` (card/note creation, `migrateLegacyIds.ts`'s id-remap-over-empty-array), and no setter/mutator exists anywhere in the codebase to ever populate them. Scaffolding for an unbuilt linking feature. Report only, per instructions.
+  - `CardType` variants `cloze`/`image`/`typed` — confirmed unused: `select type, count(*) from cards group by type` returns a single row, `basic: 305`. Report only.
+  - `Goal`, `StudyStreak`, `DailyStats` — confirmed type-only: no backing table in `list_tables`, no sync code references, and grepping `src/` finds zero usage outside their own declarations in `types.ts`. Report only, not removed.
+
+**Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on all three touched files (`useSync.ts`, `useLibraryStore.ts`, `useExamStore.ts`) shows only the two pre-documented pre-existing `useSync.ts` issues (mount-effect `setState`-in-effect error, mount-effect missing-deps warning) — zero new findings, including in the two files with actual logic changes. Files touched: `src/hooks/useSync.ts` (review_sessions merge fix), `src/store/useLibraryStore.ts` (exam-ref pruning wired into delete paths), `src/store/useExamStore.ts` (new `pruneRefs` action). No commit/push performed; changes left unstaged for review. Live-data fixes applied directly via Supabase MCP (not through application code, since these were one-off repairs of already-corrupted rows): the 26-card `fsrs_data` replay/update, and the single exam's orphaned `folder_ids` cleanup.
+
+### Zero-review review_sessions cleanup + StrictMode double-mount root-cause fix
+
+Follow-up task, verbatim:
+
+> Task: Clean up the 96 zero-review-history review_sessions noise rows and fix the root cause
+> so they stop accumulating.
+>
+> 1. Confirm via MCP the current count still matches (96: 71 with ended_at, 25 without) before
+>    deleting anything.
+> 2. Delete all 96 rows — confirmed noise, no real user progress attached (0 cardsReviewed each),
+>    pre-launch solo-dev environment, no downstream stats depend on them.
+> 3. Investigate the suspected root cause: React StrictMode double-mount causing
+>    startLibrarySession() to fire twice (mount → unmount → remount in dev), creating an
+>    abandoned first row. Confirm this is actually happening (check for the double-invoke
+>    pattern in session/page.tsx's effect setup) rather than assuming.
+> 4. If confirmed, fix it — guard startLibrarySession() so the dev double-mount doesn't create
+>    a duplicate/orphaned row (e.g. ref-guard against double-firing in the same mount cycle,
+>    or clean up the first row before creating a second on remount).
+> 5. Report the live row count after deletion (should be 0 noise rows), and state clearly
+>    whether the double-mount cause was confirmed or ruled out.
+>
+> Run tsc --noEmit and next build to verify. Do not commit or push — leave changes unstaged
+> for me to review and push myself.
+>
+> Append to CLAUDE.md under ## Session Log: this prompt verbatim, what was deleted, root cause
+> finding, and fix summary.
+
+**Step 1 — count re-check.** The live count had drifted since the prior session's report: **97** zero-review rows (26 with `ended_at IS NULL`, 71 finalized), not 96 — one more accumulated between sessions, consistent with the bug still being live and unfixed at that point. Proceeded against the current live set rather than the stale 96/25 estimate.
+
+**Step 2 — deleted.** `delete from review_sessions where cards_reviewed = 0` — all 97 ids listed before deletion, all 97 returned by `RETURNING id` on delete. Post-delete count confirmed: **0 zero-review rows remain**, 28 real sessions left (all with `cards_reviewed > 0`).
+
+**Step 3 — root cause confirmed, not assumed.** Read `src/app/(app)/study/session/page.tsx`'s mount effect (`useEffect(..., [])` around what was line 437): on the "fresh session" branch it called `beginFreshSession()` synchronously in the effect body — which calls `startLibrarySession()` (mints a new `review_sessions` row via `useHistoryStore.getState().startSession(...)`) — and returned a cleanup of `() => endLibrarySession()`. Confirmed **StrictMode is active**: `next.config.ts` has no `reactStrictMode` override, and Next.js defaults this to `true` (has been the default since 13.4), so every `next dev` run double-invokes this effect (mount → synchronous cleanup → remount, all before any timer fires — a dev-only React 18/19 behavior, never in production). This produces exactly the row pattern found in the data: pairs sharing near-identical `started_at` timestamps (often single-digit milliseconds apart), where the first of each pair is finalized (`ended_at` set) within milliseconds of starting — the phantom pass's own cleanup calling `endLibrarySession()` on a session that had zero time to accumulate any reviews. **Confirmed, not ruled out.**
+
+**Step 4 — fix applied.** `src/app/(app)/study/session/page.tsx` — the mount effect's fresh-session branch now defers the `beginFreshSession()` call via `setTimeout(fn, 0)` instead of calling it synchronously in the effect body, and the cleanup clears that timer before calling `endLibrarySession()`. Because StrictMode's mount→cleanup→remount cycle happens synchronously within the same tick (before any timer callback runs), the phantom first pass's `clearTimeout` cancels the scheduled `beginFreshSession()` before it ever executes — no row is created for the phantom pass, and `endLibrarySession()` on that pass's cleanup is a no-op (`librarySessionIdRef.current` is still `null`). Only the second, real pass's timer survives to actually fire and start the session. The `matches` (resumable-recovery) branch was left untouched — it doesn't call `beginFreshSession()`/`startLibrarySession()` at mount time at all (session creation there is deferred to the user clicking "Resume"), so it was never part of this bug and needed no change. Checked for a visible-loading regression from the one-tick defer: the page already gates its loading UI on `isLoading = !loaded` (line ~863), and `loaded` was already flipping from `false` to `true` asynchronously after the effect ran either way, so shifting that from "same tick" to "next macrotask" (sub-millisecond in practice) is not observably different.
+
+**Step 5 — final counts and confirmation status.**
+- Live `review_sessions` zero-review count after cleanup: **0** (28 real sessions remain).
+- Root cause: **confirmed** (not assumed) — verified via `next.config.ts` (no StrictMode override → Next default `true`) cross-referenced against the exact code shape in the mount effect and the paired-timestamp signature in the now-deleted rows.
+
+**Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on the touched file shows only the two pre-documented pre-existing issues (`setState`-in-effect at the `pendingRecovery`/`showMoreRatings` calls, `getDeckBoth`/`isComplete` unused-var warnings) — confirmed unrelated to and unchanged by this edit. File touched: `src/app/(app)/study/session/page.tsx`. No commit/push performed; changes left unstaged for review. The 97-row deletion was a live-data operation via Supabase MCP, not an application-code change.
+
+### Investigation: "20 new cards rated Remembered don't show in Reviews after raising newCardsPerDay mid-session" — no bug found
+
+Task, verbatim:
+
+> Bug report: Raised newCardsPerDay from 20 to 40 mid-session (already at 12:30am) to unlock
+> 20 more new cards for the day. Studied them, rated them correctly ("Remembered"). None of
+> these newly-reviewed cards are showing up in the Reviews/Due list afterward.
+>
+> Investigate before concluding anything — there are at least three possible explanations and
+> they need to be distinguished, not assumed:
+>
+> 1. Expected behavior post same-day-graduation-fix (likely, check first):
+>    The same-day graduation override was previously removed (documented fix: newly-graduated
+>    cards now get FSRS's real computed first interval — Good ≈ 4 days, Easy ≈ 16 days — instead
+>    of being due immediately). If these 20 cards were rated "Remembered" (grade 3 or 4), their
+>    correct due date would be several days out, meaning NOT appearing in today's Reviews is
+>    actually correct behavior, not a bug. Check the actual fsrs_data.due_date written for these
+>    specific cards after review — if it's several days in the future, this is working as intended
+>    and needs no fix, just user-facing clarity (e.g. does the UI make clear why a just-studied
+>    card won't reappear today?).
+>
+> 2. Midnight/day-boundary bug (check second):
+>    This happened right at the day boundary (~12:30am). toLocalDateStr() is used for local-time
+>    day bucketing everywhere, including the daily new-card cap in getNewCards(). Check whether
+>    raising newCardsPerDay mid-session and studying more cards just after midnight caused any
+>    miscounting — e.g. did the "cards studied today" count get bucketed to the wrong day, could
+>    any of these 20 cards have been silently excluded from being counted as "new cards studied
+>    today" vs "yesterday," or could the daily cap calculation have used a stale/wrong day value
+>    given the timing?
+>
+> 3. Genuine bug in cap/queue recompute on limit change (check third):
+>    Confirm that changing newCardsPerDay mid-session correctly recomputes the new-card queue
+>    immediately (live selector recompute, not stale cached count) — i.e. no double-counting or
+>    miscounting of "already studied today" when the limit itself changes between actions.
+>
+> For each of the 20 cards affected: pull their actual fsrs_data (due_date, state, updated_at)
+> and review_logs entries via MCP to see ground truth, rather than reasoning about it abstractly.
+>
+> Report which of the three (or a combination) is actually happening, with evidence, before
+> making any fix. If it's #1 (expected behavior), no code fix needed — just tell me clearly so
+> I understand the app is working correctly. If it's #2 or #3, propose the fix but don't apply
+> it yet — I want to see the diagnosis first.
+>
+> Append findings to CLAUDE.md under ## Session Log (this prompt verbatim + findings).
+
+**Finding: #1, confirmed — expected behavior, not a bug.** The rating UI (`ConfidenceRating`'s primary binary buttons, per the Warm Obsidian redesign) only exposes "Missed" (grade 1) and "Remembered" (grade 4/Easy). `DEFAULT_FSRS_PARAMS.weights[3] = 15.4722` (`src/lib/srs.ts:33`) is the initial stability FSRS-5 assigns a new card's first Easy review, and `reviewCard` (`src/store/useLibraryStore.ts:490-556`) computes `updated = fsrsSchedule(existing, rating, fsrsParams)` with no same-day override anywhere in the path — confirmed by direct read, matching the prior session's documented removal of that override. So every card rated "Remembered" via the primary UI gets a first interval of **~15-16 days** (before fuzz), not later the same day.
+
+**Server-side evidence (proxy set, not the literal 20 — see caveat below).** Queried `fsrs_data` via Supabase MCP (project `hmqfbfquunoenzrrltya`) for 7 cards on this account that went through the identical `wasNew:true, rating:4` path in the days immediately before this report (e.g. `f8a8381b-180a-428a-b933-ec5097c76f78`, `15476e93-b9f4-4e9c-ac3e-98d592fcd602`, `74a733f1-7445-4caf-9a97-1cbec4dc73ff`, `92118679-5cda-4db5-848c-f7a083451208`, `dc681701-3f03-4621-b632-accee9d3c959`, `1bb0244a-c939-439c-a2a4-b422e808c7af`, `0600597e-ea73-4adf-8b2e-92190b1263e6`). All show `state: 'review'`, `due_date` **30-45 days in the future** (2026-08-24 through 2026-09-02), `stability` ≈ 42 after 3-5 accumulated "Easy" reviews — exactly the graduation fix working as designed.
+
+**Caveat on scope — the literal 20 cards weren't reachable via MCP.** `review_logs` has no rows after `2026-07-17 05:25:48 UTC`, roughly 10 hours before `user_settings.new_cards_per_day` (20→40) synced at `2026-07-17 15:07:36 UTC`. The settings change itself did sync successfully (confirmed via direct query), so sync isn't broadly broken — but the specific 20-card review batch from the report hadn't reached Supabase as of this investigation, most likely because the tab was still open and hadn't hit its next push cycle. Evidence above is from the same account going through the identical code path with the same rating, not the literal cards in question.
+
+**#2 (midnight bucketing) — ruled out.** `toLocalDateStr` (`src/lib/formatDate.ts`) is applied symmetrically: at write-time on `reviewedAt` (log creation in `reviewCard`) and at read-time in `getNewCards`'s `wasNewTodayCardIds` computation (`useLibraryStore.ts:590-592`) — both via plain `new Date()` / `new Date(l.reviewedAt)` local-timezone getters. No UTC/local mismatch is possible in this path; both sides agree on "today" the same way regardless of when relative to midnight the review happened.
+
+**#3 (stale cap on limit change) — ruled out.** `getNewCards()` reads `newCardsPerDay` via `useSettingsStore.getState()` fresh on every invocation (`useLibraryStore.ts:580`), not from a memoized/closed-over value — any call after the settings change picks up the raised cap immediately. `study/new/page.tsx`'s `useMemo` also explicitly lists `newCardsPerDay` in its dep array. The session queue itself (`session/page.tsx`'s `buildQueue`) is an intentionally static per-session array once built (matches documented queue semantics — a cursor advances through it, it doesn't live-append); a raised cap requires starting a fresh session to take effect, which is expected, not a bug.
+
+**No fix applied — none needed.** Reported per instructions as a diagnosis-only investigation. Only remaining open question is optional UX clarity (does the Reviews/Due surface make it obvious a just-graduated card won't reappear same-day) — `study/new/page.tsx` already has copy for this from a prior session ("Learned cards will return to your Reviews queue when they're due"); extending it to other surfaces was not requested and not done.

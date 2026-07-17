@@ -48,6 +48,18 @@ const SCREENS = [
         await page.waitForTimeout(900)
         await page.mouse.move(1580, 980) // park cursor away so no card shows hover state
         await page.waitForTimeout(200)
+        const restOpacity = await page.evaluate(() => {
+          const cards = [...document.querySelectorAll('main [class*="card-surface"]')]
+          const deck = cards.find((c) => /Neuroanatomy|Pharmacology/.test(c.textContent))
+          if (!deck) return 'no-deck-card'
+          const cb = deck.querySelector('input[type=checkbox]')
+          const menu = deck.querySelector('[aria-label="More options"]')
+          return {
+            checkbox: cb ? getComputedStyle(cb).opacity : 'none',
+            menuWrapper: menu ? getComputedStyle(menu.parentElement).opacity : 'none',
+          }
+        })
+        console.log('  deck-card at-rest opacity:', JSON.stringify(restOpacity))
         await page.screenshot({ path: path.join(__dirname, OUT, 'library-decks.png'), fullPage: true })
         console.log('shot: library-decks')
       }

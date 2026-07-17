@@ -20,6 +20,7 @@ interface ExamState {
   removeFolderFromExam: (examId: string, folderId: string) => void
   setTargetRetention: (examId: string, retention: number) => void
   rateExam: (id: string, rating: number, predictedRetention: number) => void
+  pruneRefs: (deckIds: string[], folderIds: string[]) => void
 }
 
 export const useExamStore = create<ExamState>()(
@@ -117,6 +118,26 @@ export const useExamStore = create<ExamState>()(
           exams: s.exams.map((e) =>
             e.id === id ? { ...e, rating, predictedRetentionAtExam: predictedRetention } : e
           ),
+        }))
+      },
+
+      // Called from useLibraryStore's deleteDeck/deleteFolder so a deleted
+      // deck/folder's id can't linger in an exam's deckIds/folderIds array
+      // (schema.sql has no FK on these — they're plain uuid[] columns, so
+      // nothing enforces this at the DB level).
+      pruneRefs: (deckIds, folderIds) => {
+        if (deckIds.length === 0 && folderIds.length === 0) return
+        const deckSet = new Set(deckIds)
+        const folderSet = new Set(folderIds)
+        set((s) => ({
+          exams: s.exams.map((e) => {
+            const newDeckIds = e.deckIds.filter((d) => !deckSet.has(d))
+            const newFolderIds = (e.folderIds ?? []).filter((f) => !folderSet.has(f))
+            if (newDeckIds.length === e.deckIds.length && newFolderIds.length === (e.folderIds ?? []).length) {
+              return e
+            }
+            return { ...e, deckIds: newDeckIds, folderIds: newFolderIds }
+          }),
         }))
       },
     }),

@@ -8,6 +8,12 @@ import { generateId } from '@/lib/utils'
 interface UndoEntry {
   cardId: string
   prevFSRS: FSRSState
+  // fsrsData[cardId].updatedAt as written by the review being undone — lets
+  // handleUndo detect whether something else (e.g. a sync pull bringing in a
+  // newer state from another device) has touched the card since, so a stale
+  // prevFSRS can't clobber it. Absent on recovery snapshots persisted before
+  // this field existed; treated as "no check possible" in that case.
+  postReviewUpdatedAt?: string
   logId: string
   isNew: boolean
   rating: number
@@ -30,7 +36,7 @@ interface StudyState {
   nextCard: () => void
   addLog: (log: Omit<ReviewLog, 'id' | 'sessionId'>) => void
   reset: () => void
-  pushUndo: (cardId: string, prevFSRS: FSRSState, logId: string, isNew: boolean, rating: number) => void
+  pushUndo: (cardId: string, prevFSRS: FSRSState, logId: string, isNew: boolean, rating: number, postReviewUpdatedAt?: string) => void
   popUndo: () => UndoEntry | undefined
   decrementIndex: () => void
   requeueCurrentCard: () => void
@@ -86,9 +92,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       undoStack: [],
     }),
 
-  pushUndo: (cardId, prevFSRS, logId, isNew, rating) =>
+  pushUndo: (cardId, prevFSRS, logId, isNew, rating, postReviewUpdatedAt) =>
     set((s) => ({
-      undoStack: [...s.undoStack, { cardId, prevFSRS, logId, isNew, rating }],
+      undoStack: [...s.undoStack, { cardId, prevFSRS, logId, isNew, rating, postReviewUpdatedAt }],
     })),
 
   popUndo: () => {

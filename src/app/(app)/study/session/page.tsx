@@ -45,6 +45,12 @@ const RECOVERY_KEY = 'nemos-session-recovery'
 
 interface RecoverySnapshot {
   sessionId: string
+  // The real useHistoryStore ReviewSession id (librarySessionIdRef), distinct
+  // from sessionId above (useStudyStore's unrelated local UI id). Persisted so
+  // a resumed session continues writing to the same server-side row instead
+  // of splitting one continuous session across two ids. Absent on snapshots
+  // saved before this field existed.
+  librarySessionId?: string | null
   queue: Card[]
   currentIndex: number
   logs: ReturnType<typeof useStudyStore.getState>['logs']
@@ -198,6 +204,19 @@ function SessionContent() {
     const cardsCorrect = sessionLogs.filter((l) => l.rating >= 2).length
     useHistoryStore.getState().endSession(sessionId, cardsReviewed, cardsCorrect)
     librarySessionIdRef.current = null
+  }, [])
+
+  // Finalizes a review_sessions row belonging to a recovery snapshot that's
+  // about to be discarded (mismatched/stale snapshot found on mount, or user
+  // picks "Start fresh") instead of leaving it abandoned forever at
+  // cardsReviewed: 0, endedAt: null.
+  const closeAbandonedSession = useCallback((snapshot: RecoverySnapshot) => {
+    const sid = snapshot.librarySessionId
+    if (!sid) return
+    const sessionLogs = snapshot.logs.filter((l) => !l.wasNew)
+    const cardsReviewed = sessionLogs.length
+    const cardsCorrect = sessionLogs.filter((l) => l.rating >= 2).length
+    useHistoryStore.getState().endSession(sid, cardsReviewed, cardsCorrect)
   }, [])
 
   // Tracks the most recent "D" quick-delete so Ctrl+Z/Ctrl+D can restore it from trash
@@ -381,7 +400,15 @@ function SessionContent() {
       startedAt: new Date(),
       mode: pendingRecovery.mode,
     })
-    startLibrarySession()
+    if (pendingRecovery.librarySessionId) {
+      // Continue writing to the same review_sessions row instead of
+      // splitting one continuous session across two ids.
+      librarySessionIdRef.current = pendingRecovery.librarySessionId
+    } else {
+      // Snapshot predates librarySessionId being persisted — no id to
+      // restore, fall back to minting a fresh row.
+      startLibrarySession()
+    }
     setHistory([])
     setLoaded(true)
     const lib = useLibraryStore.getState()
@@ -400,10 +427,11 @@ function SessionContent() {
   }, [pendingRecovery])
 
   const handleDiscardRecovery = useCallback(() => {
+    if (pendingRecovery) closeAbandonedSession(pendingRecovery)
     clearRecovery()
     setPendingRecovery(null)
     beginFreshSession()
-  }, [beginFreshSession])
+  }, [pendingRecovery, closeAbandonedSession, beginFreshSession])
 
   /* ── Load cards on mount — check for an abandoned session first ── */
   useEffect(() => {
@@ -416,14 +444,52 @@ function SessionContent() {
       && saved.mode === resolvedMode
     if (matches) {
       setPendingRecovery(saved)
-    } else {
-      if (saved) clearRecovery() // stale/mismatched snapshot — drop it
-      beginFreshSession()
+      // End the persisted session record if the user navigates away/closes
+      // the tab mid-session, rather than via the Exit/Back-to-Study buttons.
+      return () => endLibrarySession()
     }
-    // End the persisted session record if the user navigates away/closes the tab
-    // mid-session, rather than via the Exit/Back-to-Study buttons.
-    return () => endLibrarySession()
+    // stale/mismatched snapshot — drop it, but finalize the abandoned
+    // review_sessions row it points to rather than leaving it open forever.
+    if (saved) { closeAbandonedSession(saved); clearRecovery() }
+
+    // Deferred by a tick: React 18/19 StrictMode (dev only) synchronously
+    // mounts this effect, tears it down, then remounts it, all before any
+    // timer fires. Calling beginFreshSession() (which mints a review_sessions
+    // row via startLibrarySession) directly in the effect body meant the
+    // phantom first pass created a row that its own cleanup then immediately
+    // finalized at 0 cards reviewed — one throwaway row per dev remount
+    // (confirmed live: 97 such rows, paired by near-identical started_at
+    // timestamps, most finalized within milliseconds of starting). Scheduling
+    // via setTimeout(0) lets the phantom pass's cleanup clear the timer
+    // before it ever fires; only the second, real pass's timer survives to
+    // actually start the session.
+    const timer = setTimeout(() => beginFreshSession(), 0)
+    return () => {
+      clearTimeout(timer)
+      endLibrarySession()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* Best-effort finalize on hard tab-close/crash/refresh — the unmount
+     cleanup above only fires on React unmount (SPA navigation), never on an
+     actual page unload, so a hard close previously left the review_sessions
+     row open forever (cardsReviewed: 0, endedAt: null). */
+  useEffect(() => {
+    function finalizeOnUnload() {
+      const sid = librarySessionIdRef.current
+      if (!sid) return
+      const sessionLogs = useStudyStore.getState().logs.filter((l) => !l.wasNew)
+      const cardsReviewed = sessionLogs.length
+      const cardsCorrect = sessionLogs.filter((l) => l.rating >= 2).length
+      useHistoryStore.getState().endSession(sid, cardsReviewed, cardsCorrect)
+    }
+    window.addEventListener('beforeunload', finalizeOnUnload)
+    window.addEventListener('pagehide', finalizeOnUnload)
+    return () => {
+      window.removeEventListener('beforeunload', finalizeOnUnload)
+      window.removeEventListener('pagehide', finalizeOnUnload)
+    }
   }, [])
 
   /* Persist an in-progress session snapshot on every change so it can be
@@ -434,7 +500,7 @@ function SessionContent() {
       clearRecovery()
       return
     }
-    saveRecovery({ sessionId, queue, currentIndex, logs, undoStack, mode, deckId, examId })
+    saveRecovery({ sessionId, librarySessionId: librarySessionIdRef.current, queue, currentIndex, logs, undoStack, mode, deckId, examId })
   }, [loaded, sessionId, queue, currentIndex, logs, undoStack, mode, deckId, examId, pendingRecovery])
 
   /* Reset timer & UI when card changes */
@@ -524,6 +590,17 @@ function SessionContent() {
       if (ratingInFlightRef.current) return
       const card = queue[currentIndex]
       if (!card || animatingOut) return
+
+      // The queue snapshot can go stale — the card may have been deleted
+      // locally or synced-deleted from another device since it was built.
+      // Skip the phantom write (which would otherwise resurrect an orphaned
+      // fsrsData row + review log for a card that no longer exists) and just
+      // advance past it, like a normal removal.
+      if (!useLibraryStore.getState().cards.some((c) => c.id === card.id)) {
+        removeCurrentCard()
+        return
+      }
+
       ratingInFlightRef.current = true
 
       const isNew = (useLibraryStore.getState().fsrsData[card.id]?.state ?? 'new') === 'new'
@@ -568,7 +645,10 @@ function SessionContent() {
         if (rating === 1) setMissedReviewCount((c) => c + 1)
       }
 
-      if (prevFSRS) pushUndo(card.id, prevFSRS, logId, isNew, rating)
+      if (prevFSRS) {
+        const postReviewUpdatedAt = useLibraryStore.getState().fsrsData[card.id]?.updatedAt
+        pushUndo(card.id, prevFSRS, logId, isNew, rating, postReviewUpdatedAt)
+      }
       setHistory((h) => [...h, currentIndex])
 
       // Animate then advance
@@ -588,7 +668,24 @@ function SessionContent() {
     const entry = popUndo()
     if (!entry) return
     // Guard against a pre-FSRS-only recovery snapshot missing the field
-    if (entry.prevFSRS) useLibraryStore.getState().setFSRSData(entry.cardId, entry.prevFSRS)
+    if (entry.prevFSRS) {
+      // Recency check (same intent as pickFresherFsrs in useSync.ts): if the
+      // live fsrsData entry no longer matches what this review wrote, some
+      // other source — most likely a sync pull bringing in a newer state
+      // from another device across a close/resume gap — has touched the
+      // card since. Applying the stale prevFSRS here would silently clobber
+      // it, so decline the undo instead.
+      const live = useLibraryStore.getState().fsrsData[entry.cardId]
+      if (entry.postReviewUpdatedAt && live?.updatedAt !== entry.postReviewUpdatedAt) {
+        useAppStore.getState().addToast({
+          type: 'info',
+          message: "Can't undo — this card was updated elsewhere",
+          duration: 3000,
+        })
+        return
+      }
+      useLibraryStore.getState().setFSRSData(entry.cardId, entry.prevFSRS)
+    }
     useHistoryStore.getState().removeLastLog()
     decrementIndex()
     if (entry.isNew) {

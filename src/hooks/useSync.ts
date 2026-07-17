@@ -145,6 +145,7 @@ const preExistingIds = {
   notes:      new Set<string>(),
   reviewLogs: new Set<string>(),
   exams:      new Set<string>(),
+  sessions:   new Set<string>(),
 }
 let preExistingSnapshotTaken = false
 
@@ -160,6 +161,7 @@ function snapshotPreExistingIds(): void {
   hs.reviewLogs.forEach((l) => preExistingIds.reviewLogs.add(l.id))
   ns.notes.forEach((n)  => preExistingIds.notes.add(n.id))
   es.exams.forEach((e)  => preExistingIds.exams.add(e.id))
+  hs.sessions.forEach((sess) => preExistingIds.sessions.add(sess.id))
   preExistingSnapshotTaken = true
 }
 
@@ -494,7 +496,15 @@ async function runPull(
 
   if (sessions !== null || reviewLogs !== null) {
     useHistoryStore.setState((current) => ({
-      ...(sessions !== null ? { sessions } : {}),
+      // review_sessions is always fetched in full (no updated_at column, no
+      // incremental gating — see the query above), so every pull sees the
+      // complete server set and mergeKeepLocal's "deleted elsewhere" detection
+      // is always valid here, not just on a full pull. Without this, a plain
+      // `{ sessions }` replace (the old behavior) silently dropped any
+      // session created locally since the last pull but not yet pushed.
+      ...(sessions !== null ? {
+        sessions: mergeKeepLocal(sessions, current.sessions, preExistingIds.sessions),
+      } : {}),
       // Same deleted-elsewhere detection as every other table: a full pull
       // returns ALL server logs, so a pre-existing local log missing from it
       // was deleted on another device — drop it instead of keeping it around
