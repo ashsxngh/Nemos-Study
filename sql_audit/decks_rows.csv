@@ -1,7 +1,0 @@
-id,user_id,folder_id,name,description,is_starred,is_archived,tags,order,created_at,updated_at
-0baae41f-7ed7-48c8-ac0d-8a5e187171c5,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,594bc268-bfd0-40bc-9eaf-1ea26d20048a,People's Republic of China,,false,false,[],1,2026-07-02 15:03:18.933+00,2026-07-02 15:03:18.933+00
-2f083a62-6e92-4f20-a9d9-ba0f78cf72bf,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,e982c2f1-e9ce-4458-bf75-f4b942a0e190,DNA,,false,false,[],2,2026-07-07 06:09:54.702+00,2026-07-07 06:09:54.702+00
-5c703bdb-7cb7-424c-9746-9c659997b959,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,e982c2f1-e9ce-4458-bf75-f4b942a0e190,Protein Synthesis,,false,false,[],4,2026-07-13 16:13:48.543+00,2026-07-13 16:13:48.543+00
-99d6888b-cfee-4164-8d82-7ffec9d21c46,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,e982c2f1-e9ce-4458-bf75-f4b942a0e190,Mutations,DNA mutations,false,false,[],5,2026-07-13 16:16:26.601+00,2026-07-13 16:16:26.601+00
-dfcc751d-6f9c-4265-adea-42f7e95b457a,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,e98c46d1-d9b3-4340-8db6-9b0945eb2c17,9A - Physical thermal properties of water,,false,false,[],5,2026-07-13 16:41:04.167+00,2026-07-13 16:41:04.167+00
-e7adc0c0-4bfb-46db-ac01-27b6bf9ffe93,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,e982c2f1-e9ce-4458-bf75-f4b942a0e190,Patterns of Inheritance,,false,false,[],3,2026-07-07 06:10:44.319+00,2026-07-07 06:10:44.319+00
