@@ -1,0 +1,2 @@
+id,user_id,settings,updated_at,new_cards_per_day,daily_review_limit,show_deck_name,fsrs_weights,target_retention
+ac124d76-ec23-47bb-adc5-475998923e14,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,{},2026-07-16 13:00:06.036+00,20,200,true,"[0.4072, 1.1829, 3.1262, 15.4722, 7.2102, 0.5316, 1.0651, 0.0589, 1.3547, 0.1049, 1, 1.9898, 0.11, 0.29, 2.27, 0.179, 2.9898]",0.9

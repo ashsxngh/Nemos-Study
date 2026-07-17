@@ -75,7 +75,7 @@ interface ConfidenceRatingProps {
  * The interval under each label is a real preview: fsrsSchedule (pure) is run
  * once per rating against the card's current FSRS state with the user's own
  * weights/retention settings — the same call reviewCard makes when the rating
- * is actually committed, including its same-day rule for graduating new cards.
+ * is actually committed.
  */
 export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingProps) {
   const { fsrsWeights, fsrsTargetRetention, fsrsMaxInterval } = useSettingsStore(
@@ -97,12 +97,6 @@ export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingPr
     }
     const out = {} as Record<Difficulty, string>
     for (const grade of [1, 2, 3, 4] as const) {
-      // Mirror reviewCard's graduation rule: a new card rated Good/Easy is
-      // made reviewable the same day regardless of the scheduled interval.
-      if (fsrs.state === 'new' && grade >= 3) {
-        out[grade] = 'Today'
-        continue
-      }
       const next = fsrsSchedule(fsrs, grade, params)
       // eslint-disable-next-line react-hooks/purity -- the interval preview is wall-clock-relative by design (fsrsSchedule itself anchors on "now"); the memo recomputes per card, which is exactly the freshness needed
       const days = Math.round((new Date(next.dueDate).getTime() - Date.now()) / 86400000)

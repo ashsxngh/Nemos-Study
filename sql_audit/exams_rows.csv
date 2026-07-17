@@ -1,0 +1,2 @@
+id,user_id,name,subject,date,notes,priority,deck_ids,created_at,folder_ids,target_retention,daily_new_card_limit,auto_adjust_limits,topics,updated_at,rating,predicted_retention_at_exam
+903ddb7c-9a74-4069-afcc-738687adcc5a,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,Source Analysis,History,2026-06-24,,high,[],2026-06-21 06:36:14.868+00,"[""c43d4c31-420c-4ce1-a0ff-8a82d0e885d1""]",0.95,20,true,[],2026-07-16 12:58:55.356901+00,,

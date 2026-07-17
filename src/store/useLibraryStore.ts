@@ -519,10 +519,6 @@ export const useLibraryStore = create<LibraryState>()(
           requestRetention: fsrsTargetRetention,
         }
         const updated = fsrsSchedule(existing, rating, fsrsParams)
-        // Cards graduating from new should be reviewable the same day
-        if (wasNew && rating >= 3) {
-          updated.dueDate = new Date().toISOString()
-        }
         // Client recency stamp for the sync pull merge — fsrsSchedule spreads
         // the previous state, so without this a row pulled from the server
         // would carry its stale server updated_at forward and the pull merge

@@ -1,0 +1,4 @@
+id,user_id,folder_id,title,content,is_starred,is_archived,tags,linked_note_ids,embedded_card_ids,created_at,updated_at
+55c475c5-aaa4-4646-9610-fae41808f55a,bd7d53fd-76e2-4330-ab15-0e0a432f7b68,,Future Ambitions,"Bug Fixes:
+- Sidebar decks thingo removal
+- Twenty due, twenty new thingo removal (change 20 due to like the actual number in new cards or like review system)",false,false,"[""Nemos""]",[],[],2026-07-10 15:23:25.507+00,2026-07-10 15:25:31.304+00

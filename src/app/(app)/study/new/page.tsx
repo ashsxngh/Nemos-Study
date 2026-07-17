@@ -94,7 +94,7 @@ export default function NewCardsPage() {
               </div>
 
               <p className="text-xs text-center text-[var(--text-muted)]">
-                Learned cards will appear in your Reviews queue the same day
+                Learned cards will return to your Reviews queue when they&apos;re due
               </p>
             </div>
           )}
