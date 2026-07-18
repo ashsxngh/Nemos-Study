@@ -41,7 +41,7 @@ interface SettingsData {
   // Keyboard shortcuts (study session)
   studyShortcuts: {
     forgot: string      // key when answer shown → rate 1
-    remembered: string  // key when answer shown → rate 4
+    remembered: string  // key when answer shown → rate 3 (Good)
     skip: string        // skip card
     back: string        // go back
   }

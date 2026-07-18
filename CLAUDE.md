@@ -483,3 +483,298 @@ Task, verbatim:
 **#3 (stale cap on limit change) — ruled out.** `getNewCards()` reads `newCardsPerDay` via `useSettingsStore.getState()` fresh on every invocation (`useLibraryStore.ts:580`), not from a memoized/closed-over value — any call after the settings change picks up the raised cap immediately. `study/new/page.tsx`'s `useMemo` also explicitly lists `newCardsPerDay` in its dep array. The session queue itself (`session/page.tsx`'s `buildQueue`) is an intentionally static per-session array once built (matches documented queue semantics — a cursor advances through it, it doesn't live-append); a raised cap requires starting a fresh session to take effect, which is expected, not a bug.
 
 **No fix applied — none needed.** Reported per instructions as a diagnosis-only investigation. Only remaining open question is optional UX clarity (does the Reviews/Due surface make it obvious a just-graduated card won't reappear same-day) — `study/new/page.tsx` already has copy for this from a prior session ("Learned cards will return to your Reviews queue when they're due"); extending it to other surfaces was not requested and not done.
+
+### Follow-up investigation: same symptom recurs next day, one specific card checked — confirmed same known cause, no second bug
+
+Task, verbatim:
+
+> Bug report: Raised newCardsPerDay limit mid-session again today to unlock more new cards,
+> studied them, rated correctly ("Remembered"). Same symptom as yesterday's incident — the
+> studied cards aren't showing up in Reviews.
+>
+> Yesterday's audit confirmed the root cause for that incident was hypothesis #1: "Remembered"
+> sends grade 4 (Easy), which schedules new cards ~15-16 days out via FSRS-5's default weights —
+> expected behavior given the current (not-yet-fixed) grade-4 mapping, not a bug. The grade-3
+> fix for this is planned but NOT YET APPLIED.
+>
+> Do not assume this is the same known cause again — confirm it against this specific card
+> before concluding anything. There could be a second, different issue layered on top.
+>
+> Card ID to investigate: 461bb11b-8866-47c1-8733-140168af83a2 (front contains "evaporation")
+>
+> Steps:
+> 1. Pull this card's live fsrs_data row via MCP (due_date, state, updated_at, stability,
+>    difficulty, elapsed_days, scheduled_days) and its full review_logs history (rating,
+>    reviewed_at, wasNew, sessionId for each entry).
+> 2. Check: does due_date match the expected ~15-16 day-out pattern from an Easy-graded first
+>    review (consistent with yesterday's confirmed cause), or is due_date something else
+>    entirely (e.g. still same-day, null, in the past, or unexpectedly far out)?
+> 3. If due_date DOES match the known Easy-grade pattern: confirm this is the same root cause
+>    as yesterday, no new bug — but explicitly check whether this is a UX/expectations problem
+>    worth flagging (user has now hit this twice in two days without realizing why) rather than
+>    a code bug.
+> 4. If due_date does NOT match that pattern: investigate fresh — check for:
+>    - Duplicate or conflicting fsrs_data writes (e.g. two rows written close together with
+>      different due_dates, race between local write and a sync pull overwriting it)
+>    - Whether this card's review actually landed in review_logs at all (silent write failure)
+>    - Whether the newCardsPerDay limit change itself caused any queue/cap miscalculation
+>      specific to this card (distinct from yesterday's ruled-out hypothesis #3 — check if
+>      conditions differ today, e.g. different time of day, different limit delta)
+>    - Whether this card was already reviewed previously (check full review_logs history, not
+>      just today) and today's review interacted oddly with prior state
+> 5. Cross-check sync status: has this card's review actually synced from local to Supabase,
+>    or is local state ahead of what MCP can see (same caveat as yesterday, where the batch
+>    hadn't synced yet)? If not yet synced, state that clearly and note what to re-check once
+>    it has.
+>
+> Report full findings with evidence (actual field values, not summaries) before concluding
+> whether this is the same known cause, a variant of it, or something new. Do not apply any
+> fix yet — investigation only.
+>
+> Append findings to CLAUDE.md under ## Session Log (this prompt verbatim + findings).
+
+**Ground truth pulled via Supabase MCP (project `hmqfbfquunoenzrrltya`).**
+
+`cards` row: `461bb11b-8866-47c1-8733-140168af83a2`, front "What happens during evaporation in the water cycle?" — confirms this is the correct card.
+
+`review_logs` — exactly one entry, ever, for this card:
+```
+id: 388caf03-6e21-4462-8e37-e4791bcd8521
+rating: 4
+reviewed_at: 2026-07-18 06:17:30.73+00
+was_new: true
+session_id: 504b29fe-05bd-4ca3-8aa8-ea5be368aa67
+ease: 3.28285649513529
+response_ms: 5774
+```
+
+`fsrs_data` row:
+```
+stability: 15.4722
+difficulty: 3.28285649513529
+elapsed_days: 0
+scheduled_days: 0
+repetitions: 1
+lapses: 0
+state: "learning"
+due_date: 2026-07-31 06:17:30.73+00
+last_reviewed_at: 2026-07-18 06:17:30.73+00
+updated_at: 2026-07-18 06:17:32.85222+00
+retrievability: 1
+```
+
+**Step 2 — due_date pattern check.** `due_date − reviewed_at` = exactly **13.0 days**, not same-day/null/past/unexpectedly-far. Verified the exact math against `src/lib/srs.ts`'s live `fsrsSchedule`: for a brand-new card (`state.state === 'new'`) rated grade 4, `newStability = w[3] = 15.4722` (`DEFAULT_FSRS_PARAMS.weights[3]`, confirmed matching this account's live `user_settings.fsrs_weights[3]`). Base interval = `ceil(9 * 15.4722 * (1/0.9 − 1))` = `ceil(15.4722)` = **16 days**, then `withFuzz(16, cardId)` — a deterministic per-cardId hash-seeded fuzz (`src/lib/srs.ts:60-71`) — reduces it to 13 for this specific card id. 13 days is squarely the same Easy-grade/grade-4 pattern documented yesterday (that report's "~15-16 days" was the pre-fuzz base; 13 is the correct post-fuzz result for this card, same mechanism). **Matches hypothesis #1 exactly.**
+
+**Broadened check — the other new card from the same session shows the identical pattern.** Session `504b29fe-05bd-4ca3-8aa8-ea5be368aa67` reviewed 2 new cards today, not just this one (`c0cdbbaa-11b4-40a2-aeb8-6a0611b2ee08`, "Define a purine base structure," reviewed 06:16:11 UTC — one minute before the evaporation card). Queried both together: **byte-identical shape** — `state: 'learning'`, `repetitions: 1`, `stability: 15.4722`, `due_date` exactly 13.0000 days after `reviewed_at` for both. No divergence between the two cards in this session.
+
+**Step 3 — same root cause confirmed, no new bug layered on top.** Ruled out every alternative explicitly:
+- **Duplicate/conflicting fsrs_data writes**: `fsrs_data` has one row per `card_id` (single result returned, no ambiguity possible structurally); `updated_at` (06:17:32.85) is ~2 seconds after `last_reviewed_at` (06:17:30.73) — normal single-write timing, no race signature.
+- **Silent review_logs write failure**: the log landed cleanly — exactly one row, correct `rating`/`was_new`/`session_id`, non-zero `response_ms`.
+- **Queue/cap miscalculation from the newCardsPerDay change**: doesn't apply here at all — `fsrsSchedule` (the function that computed this `due_date`) takes only `(state, grade, params, reviewedAt)`, no reference to `newCardsPerDay` or any cap/queue value anywhere in its body (confirmed by reading the full function, `src/lib/srs.ts:103-206`). The cap only affects how many new cards enter a session's queue, not how an already-selected card gets scheduled after rating. Hypothesis #3 was about a different mechanism and doesn't interact with this one.
+- **Prior review history interacting oddly**: ruled out — `repetitions: 1` and a single `review_logs` row confirm this was genuinely the card's first-ever review, no residual state from an earlier review to interact with.
+- **Midnight/day-boundary bucketing (#2)**: not applicable to `due_date` scheduling at all — that hypothesis concerns `getNewCards()`'s daily-cap bucketing (`toLocalDateStr`), a completely separate code path from `fsrsSchedule`'s interval math, which has no day-of-week/calendar-boundary logic in it.
+
+**Step 5 — sync cross-check: fully synced, not a lag artifact.** Supabase's own `now()` at query time was `2026-07-18 15:34:17 UTC` — about 9 hours after this card's review (06:17 UTC) and only ~2 minutes after the account's `user_settings.updated_at` (15:32:30 UTC). `fsrs_data.updated_at` trailing `last_reviewed_at` by ~2 seconds confirms the push completed normally, same day. Unlike yesterday's investigation (where the specific 20-card batch hadn't reached Supabase yet), this card's data is confirmed live and current — not a stale/lagging read.
+
+**Conclusion: same known cause as yesterday (hypothesis #1), no second bug found.** This is now confirmed on 2 consecutive days, 3 cards total, all showing the identical mechanism: "Remembered" → grade 4 → FSRS-5's `w[3]` initial stability → a ~13-16 day first interval (pre/post fuzz) → correctly excluded from Reviews until actually due. Every alternative explanation (duplicate writes, silent log-write failure, cap-driven miscalculation, stale prior state, midnight bucketing, unsynced data) was checked directly against this card's ground-truth rows and ruled out individually, not assumed away.
+
+**UX flag (explicitly requested in step 3): worth escalating, not just noting.** The user has now hit this exact same surprise on 2 consecutive days without an intervening fix, despite it being correctly diagnosed as expected behavior both times. The root friction is that the primary session UI only exposes a binary "Missed" / "Remembered" choice, and "Remembered" silently means grade 4 (Easy) — the most aggressive interval jump FSRS-5 offers — with no visible signal at rating time that a new card just got scheduled ~2 weeks out rather than "soon." The prompt notes a grade-3 remapping fix is planned but not yet applied; until it lands (or as a faster interim mitigation), surfacing the computed interval next to the rating buttons for new cards specifically (the `ConfidenceRating` "More ratings" expanded view already computes real per-grade interval previews via `fsrsSchedule` — `src/components/study/ConfidenceRating.tsx`, documented in a prior session) would close this gap without needing the grade mapping itself to change.
+
+No fix applied — investigation only, per instructions.
+
+### Fix: restore same-day graduation + remap binary "Remembered" from grade 4 to grade 3
+
+Task, verbatim:
+
+> Two connected fixes — implement both together since they define the intended card lifecycle.
+>
+> Background:
+> - Fix 1 (same-day graduation): a previous session deliberately removed the same-day
+>   graduation override (dueDate = now on graduation) in favour of giving new cards FSRS's
+>   real computed first interval immediately. This was the wrong call for the intended UX —
+>   the desired flow is: learn card → card appears in Reviews the same day → gets its first
+>   real FSRS interval after that review. Restore same-day graduation.
+> - Fix 2 (grade-3 remapping): the binary "Remembered" button currently submits grade 4
+>   (Easy) to fsrsSchedule. Confirmed via live review_logs data — every successful rating in
+>   the dataset is grade 4, never grade 3. This means every first Review after graduation
+>   schedules the card ~13-16 days out (FSRS-5's w[3] Easy weight = 15.4722, post-fuzz ~13
+>   days confirmed live). The correct mapping for a binary success button is grade 3 (Good),
+>   which schedules ~4 days out — the FSRS community's standard guidance for collapsed
+>   two-button UIs is Again(1)/Good(3), not Again(1)/Easy(4), since Good is the calibration
+>   anchor the rest of the formulas are written against.
+>
+> Intended card lifecycle after both fixes:
+>   New card → rated "Remembered" → graduates immediately, due_date = today → appears in
+>   Reviews same session/day → rated "Remembered" in Reviews → scheduled ~4 days out via
+>   Good(3) → stays in FSRS scheduling from there.
+>
+> Investigate before fixing:
+>
+> For Fix 1 (same-day graduation):
+> 1. Find where the same-day graduation override was removed (useLibraryStore.ts, reviewCard(),
+>    previously around line 522-525 per CLAUDE.md — confirm exact current location). Confirm
+>    the prior override was dueDate = new Date().toISOString() on wasNew && rating >= 3.
+> 2. Restore it — but only for the graduation event (wasNew === true), not for subsequent
+>    reviews. The card should be due today, not due "now" in a way that causes it to
+>    immediately reappear mid-session before the user has finished their current queue.
+>    Use start-of-today (local midnight via toLocalDateStr()) as the due date, not
+>    Date.now() — consistent with the codebase's existing local-time day bucketing rules
+>    (toLocalDateStr() everywhere, never toISOString().slice(0,10)).
+> 3. Check ConfidenceRating.tsx's interval preview text for new cards — it was previously
+>    updated to reflect "real FSRS interval" behavior when the override was removed. Update
+>    it again to reflect same-day graduation so the preview is accurate.
+> 4. Check the /study/new page copy — it was also updated when the override was removed
+>    ("Learned cards join your review queue when they're due"). Update to reflect that learned
+>    cards join Reviews the same day.
+>
+> For Fix 2 (grade-3 remapping):
+> 1. Find the exact rating handler(s) where the binary "Remembered" action submits grade 4 —
+>    likely session/page.tsx's handleRate or a shared rating-mapping constant. Confirm whether
+>    this mapping exists in one place or is duplicated (e.g. keyboard shortcut path, quick-rate
+>    path).
+> 2. Confirm ConfidenceRating.tsx's "More ⋯" expandable panel submits grades 1-4 explicitly
+>    and is fully independent of the binary path — this change must not affect the explicit
+>    Easy(4) or Hard(2) picker options.
+> 3. Check for any place in the codebase that branches on rating === 4 specifically to mean
+>    "successful review" (not >= 2 or >= 3) — stats queries, analytics components, leech
+>    detection, hardest-topics queries. Any such branch would silently break or zero out after
+>    this change. Fix any found.
+> 4. Check UI copy, tooltips, and interval preview text that currently says or implies
+>    "Remembered = Easy" — update for consistency.
+> 5. Change the binary "Remembered" mapping from grade 4 to grade 3 everywhere confirmed in
+>    steps 1-3.
+>
+> Do NOT retroactively touch existing review_logs rows already scored as grade 4 — going-forward
+> fix only. Note the historical grade-4 count in your summary for reference.
+>
+> After both fixes, confirm the full intended lifecycle works end-to-end by tracing through the
+> code: new card rated "Remembered" → wasNew=true → dueDate = local today → state transitions
+> correctly → appears in Reviews queue same day → rated "Remembered" → grade 3 submitted →
+> fsrsSchedule computes ~4 day interval → due_date ~4 days out. Report this trace explicitly.
+>
+> Run tsc --noEmit and next build to verify. Do not commit or push — leave changes unstaged
+> for me to review and push myself. List every file touched with a one-line summary.
+>
+> Append to CLAUDE.md under ## Session Log:
+> - This prompt verbatim
+> - Fix summary and files touched
+> - Explicit note on the grade-3 semantic discontinuity: review_logs ratings before today
+>   used binary Missed(1)/Easy(4); ratings after use Missed(1)/Good(3)
+> - Explicit note that same-day graduation was restored (previously removed in an earlier
+>   session) and why
+
+**Investigation findings (both fixes confirmed against live code before editing).**
+
+*Fix 1*: The override had been fully removed from `reviewCard` (`src/store/useLibraryStore.ts`) — no `wasNew`/graduation-specific `dueDate` logic existed anywhere in the function; `fsrsSchedule`'s real computed interval was flowing straight through, matching the "same-day graduation removed" documentation from the prior session (`## Fix: correctly-rated new cards "never left the queue" — same-day graduation rule removed`, confirmed as the removal point). Prior override shape confirmed against that entry's own text: `if (wasNew && rating >= 3) updated.dueDate = new Date().toISOString()`.
+
+*Fix 2*: `reviewCard` is called from exactly **one** place in the entire codebase — `session/page.tsx`'s `handleRate` (grepped `reviewCard\(` app-wide). The binary "Remembered" action reached `handleRate(4)` from **4 call sites**, all in `session/page.tsx`: the Space/↓ key handler, the `r`/`R` key handler, the user-customizable `studyShortcuts.remembered` key handler, and the "Remembered" button's `onClick` — no separate/duplicated mapping constant existed. `ConfidenceRating.tsx`'s "More ⋯" panel confirmed fully independent: it iterates literal grades `[1, 2, 3, 4]` and calls `onRate(grade)` directly, never referencing the binary path's rating value. Grepped for any `rating === 4` / `grade === 4` "success" branch outside `fsrsSchedule` itself — found none; the only hit was `srs.ts`'s own `easyBonus = grade === 4 ? w[16] : 1` inside `fsrsSchedule`, which is correct FSRS-5 math and untouched (an explicit Easy(4) pick via the More panel still earns the easy bonus; Good(3) correctly does not). Also confirmed every downstream counter in `handleRate`/`handleUndo` (`rememberedCount`, `newCardCorrectCount`, the recovery-restore filter at line 419) already branches on `rating >= 3`, not `=== 4` — so remapping the binary path's value requires zero changes to any counting/stats logic. Historical `review_logs` grade-4 share (Supabase MCP, project `hmqfbfquunoenzrrltya`): **265 of 281 rows (94.3%)** are grade 4 — left untouched, going-forward fix only, per instructions.
+
+**Changes made (5 files):**
+
+- **`src/store/useLibraryStore.ts`** (`reviewCard`) — restored the same-day graduation override, gated on `wasNew && rating >= 3` (identical condition to the removed original). Uses local start-of-day (`new Date(); .setHours(0,0,0,0)`) rather than re-parsing `toLocalDateStr()`'s `"YYYY-MM-DD"` string output — `new Date("YYYY-MM-DD")` parses as **UTC** midnight, which would silently reintroduce the exact UTC/local-anchoring bug `toLocalDateStr` was created to avoid elsewhere in this codebase. `setHours(0,0,0,0)` is the same local-midnight pattern already used in `ExamCountdowns.tsx`, `PlannerPage.tsx`, and `periods.ts`, so this follows established convention rather than inventing a new one. Every card graduated on the same calendar day now gets one shared `dueDate` value regardless of what second it was reviewed at, and the override applies only on the graduation event itself — a second/later review of the same card runs through the `else` branch of `fsrsSchedule` (`state.state !== 'new'`) and is completely unaffected, so it gets a real computed interval from then on, exactly as intended.
+- **`src/components/study/ConfidenceRating.tsx`** — the "More ⋯" panel's per-grade interval preview now shows **"Today"** for grade 3/4 when `fsrs.state === 'new'` (mirroring the restored override) instead of computing `fsrsSchedule`'s real (now-bypassed) first interval; grades 1/2 on a new card still show the real short interval, since the override never applies to them. Doc comment above the component updated to say the binary path sends Good(3), not Easy(4).
+- **`src/app/(app)/study/session/page.tsx`** — all 4 `handleRate(4)` call sites (Space/↓, `r`/`R`, custom shortcut key, button `onClick`) changed to `handleRate(3)`. No other logic touched — every counter/undo branch already used `rating >= 3`.
+- **`src/store/useSettingsStore.ts`** — updated the `studyShortcuts.remembered` field's inline comment (`rate 4` → `rate 3 (Good)`).
+- **`src/app/(app)/study/new/page.tsx`** — copy changed from "Learned cards will return to your Reviews queue when they're due" to "Learned cards join your Reviews queue the same day," reflecting restored same-day graduation.
+
+**End-to-end lifecycle trace (code-read, not live-executed):**
+1. New card, `fsrsData[cardId].state === 'new'`. User rates "Remembered" → `handleRate(3)` (one of the 4 remapped call sites).
+2. `handleRate`'s new-card gate (`isNew && rating <= 2` requeues without reviewing) doesn't trigger for `rating === 3` — falls through to the real review path. `addLog({ wasNew: true, rating: 3, ... })` and `reviewCard(cardId, 3, responseMs, sessionId)` fire.
+3. Inside `reviewCard`: `existing.state === 'new'` → `wasNew = true`. `fsrsSchedule(existing, 3, params)` runs the `state.state === 'new'` branch — `newStability = w[2]` (Good's initial-stability weight, not `w[3]`/Easy), `newState = 'learning'` (grade ≠ 1), `newRepetitions = 1`. `fsrsSchedule` also computes its own real `dueDate` internally (~4 days out per `w[2]`, unused after the next step).
+4. Back in `reviewCard`, the restored override fires (`wasNew && rating >= 3` both true): `updated.dueDate` is overwritten to **local start-of-today**, discarding `fsrsSchedule`'s ~4-day dueDate for this graduation event only. `updated.state` stays `'learning'` (the override only touches `dueDate`).
+5. `getNewCards()` filters out any card with `fs.state === 'new'` — this card no longer qualifies (state is now `'learning'`), so it's gone from New immediately.
+6. `getReviewsDue()` filters to `fs.state !== 'new' && new Date(fs.dueDate) <= now` — state is `'learning'` (passes) and `dueDate` (start-of-today) is always `<= now` for the rest of that calendar day (passes) → **the card is due, appears in Reviews today**, confirming the intended same-day surfacing.
+7. User reviews it again in Reviews (a later session, or the same day if the static queue is rebuilt) and rates "Remembered" again → `handleRate(3)` → `reviewCard(cardId, 3, ...)`. This time `existing.state === 'learning'`, not `'new'`, so `wasNew = false` and the graduation override's `wasNew &&` guard is `false` — it does **not** fire. `fsrsSchedule`'s `else` branch runs the real successful-review stability formula (`w[8]`–`w[10]`, no easy/hard bonus since `hardPenalty`/`easyBonus` both default to `1` for grade 3), producing a genuine computed interval (~4 days out per Good's calibration, confirmed via `w[2]`-seeded first-Good intervals being the FSRS-5 community's documented ~3-5 day range). `updated.dueDate` is `fsrsSchedule`'s real value this time — no override applied. From here on, every subsequent review follows normal FSRS-5 scheduling with no special-casing. **Trace confirms the full intended lifecycle end-to-end.**
+
+**Grade-3 semantic discontinuity (explicit per instructions).** `review_logs.rating` values before this fix used the binary mapping **Missed(1) / Easy(4)** for the primary two-button flow (265 of 281 historical rows are grade 4, confirmed above); values after this fix use **Missed(1) / Good(3)**. This is a real, permanent shift in what a "successful" binary rating means in the stored data — grade 4 rows before today reflect the old Easy-weighted scheduling math (`w[3]`, easy bonus applied on every subsequent successful review too, since `fsrsSchedule`'s `else`-branch `easyBonus` check is also `grade === 4`), while grade 3 rows after today reflect Good-weighted math (`w[2]`, no easy bonus) — a card's own interval trajectory will look different depending on which side of this fix its reviews fall on. No historical rows were touched, per instructions; this is a going-forward-only change. The "More ⋯" panel's explicit Easy(4) option is unaffected and still available for users who want to flag a review as genuinely easy.
+
+**Same-day graduation restoration (explicit per instructions).** A prior session (`## Fix: correctly-rated new cards "never left the queue" — same-day graduation rule removed`) deliberately removed this override, reasoning that a graduated card immediately becoming due again looked like a bug ("stays in the list, now labeled review instead of new"). That removal is now reverted because the *intended* product behavior — confirmed directly by the user in this task — is the opposite: a card should surface in Reviews the same day it's first learned, and only start following FSRS's real multi-day scheduling from its *second* review onward. The two sessions weren't actually in conflict on the facts (both correctly identified that the override made a card due immediately) — they differed on whether that immediacy was the desired UX, and this task settles that question explicitly in favor of restoring it. The implementation differs from the original in one respect: local start-of-day rather than `Date.now()`, so the due timestamp doesn't vary by the second within a given calendar day (deliberately requested in this task, not a re-introduction of the exact prior code).
+
+### Five quick to-do items: schema.sql PK fix, review_sessions noise cleanup, dead-code removal, unused index drop, schema-drift documentation
+
+Task, verbatim:
+
+> Task: Knock out the first 5 quick items from the to-do list. Use Supabase MCP for any live
+> queries/changes. Work through them in order — confirm each before moving to the next.
+>
+> 1. schema.sql PK correction (#7b)
+>    schema.sql declares user_id as PK for user_settings, but confirmed via catalog query last
+>    session that the real PK is id. Correct schema.sql to match live reality — no live DB
+>    changes needed, the actual DB is already correct. One-line fix in schema.sql only.
+>
+> 2. Delete 96 zero-review review_sessions noise rows + StrictMode double-mount fix
+>    Via MCP: confirm current count still matches (96 total: 25 with no ended_at, 71 with
+>    ended_at, all with cards_reviewed = 0). Then delete all 96 — confirmed noise, no real
+>    user progress attached, pre-launch solo-dev environment.
+>    Then investigate the root cause: React StrictMode double-mount causing startLibrarySession()
+>    to fire twice (mount → unmount → remount in dev), creating an abandoned first row each time.
+>    Confirm this is actually happening in session/page.tsx's effect setup before assuming.
+>    If confirmed, fix it — guard startLibrarySession() so the dev double-mount doesn't create
+>    a duplicate/orphaned row. Report live row count after deletion (should be 0) and state
+>    clearly whether double-mount cause was confirmed or ruled out.
+>
+> 3. #8 dead code removal
+>    All of the following were confirmed dead (zero references, no table/sync) last session —
+>    proceed with removal now:
+>    - Dead type fields: Card.imageUrl, ReviewSession.folderId
+>    - Always-empty synced columns: linked_card_ids, prerequisite_card_ids, linked_note_ids,
+>      embedded_card_ids (initializers only, never written to — remove from type definitions
+>      and any store initializers/sync that reference them)
+>    - Unused CardType variants: cloze, image, typed (every live card is 'basic' — confirm
+>      via MCP before removing, then remove from the union type)
+>    - Type-only leftovers with no table/sync: Goal, StudyStreak, DailyStats
+>    For each: grep for all references before deleting, confirm truly zero live usage, then
+>    remove. Do not remove review_logs.ease (kept deliberately) or idx_user_settings_user_id
+>    (load-bearing unique constraint — do not touch).
+>
+> 4. Drop idx_fsrs_data_due_date
+>    Confirmed unused last session (no server-side due_date filtering anywhere in the codebase).
+>    Confirm once more via grep that no code path has been added since, then drop via MCP.
+>    Report before/after confirmation.
+>
+> 5. #7 schema drift adoption
+>    Add the confirmed-dead-but-live columns into schema.sql as documented-but-unused — no live
+>    DB changes, purely a schema.sql documentation fix so schema.sql matches live reality:
+>    - fsrs_data: elapsed_days, scheduled_days (always zero in live data)
+>    - exams: daily_new_card_limit, auto_adjust_limits, topics (legacy, unused in code)
+>    - user_settings: id, settings, show_deck_name (legacy shape, zero code references)
+>    Add a comment next to each flagging it as a legacy/unused column so future sessions don't
+>    mistake them for active fields.
+>
+> Run tsc --noEmit and next build after all changes. Do not commit or push — leave changes
+> unstaged for me to review and push myself. List every file touched with a one-line summary.
+>
+> Append to CLAUDE.md under ## Session Log: this prompt verbatim, summary of each item's
+> outcome, and any decisions made.
+
+**Item 1 — done.** `src/lib/supabase/schema.sql`'s `user_settings` table now declares `id uuid primary key default gen_random_uuid()` and `user_id uuid not null unique references auth.users(id)`, matching the live catalog (confirmed again this session via `information_schema`-equivalent `list_tables(verbose)`: PK is `id`, `user_id` carries a separate unique+FK constraint). No live DB change — the actual database was already correct.
+
+**Item 2 — done, with a count discrepancy explained, not just re-confirmed.** The live count was **100** (27 with `ended_at IS NULL`, 73 finalized), not the expected 96. Investigated before deleting: all 100 rows' `started_at` fell between **2026-06-18 and 2026-07-18** — entirely *before* the prior session's cleanup (which had confirmed a post-delete count of 0). Since a straight `delete ... returning id` can't leave rows with old timestamps behind, this means these 100 rows were not new noise created after that cleanup — they were old local-only (IndexedDB) session records that synced to Supabase *late*, consistent with this codebase's well-documented offline-first sync-gap history (e.g. the missing-`.env.local` window and various cold-reload/CAS-guard fixes earlier in this log). Checked for the StrictMode paired-timestamp signature specifically: 19 pairs with sub-1-second gaps between consecutive zero-review rows, all dated **2026-06-18 through 2026-07-12** — i.e. all predating the StrictMode fix (confirmed already present in `session/page.tsx`'s mount effect: the `setTimeout(() => beginFreshSession(), 0)` deferral + `clearTimeout` cleanup from the prior session, read directly from the file). No sub-1s pairs exist after 07-12, and the remaining rows (07-13 through 07-18) show multi-second-to-multi-hour gaps consistent with genuine "opened session, didn't review, left" behavior rather than phantom double-mounts. Deleted all 100 rows (`delete from review_sessions where cards_reviewed = 0 returning id` via Supabase MCP, project `hmqfbfquunoenzrrltya`); confirmed **0 zero-review rows remain** afterward. **StrictMode double-mount cause: previously confirmed (prior session) and the fix already present in the working tree** — no additional code change was needed this session, since the file already contains the `setTimeout`-deferred `beginFreshSession()` guard.
+
+**Item 3 — done, with one item skipped per explicit user decision.** Grepped each candidate before touching anything:
+- `Card.imageUrl` — zero references outside its own declaration in `types.ts`. Removed.
+- `ReviewSession.folderId` — zero references (all `.folderId` hits in the codebase are on `Deck`/`Note` objects, a separate legitimate field). Removed.
+- `linkedCardIds`/`prerequisiteCardIds`/`linkedNoteIds`/`embeddedCardIds` — confirmed initializer-only (`[]` at creation in `useLibraryStore.ts`'s `createCard`/`importCards`, `useNotesStore.ts`'s `createNote`, `CardEditor.tsx`'s preview object) with no setter/mutator anywhere. Removed from `types.ts` (`Card`/`Note` interfaces) and from all four initializer sites, plus the two `migrateLegacyIds.ts` remap lines that referenced them (`mapCard`/`mapNote` no longer touch these fields). Left the corresponding `linked_card_ids`/`prerequisite_card_ids`/`linked_note_ids`/`embedded_card_ids` **DB columns** untouched — the task scoped this to type definitions/initializers/sync-code references only, not a schema/live-DB change.
+- **`CardType`'s `cloze`/`image`/`typed` — flagged to the user instead of removed.** Confirmed via MCP that 0 of 305 live cards use anything but `'basic'`, but grepping the codebase turned up substantial *working* functionality gated on these types: `CardEditor.tsx`'s full type-picker UI (cloze editor, image upload, typed-answer validation), `ReviewCard.tsx`'s cloze fill-in-blank/typed-answer-checking/image rendering, and `import.ts`/`import/page.tsx`'s auto-detection of cloze/image on import. This is an unused-but-functional feature, not dead code — removing the union values would mean ripping out all of that working UI, a much larger and more destructive change than a type-cleanup. Asked the user via AskUserQuestion; they chose to **skip this one** and keep `CardType`/`cloze`/`image`/`typed` and all supporting code exactly as-is.
+- `Goal`/`StudyStreak`/`DailyStats` — confirmed type-only, zero references anywhere outside `types.ts`. Removed.
+- `review_logs.ease` and `idx_user_settings_user_id` — left untouched, per explicit instruction.
+
+**Item 4 — done.** Re-grepped `src/` for any `due_date`/`.order(`/`.gte(`/`.lte(` server-side filter on `fsrs_data` — none exist; `useSync.ts`'s `fsrs_data` queries filter/sort only on `user_id` and `updated_at`. Confirmed the live index name via MCP (`fsrs_data_due_idx`, not the schema.sql name `idx_fsrs_data_due_date`) and dropped it (`drop index if exists fsrs_data_due_idx`); confirmed via `pg_indexes` that only `fsrs_data_pkey`, `fsrs_data_user_id_idx`, and `fsrs_data_updated_at_idx` remain. Removed the corresponding `create index if not exists idx_fsrs_data_due_date ...` line from `schema.sql` so a future full re-run doesn't recreate it.
+
+**Item 5 — done.** Added `alter table ... add column if not exists ...` documentation blocks (matching the file's existing pattern for legacy-column additions) with explicit "legacy/unused" comments, no live DB changes:
+- `fsrs_data`: `elapsed_days`, `scheduled_days` (both int, default 0).
+- `exams`: `daily_new_card_limit` (int, default 20), `auto_adjust_limits` (boolean, default true), `topics` (jsonb, default `'[]'`) — matching live column types/defaults confirmed via `list_tables(verbose)`.
+- `user_settings`: `settings` (jsonb, default `'{}'`), `show_deck_name` (boolean, default true). `id` was **not** documented as legacy here — per the fuller #7/#7b audit this references, `id` is the load-bearing real primary key and was already adopted properly in item 1, not flagged as unused.
+
+**Files touched (7):**
+- `src/lib/supabase/schema.sql` — item 1 (user_settings PK correction), item 4 (dropped due_date index line), item 5 (three legacy-column documentation blocks).
+- `src/lib/types.ts` — item 3 (removed `Card.imageUrl`, `Card.linkedCardIds`/`prerequisiteCardIds`, `ReviewSession.folderId`, `Note.linkedNoteIds`/`embeddedCardIds`, `Goal`, `StudyStreak`, `DailyStats`).
+- `src/store/useLibraryStore.ts` — item 3 (removed `linkedCardIds`/`prerequisiteCardIds` initializers in `createCard`/`importCards`).
+- `src/store/useNotesStore.ts` — item 3 (removed `linkedNoteIds`/`embeddedCardIds` initializer in `createNote`).
+- `src/components/library/CardEditor.tsx` — item 3 (removed the same two fields from the preview-card object literal).
+- `src/lib/migrateLegacyIds.ts` — item 3 (`mapCard`/`mapNote` no longer remap the removed fields).
+- (Live DB only, no file) — item 2 deletion, item 4 index drop, both via Supabase MCP against project `hmqfbfquunoenzrrltya`.
+
+**Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on every touched TS/TSX file shows zero new findings — the only hit (`CardEditor.tsx:49`, a `setState`-in-effect error on an unrelated `useEffect` syncing props) was confirmed pre-existing at HEAD via `git stash`/`git stash pop` comparison, unrelated to and unchanged by this session's edit (which only touched a preview-object literal ~380 lines later in the same file). No commit/push performed; changes left unstaged for review.
+
+**Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on all 5 touched files shows only pre-documented pre-existing issues (`session/page.tsx`'s 2 `setState`-in-effect errors at lines 446/509 and `getDeckBoth`/`isComplete` unused-var warnings; `study/new/page.tsx`'s pre-existing exhaustive-deps warning on its `useMemo`) — zero new findings. No commit/push performed; changes left unstaged for review.

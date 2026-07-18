@@ -79,6 +79,13 @@ create table if not exists fsrs_data (
 -- Adds updated_at for databases created before this existed (incremental sync).
 alter table fsrs_data add column if not exists updated_at timestamptz not null default now();
 
+-- Legacy/unused columns confirmed present in the live database but never
+-- read or written by any application code (always 0). Documented here,
+-- not dropped, so schema.sql matches live reality — see CLAUDE.md Session
+-- Log, #7 schema-drift audit.
+alter table fsrs_data add column if not exists elapsed_days int default 0;
+alter table fsrs_data add column if not exists scheduled_days int default 0;
+
 -- review_logs
 create table if not exists review_logs (
   id                 uuid primary key default gen_random_uuid(),
@@ -148,10 +155,24 @@ alter table exams add column if not exists predicted_retention_at_exam float;
 -- Adds updated_at for incremental sync filtering.
 alter table exams add column if not exists updated_at timestamptz not null default now();
 
+-- Legacy/unused columns confirmed present in the live database but never
+-- read or written by any application code (the per-exam new-card-limit/
+-- auto-adjust feature these describe was never built). Documented here,
+-- not dropped, so schema.sql matches live reality — see CLAUDE.md Session
+-- Log, #7 schema-drift audit.
+alter table exams add column if not exists daily_new_card_limit int default 20;
+alter table exams add column if not exists auto_adjust_limits boolean default true;
+alter table exams add column if not exists topics jsonb default '[]'::jsonb;
+
 -- user_settings (one row per user; holds the SRS-relevant settings that must
 -- schedule cards identically across devices)
+-- Note: `id` is the real primary key (confirmed via live catalog query);
+-- `user_id` is a separate unique + FK column, not the PK. The upsert in
+-- useSync.ts uses onConflict: 'user_id', which works fine against a unique
+-- constraint regardless of whether it's also the PK.
 create table if not exists user_settings (
-  user_id            uuid primary key references auth.users(id) on delete cascade,
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            uuid not null unique references auth.users(id) on delete cascade,
   new_cards_per_day  int not null default 20,
   fsrs_weights       jsonb,
   target_retention   float8,
@@ -170,6 +191,14 @@ alter table user_settings add column if not exists updated_at timestamptz not nu
 alter table user_settings add column if not exists fsrs_weights jsonb;
 alter table user_settings add column if not exists target_retention float8;
 alter table user_settings add column if not exists daily_review_limit int;
+
+-- Legacy/unused columns confirmed present in the live database but never
+-- read or written by any application code (the app syncs individual typed
+-- columns — new_cards_per_day, fsrs_weights, etc. — never a generic settings
+-- blob). Documented here, not dropped, so schema.sql matches live reality —
+-- see CLAUDE.md Session Log, #7 schema-drift audit.
+alter table user_settings add column if not exists settings jsonb default '{}'::jsonb;
+alter table user_settings add column if not exists show_deck_name boolean default true;
 
 -- ────────────────────────────────────────────────────────────
 -- INCREMENTAL SYNC TRIGGERS
@@ -273,7 +302,6 @@ create index if not exists idx_folders_user_id        on folders        (user_id
 create index if not exists idx_decks_user_id          on decks          (user_id);
 create index if not exists idx_cards_user_id          on cards          (user_id);
 create index if not exists idx_fsrs_data_user_id      on fsrs_data      (user_id);
-create index if not exists idx_fsrs_data_due_date     on fsrs_data      (due_date);
 create index if not exists idx_review_logs_user_id    on review_logs    (user_id);
 create index if not exists idx_review_sessions_user_id on review_sessions (user_id);
 create index if not exists idx_notes_user_id          on notes          (user_id);

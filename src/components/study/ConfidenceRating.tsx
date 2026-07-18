@@ -70,7 +70,9 @@ interface ConfidenceRatingProps {
 /**
  * Full 4-button confidence rating row (Missed / Hard / Good / Easy).
  * Used inside an expandable "More ratings" section in the session page —
- * the primary session flow uses Forgot (1) / Remembered (4) pill buttons.
+ * the primary session flow uses Forgot (1) / Remembered (3, Good) pill
+ * buttons; this panel's own grade choices (including explicit Easy) are
+ * independent of that binary mapping.
  *
  * The interval under each label is a real preview: fsrsSchedule (pure) is run
  * once per rating against the card's current FSRS state with the user's own
@@ -97,6 +99,15 @@ export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingPr
     }
     const out = {} as Record<Difficulty, string>
     for (const grade of [1, 2, 3, 4] as const) {
+      // Mirrors reviewCard's same-day graduation rule: a new card rated
+      // Good/Easy joins Reviews today, so the preview must say "Today"
+      // rather than the real first-interval date (which only applies from
+      // the *next* review onward) — otherwise this panel would disagree
+      // with what actually happens on click.
+      if (fsrs.state === 'new' && grade >= 3) {
+        out[grade] = 'Today'
+        continue
+      }
       const next = fsrsSchedule(fsrs, grade, params)
       // eslint-disable-next-line react-hooks/purity -- the interval preview is wall-clock-relative by design (fsrsSchedule itself anchors on "now"); the memo recomputes per card, which is exactly the freshness needed
       const days = Math.round((new Date(next.dueDate).getTime() - Date.now()) / 86400000)

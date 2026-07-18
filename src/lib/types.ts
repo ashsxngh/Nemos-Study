@@ -63,12 +63,9 @@ export interface Card {
   front: string
   back: string
   hint?: string
-  imageUrl?: string
   tags: string[]
   isPinned: boolean
   isArchived: boolean
-  linkedCardIds: string[]
-  prerequisiteCardIds: string[]
   order: number
   createdAt: string
   updatedAt: string
@@ -78,7 +75,6 @@ export interface ReviewSession {
   id: string
   userId: string
   deckId?: string
-  folderId?: string
   startedAt: string
   endedAt?: string
   cardsReviewed: number
@@ -110,8 +106,6 @@ export interface Note {
   isStarred: boolean
   isArchived: boolean
   tags: string[]
-  linkedNoteIds: string[]
-  embeddedCardIds: string[]
   createdAt: string
   updatedAt: string
 }
@@ -130,34 +124,6 @@ export interface Exam {
   createdAt: string
   rating?: number                   // 1–5 stars, set after exam date passes
   predictedRetentionAtExam?: number // avgRetention captured at rating time (0–1)
-}
-
-export interface Goal {
-  id: string
-  userId: string
-  type: 'daily-cards' | 'daily-minutes' | 'weekly-cards' | 'streak'
-  target: number
-  current: number
-  period: string
-  createdAt: string
-}
-
-export interface StudyStreak {
-  userId: string
-  currentStreak: number
-  longestStreak: number
-  lastStudiedAt: string | null
-  totalDaysStudied: number
-}
-
-export interface DailyStats {
-  userId: string
-  date: string
-  cardsReviewed: number
-  cardsLearned: number
-  minutesStudied: number
-  sessionsCount: number
-  retentionRate: number
 }
 
 export interface CommandItem {

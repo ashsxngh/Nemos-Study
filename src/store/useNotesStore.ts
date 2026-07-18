@@ -40,8 +40,6 @@ export const useNotesStore = create<NoteState>()(
           isStarred: false,
           isArchived: false,
           tags: [],
-          linkedNoteIds: [],
-          embeddedCardIds: [],
           createdAt: now,
           updatedAt: now,
         }

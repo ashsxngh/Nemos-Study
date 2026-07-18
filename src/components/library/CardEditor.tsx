@@ -427,8 +427,6 @@ export function CardEditor({ deckId, card, onDone }: CardEditorProps) {
                   tags: [],
                   isPinned: false,
                   isArchived: false,
-                  linkedCardIds: [],
-                  prerequisiteCardIds: [],
                   order: 0,
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),

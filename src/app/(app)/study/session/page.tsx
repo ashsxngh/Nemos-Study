@@ -844,20 +844,20 @@ function SessionContent() {
       if (e.code === 'Space' || e.key === 'ArrowDown') {
         e.preventDefault()
         if (!showAnswer) flipCard()
-        else handleRate(4)
+        else handleRate(3)
         return
       }
 
       if (showAnswer) {
         // R = Remember
-        if (k === 'r' || k === 'R') { handleRate(4); return }
+        if (k === 'r' || k === 'R') { handleRate(3); return }
 
         if (k === studyShortcuts.forgot || k === studyShortcuts.forgot.toUpperCase()) {
           handleRate(1)
           return
         }
         if (studyShortcuts.remembered !== ' ' && k === studyShortcuts.remembered) {
-          handleRate(4)
+          handleRate(3)
           return
         }
         if (k === studyShortcuts.skip) { handleSkip(); return }
@@ -1504,7 +1504,7 @@ function SessionContent() {
 
           {/* ✓ Remembered — periwinkle fill, dark indigo text */}
           <button
-            onClick={() => answerReady && !isAnimating && handleRate(4)}
+            onClick={() => answerReady && !isAnimating && handleRate(3)}
             disabled={!answerReady || isAnimating}
             className="group flex items-center justify-center gap-3.5 px-8 py-3 rounded-[var(--radius-lg)] min-w-[180px] transition-all duration-200 select-none active:scale-95"
             style={{

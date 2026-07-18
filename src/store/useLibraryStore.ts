@@ -309,8 +309,6 @@ export const useLibraryStore = create<LibraryState>()(
           tags: tags ?? [],
           isPinned: false,
           isArchived: false,
-          linkedCardIds: [],
-          prerequisiteCardIds: [],
           order: get().cards.filter((c) => c.deckId === deckId).length,
           createdAt: now,
           updatedAt: now,
@@ -344,8 +342,6 @@ export const useLibraryStore = create<LibraryState>()(
             tags: raw.tags ?? [],
             isPinned: false,
             isArchived: false,
-            linkedCardIds: [],
-            prerequisiteCardIds: [],
             order: baseOrder + i,
             createdAt: now,
             updatedAt: now,
@@ -521,6 +517,18 @@ export const useLibraryStore = create<LibraryState>()(
           requestRetention: fsrsTargetRetention,
         }
         const updated = fsrsSchedule(existing, rating, fsrsParams)
+        // Same-day graduation: a new card correctly rated (Good/Easy) should
+        // join Reviews today, not wait for FSRS's real first interval — the
+        // real interval only kicks in from the *next* review onward. Local
+        // start-of-day (not Date.now()) so every card graduated today shares
+        // one due date regardless of what time it was reviewed, consistent
+        // with toLocalDateStr's local-midnight day-boundary convention used
+        // everywhere else in the app.
+        if (wasNew && rating >= 3) {
+          const startOfToday = new Date()
+          startOfToday.setHours(0, 0, 0, 0)
+          updated.dueDate = startOfToday.toISOString()
+        }
         // Client recency stamp for the sync pull merge — fsrsSchedule spreads
         // the previous state, so without this a row pulled from the server
         // would carry its stale server updated_at forward and the pull merge

@@ -60,8 +60,6 @@ export function migrateLegacyIds(): void {
     ...c,
     id: mapId(c.id) as string,
     deckId: mapId(c.deckId) as string,
-    linkedCardIds: mapIds(c.linkedCardIds ?? []),
-    prerequisiteCardIds: mapIds(c.prerequisiteCardIds ?? []),
   })
   const mapSrsRecord = <T extends { cardId: string }>(rec: Record<string, T>): Record<string, T> => {
     const out: Record<string, T> = {}
@@ -75,8 +73,6 @@ export function migrateLegacyIds(): void {
     ...n,
     id: mapId(n.id) as string,
     folderId: (mapId(n.folderId) ?? null) as string | null,
-    linkedNoteIds: mapIds(n.linkedNoteIds ?? []),
-    embeddedCardIds: mapIds(n.embeddedCardIds ?? []),
   })
 
   useLibraryStore.setState({
