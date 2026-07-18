@@ -778,3 +778,91 @@ Task, verbatim:
 **Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on every touched TS/TSX file shows zero new findings — the only hit (`CardEditor.tsx:49`, a `setState`-in-effect error on an unrelated `useEffect` syncing props) was confirmed pre-existing at HEAD via `git stash`/`git stash pop` comparison, unrelated to and unchanged by this session's edit (which only touched a preview-object literal ~380 lines later in the same file). No commit/push performed; changes left unstaged for review.
 
 **Verification.** `tsc --noEmit` and `next build` both clean. `eslint` on all 5 touched files shows only pre-documented pre-existing issues (`session/page.tsx`'s 2 `setState`-in-effect errors at lines 446/509 and `getDeckBoth`/`isComplete` unused-var warnings; `study/new/page.tsx`'s pre-existing exhaustive-deps warning on its `useMemo`) — zero new findings. No commit/push performed; changes left unstaged for review.
+
+### Urgent audit: exams push `notes: null` NOT-NULL violation — blast-radius check on the dead-code-removal session
+
+Task, verbatim:
+
+> Urgent audit: the dead code removal from the previous session may have broken more than just
+> the notes push error. Need to verify the full blast radius before fixing anything.
+>
+> Context: the previous session removed Card.imageUrl, ReviewSession.folderId,
+> linkedCardIds/prerequisiteCardIds/linkedNoteIds/embeddedCardIds, Goal/StudyStreak/DailyStats
+> from types.ts and related store/component files. Immediately after, a live push error appeared:
+> "null value in column 'notes' of relation 'exams' violates not-null constraint (code 23502)"
+> — confirmed cause: exam push payload is explicitly sending notes: null, overriding the DB's
+> default of ''. This suggests the removal either broke the exam push payload shape or exposed
+> a pre-existing bug that was previously masked.
+>
+> The exams table live schema is also more built-out than what was audited — confirmed live
+> columns include: id, user_id, name, subject, date, notes, priority, deck_ids, folder_ids,
+> target_retention, daily_new_card_limit, auto_adjust_limits, topics, updated_at, rating,
+> predicted_retention_at_exam, created_at. Several of these (subject, date, priority, rating,
+> predicted_retention_at_exam) were not in schema.sql and not known to be actively used — but
+> clearly were written at some point since live data has real values in them.
+>
+> Do the following in order:
+>
+> 1. Find the immediate notes: null bug
+>    Locate the exam upsert payload in useSync.ts or useExamStore.ts. Confirm it's sending
+>    notes: null explicitly. Fix: notes: exam.notes ?? ''. This is the only code change
+>    allowed until the rest of the audit is complete.
+>
+> 2. Audit the full exam push payload against the live schema
+>    Compare every field being sent in the exam upsert against the full live column list above.
+>    For each live column: is it being sent? Is it being sent correctly typed? Is anything else
+>    being sent as null that has a NOT NULL constraint? Report the full payload shape vs. live
+>    schema — don't just fix the notes field and assume nothing else is broken.
+>
+> 3. Audit what the dead code removal actually deleted vs. what's still live in the DB
+>    The removed fields (linkedCardIds etc.) were confirmed as "zero references in code" — but
+>    confirm they don't correspond to any live DB columns that still exist and still need to be
+>    included in push payloads. Use MCP to check the live column set for cards, review_sessions,
+>    and notes tables specifically, and confirm none of the removed fields map to a live NOT NULL
+>    column without a default.
+>
+> 4. Check all other push payloads for the same null-sending pattern
+>    The exam push had this bug — check whether useSync.ts's push functions for cards, decks,
+>    folders, notes, review_sessions, review_logs, fsrs_data, user_settings have any fields
+>    that could be sending explicit null for a NOT NULL column. Report any found — don't fix
+>    yet, just list them.
+>
+> 5. Confirm tsc and build are still clean after the notes fix
+>    Run tsc --noEmit and next build. Report any new errors that weren't present before this
+>    session's changes.
+>
+> Report findings for steps 2-4 before making any changes beyond the notes fix. I want to
+> see the full picture before deciding what else to touch.
+>
+> Do not commit or push anything — leave all changes unstaged for me to review.
+> Append to CLAUDE.md under ## Session Log: this prompt verbatim + full findings.
+
+**Step 1 — real bug, wrong mechanism in the prompt's framing.** No code path anywhere sets `Exam.notes` — `addExam`, `updateExam`, `rateExam`, and every import/export/restore path never touch it (confirmed via a full-repo grep, zero hits, and `git log -p -- src/store/useExamStore.ts` showing `notes` was never referenced in that file's entire history). So a single exam object's `toSnake()` output never contains a `notes` key — `Object.entries` skips genuinely-absent keys, which on its own can't produce a literal `null`. The real mechanism: `pushExamsToSupabase` upserts the whole `exams` array as **one PostgREST batch**. The one live exam (pulled from the server, where `notes` is real DB data — `''`, per the column default) carries a `notes` key after `toCamel`; a freshly-created local exam (`addExam`) carries no `notes` key at all. PostgREST's bulk upsert derives its column list from the **union of keys across the batch** — for a row missing a key that's part of that derived list, it sends explicit `NULL` rather than falling back to the column default, tripping the `NOT NULL` constraint. This is the same failure class the codebase already guards against for `cards` (`hint: c.hint ?? ''`, `front: c.front ?? ''`, `back: c.back ?? ''` at `useSync.ts:791`) — confirming this is a known, previously-handled bug pattern that just hadn't been applied to exams. **Fix applied** (the only change made): `pushExamsToSupabase`'s upsert map now adds `notes: e.notes ?? ''` after the `toSnake(e)` spread, guaranteeing the key is always present and non-null in every batch. No other line in that function touched.
+
+**Step 2 — full payload audit vs. live schema.** Every live `exams` column checked against the `Exam` TS type and the push code:
+- `id`, `user_id`, `name`, `subject`, `date`, `priority`, `deck_ids`, `folder_ids`, `target_retention`, `created_at` — all required fields on `Exam`, always set by `addExam`/`setTargetRetention`/etc.; always present in the payload. No issue.
+- `notes` — was never present; now fixed (see step 1).
+- `rating`, `predicted_retention_at_exam` — optional (`rating?`, `predictedRetentionAtExam?`), absent until `rateExam` is called. Both columns are nullable with no default — absence is correct, not a bug.
+- `updated_at` — not in the `Exam` TS type at all, never sent by app code; the `trg_exams_updated_at` trigger stamps it unconditionally on every insert/update regardless of payload contents. No issue.
+- `daily_new_card_limit`, `auto_adjust_limits`, `topics` — not in the `Exam` TS type (confirmed legacy/unused by the prior schema-drift audit), never sent; all three are nullable-with-default. No issue.
+
+`notes` was the only real gap; everything else in the payload is either always-present or safely nullable/defaulted.
+
+**Step 3 — dead-code removal vs. live DB columns.** Queried `information_schema.columns` directly for `cards`, `notes`, `review_sessions`:
+- `cards.linked_card_ids`/`prerequisite_card_ids` and `notes.linked_note_ids`/`embedded_card_ids` are all live, `NOT NULL DEFAULT '{}'::uuid[]`. The prior session deliberately scoped the removal to TS types/initializers only and left these DB columns untouched. Since no code path sets them anymore (uniformly absent from every card/note in every batch — not sometimes-present-sometimes-not like the exams case), there's no heterogeneous-key risk: every row in every batch is consistently missing the key, so PostgREST's derived column list for that batch never includes it, and the array default applies normally. Confirmed safe, not a live bug.
+- `review_sessions` has no `folder_id` column at all (only `deck_id`) — `ReviewSession.folderId` was dead in the type only, never a real column. Confirmed via the live column list.
+- `Card.imageUrl` and `Goal`/`StudyStreak`/`DailyStats` have no backing tables/columns (re-confirmed here, matching the prior audit).
+
+No removed field maps to a live NOT-NULL-without-default column that the app still needs to populate. The dead-code removal is not the source of the `notes` bug — that gap predates it entirely (never set in this file's git history).
+
+**Step 4 — same pattern elsewhere (report only, nothing else fixed).** Checked every push function in `useSync.ts` (`pushToSupabase` for folders/decks/cards/fsrs_data/review_sessions/review_logs, `pushNotesToSupabase`, `pushSettingsToSupabase`) for a TS-optional field mapping to a NOT-NULL column that isn't uniformly present or absent across a batch:
+- **`review_logs.was_new`** (`NOT NULL DEFAULT false`) — `ReviewLog.wasNew?: boolean` is optional in the type, and while every current code path (`reviewCard`) always sets it, an account with pre-`wasNew`-era logs still unpushed from a past sync-failure window (documented extensively elsewhere in this log) could in principle batch an old keyless log alongside a new one and trip the same heterogeneous-key mechanism. **Live check**: all 281 current `review_logs` rows have non-null `was_new` — no evidence this has actually fired, but the structural risk exists. Flagged, not fixed.
+- **`fsrs_data`** — already safe: `FSRSState.updatedAt?` is the only optional field, and the code already partitions the batch into `fsrsStamped`/`fsrsUnstamped` as two separate `.upsert()` calls (pre-existing, unrelated to this session), which incidentally also eliminates any batch heterogeneity risk (moot regardless, since `updated_at` is DB-trigger-stamped, not client-supplied).
+- **`folders`, `decks`, `cards`** — no optional TS field maps to a NOT-NULL column without a default that isn't already unconditionally set by every construction path; the existing `hint ?? ''`/`front ?? ''`/`back ?? ''` guard on cards was pre-existing, not touched.
+- **`user_settings`** — single-object upsert (not a batch array), so the heterogeneous-key mechanism structurally can't apply; every sent field is either always-present or maps to a nullable column.
+
+No other confirmed bugs. One plausible-but-unconfirmed risk (`review_logs.was_new`) reported for a future decision.
+
+**Step 5.** `tsc --noEmit` and `next build` both clean after the `notes` fix — no new errors.
+
+**File touched (1):** `src/hooks/useSync.ts` — `pushExamsToSupabase`'s upsert payload now includes `notes: e.notes ?? ''`. No commit/push performed; change left unstaged for review.

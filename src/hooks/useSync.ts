@@ -962,8 +962,15 @@ async function pushExamsToSupabase(exams: Exam[], pendingDeletedExams: string[])
   }
 
   if (!exams.length) return
+  // notes has a NOT NULL DB default (''), but no app code ever sets
+  // Exam.notes — an exam pulled from the server (which always has a real
+  // notes value from that default) sitting in the same batch as a freshly
+  // created local exam (which has no `notes` key at all) gives PostgREST's
+  // bulk upsert a heterogeneous key set; it fills the missing key with an
+  // explicit NULL instead of the column default, violating NOT NULL. Same
+  // class of fix as cards' hint/front/back guard above.
   const res = await supabase.from('exams').upsert(
-    exams.map((e) => ({ ...(toSnake(e) as PlainObject), user_id: userId })),
+    exams.map((e) => ({ ...(toSnake(e) as PlainObject), user_id: userId, notes: e.notes ?? '' })),
     { onConflict: 'id' },
   )
   if (res.error) {
