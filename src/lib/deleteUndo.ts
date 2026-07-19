@@ -1,7 +1,8 @@
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useTrashStore } from '@/store/useTrashStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { fsrsBackfillCard } from '@/lib/srs'
-import type { Card } from '@/lib/types'
+import type { Card, ReviewLog } from '@/lib/types'
 
 const UNDO_WINDOW_MS = 5000
 
@@ -13,6 +14,10 @@ const UNDO_WINDOW_MS = 5000
  */
 export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string, Card>): void {
   const trash = useTrashStore.getState()
+  // Logs pruned when these cards were deleted, so undo puts history back rather
+  // than leaving it lost (removed locally) and still queued for server delete.
+  const logsToRestore: ReviewLog[] = []
+  const restoredLogIds = new Set<string>()
   useLibraryStore.setState((s) => {
     const newCards = [...s.cards]
     const newFsrsData = { ...s.fsrsData }
@@ -27,6 +32,10 @@ export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string,
       // the card with no scheduling row, so it never synced one and
       // misclassified as "new" everywhere.
       newFsrsData[id] = entry?.cardFSRS ?? newFsrsData[id] ?? fsrsBackfillCard(id, card.userId)
+      for (const l of entry?.cardLogs ?? []) {
+        logsToRestore.push(l)
+        restoredLogIds.add(l.id)
+      }
       restoredIds.add(id)
     }
     return {
@@ -35,9 +44,12 @@ export function restoreCardsFromTrash(ids: string[], fallbackCards?: Map<string,
       pendingDeletes: {
         ...s.pendingDeletes,
         cards: s.pendingDeletes.cards.filter((id) => !restoredIds.has(id)),
+        // Cancel the queued server-side deletion of these cards' logs.
+        reviewLogs: (s.pendingDeletes.reviewLogs ?? []).filter((lid) => !restoredLogIds.has(lid)),
       },
     }
   })
+  useHistoryStore.getState().restoreReviewLogs(logsToRestore)
   for (const id of ids) {
     const entry = trash.items.find((i) => i.id === id && i.type === 'card')
     if (entry) trash.remove(entry.id)

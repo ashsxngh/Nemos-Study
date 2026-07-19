@@ -30,7 +30,6 @@ import { StudyModePopup } from '@/components/library/StudyModePopup'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
-import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
 import type { FolderColor, Folder as FolderType, Deck as DeckType } from '@/lib/types'
 
@@ -178,7 +177,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const router = useRouter()
   const {
     folders, decks, cards, fsrsData,
-    getDeckCards, getDeckMastery, getDueCards, getNewCards,
+    getDeckCards, getDeckMastery, getDeckDueCount, getDeckNewCount,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore(
     useShallow((s) => ({
@@ -188,8 +187,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
       fsrsData: s.fsrsData,
       getDeckCards: s.getDeckCards,
       getDeckMastery: s.getDeckMastery,
-      getDueCards: s.getDueCards,
-      getNewCards: s.getNewCards,
+      getDeckDueCount: s.getDeckDueCount,
+      getDeckNewCount: s.getDeckNewCount,
       updateFolder: s.updateFolder,
       deleteFolder: s.deleteFolder,
       updateDeck: s.updateDeck,
@@ -197,8 +196,6 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     }))
   )
   const sessions = useHistoryStore((s) => s.sessions)
-  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
   // The due/new/mastery queries are the most expensive in the app — memoize
   // per-deck results keyed by deck id instead of recomputing (and re-scanning
@@ -210,11 +207,14 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     return map
   }, [decks, cards, getDeckCards])
 
+  // Per-deck due badge = cards actually due for review from THIS deck today
+  // (due_date <= today, state != 'new'), uncapped. Deliberately not getDueCards
+  // (which mixes in globally-capped new cards) — this is display only.
   const dueCountByDeck = useMemo(() => {
     const map = new Map<string, number>()
-    for (const d of decks) map.set(d.id, getDueCards(d.id).length)
+    for (const d of decks) map.set(d.id, getDeckDueCount(d.id))
     return map
-  }, [decks, cards, fsrsData, getDueCards])
+  }, [decks, cards, fsrsData, getDeckDueCount])
 
   const masteryByDeck = useMemo(() => {
     const map = new Map<string, number>()
@@ -222,12 +222,14 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     return map
   }, [decks, cards, fsrsData, getDeckMastery])
 
+  // Per-deck new badge = every new card in THIS deck (state 'new' / no fsrs),
+  // uncapped. Deliberately not getNewCards (which applies the global
+  // newCardsPerDay cap) — this is display only.
   const newCountByDeck = useMemo(() => {
     const map = new Map<string, number>()
-    for (const d of decks) map.set(d.id, getNewCards(d.id).length)
+    for (const d of decks) map.set(d.id, getDeckNewCount(d.id))
     return map
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards])
+  }, [decks, cards, fsrsData, getDeckNewCount])
 
   const [view, setView] = useState<ViewMode>('grid')
   const [search, setSearch] = useState('')
@@ -899,7 +901,7 @@ function LibraryTreeTable({
   onStudyClick: (deck: DeckType) => void
 }) {
   const {
-    folders, decks, cards, fsrsData, getDeckCards, getNewCards,
+    folders, decks, cards, fsrsData, getDeckCards, getDeckNewCount,
     updateFolder, deleteFolder, updateDeck, deleteDeck,
   } = useLibraryStore(
     useShallow((s) => ({
@@ -908,15 +910,13 @@ function LibraryTreeTable({
       cards: s.cards,
       fsrsData: s.fsrsData,
       getDeckCards: s.getDeckCards,
-      getNewCards: s.getNewCards,
+      getDeckNewCount: s.getDeckNewCount,
       updateFolder: s.updateFolder,
       deleteFolder: s.deleteFolder,
       updateDeck: s.updateDeck,
       deleteDeck: s.deleteDeck,
     }))
   )
-  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
-  const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
@@ -930,16 +930,17 @@ function LibraryTreeTable({
       return next
     })
 
-  // getNewCards is one of the most expensive queries in the app — memoize
-  // per-deck counts keyed by deck id instead of recomputing on every render
-  // (this table recurses over the whole folder tree calling it once per deck).
+  // Per-deck new count = uncapped new cards in the deck (display only, not the
+  // globally-capped getNewCards). Memoized keyed by deck id instead of
+  // recomputing on every render (this table recurses over the whole folder tree
+  // calling it once per deck).
   const deckCountsByDeck = useMemo(() => {
     const map = new Map<string, DeckCounts>()
     for (const d of decks) {
-      map.set(d.id, { newCount: getNewCards(d.id).length, total: getDeckCards(d.id).length })
+      map.set(d.id, { newCount: getDeckNewCount(d.id), total: getDeckCards(d.id).length })
     }
     return map
-  }, [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getDeckCards])
+  }, [decks, cards, fsrsData, getDeckNewCount, getDeckCards])
 
   const deckCounts = (deckId: string): DeckCounts =>
     deckCountsByDeck.get(deckId) ?? { newCount: 0, total: 0 }

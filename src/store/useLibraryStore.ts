@@ -76,6 +76,10 @@ interface LibraryState {
   getDeckReviewsAll: (deckId: string) => Card[]
   getDeckNewAll: (deckId: string) => Card[]
   getDeckBoth: (deckId: string) => Card[]
+  // Display-only per-deck badge counts — uncapped, no global newCardsPerDay /
+  // daily-review-limit / exam-pull-forward gating. NOT for queue building.
+  getDeckNewCount: (deckId: string) => number
+  getDeckDueCount: (deckId: string) => number
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
   getDeckMastery: (deckId: string) => number
@@ -389,9 +393,11 @@ export const useLibraryStore = create<LibraryState>()(
         const newFsrsData = { ...fsrsData }
         delete newFsrsData[id]
 
-        // Save to trash before removing
+        // Save to trash before removing — capture the card's review logs too
+        // (pruneHistory below removes them), so undo can restore full history.
         if (card) {
           const deckName = decks.find((d) => d.id === card.deckId)?.name
+          const cardLogs = useHistoryStore.getState().reviewLogs.filter((l) => l.cardId === id)
           useTrashStore.getState().add({
             id: card.id,
             type: 'card',
@@ -401,6 +407,7 @@ export const useLibraryStore = create<LibraryState>()(
             snippet: card.back?.slice(0, 120),
             card,
             cardFSRS: fsrsData[id],
+            cardLogs,
           })
         }
 
@@ -430,6 +437,17 @@ export const useLibraryStore = create<LibraryState>()(
           delete newFsrsData[id]
         })
 
+        // Group the to-be-pruned logs by card once (O(logs)) rather than
+        // re-scanning per card, so each trash entry can carry its own history.
+        const logsByCard = new Map<string, ReviewLog[]>()
+        for (const l of useHistoryStore.getState().reviewLogs) {
+          if (idSet.has(l.cardId)) {
+            const arr = logsByCard.get(l.cardId)
+            if (arr) arr.push(l)
+            else logsByCard.set(l.cardId, [l])
+          }
+        }
+
         // Save each to trash before removing (trash's own list is small —
         // this loop isn't the O(n²) hazard the cards/fsrsData clones are).
         ids.forEach((id) => {
@@ -445,6 +463,7 @@ export const useLibraryStore = create<LibraryState>()(
             snippet: card.back?.slice(0, 120),
             card,
             cardFSRS: fsrsData[id],
+            cardLogs: logsByCard.get(id) ?? [],
           })
         })
 
@@ -640,11 +659,12 @@ export const useLibraryStore = create<LibraryState>()(
           )
         }
 
+        const todayStr = toLocalDateStr(now)
         const due = pool.filter((c) => {
           if (pulledForwardIds.has(c.id)) return true
           const fs = fsrsData[c.id]
           if (!fs || fs.state === 'new') return false
-          return new Date(fs.dueDate) <= now
+          return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
         })
 
         // Primary sort: relative overdueness (days_late / scheduled_interval) descending.
@@ -729,6 +749,28 @@ export const useLibraryStore = create<LibraryState>()(
           if (i < newCards.length) result.push(newCards[i])
         }
         return result
+      },
+
+      // Display-only badge counts for the Library deck cards and StudyHub inbox
+      // list. Deliberately uncapped and independent of getNewCards/getDueCards —
+      // those apply the global newCardsPerDay cap and daily review limit for
+      // queue building, which must NOT leak into per-deck badge display.
+      getDeckNewCount: (deckId) => {
+        const { cards, fsrsData } = get()
+        return cards.filter(
+          (c) => c.deckId === deckId && !c.isArchived && (fsrsData[c.id]?.state ?? 'new') === 'new'
+        ).length
+      },
+
+      getDeckDueCount: (deckId) => {
+        const { cards, fsrsData } = get()
+        const todayStr = toLocalDateStr(new Date())
+        return cards.filter((c) => {
+          if (c.deckId !== deckId || c.isArchived) return false
+          const fs = fsrsData[c.id]
+          if (!fs || fs.state === 'new') return false
+          return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
+        }).length
       },
 
       getDeckCards: (deckId) => {

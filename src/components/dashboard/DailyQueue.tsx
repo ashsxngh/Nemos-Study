@@ -10,13 +10,15 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 
 export function DailyQueue() {
-  const { decks, cards, fsrsData, getNewCards, getReviewsDue } = useLibraryStore(
+  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
       getReviewsDue: s.getReviewsDue,
+      getDeckNewCount: s.getDeckNewCount,
+      getDeckDueCount: s.getDeckDueCount,
     }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
@@ -32,17 +34,22 @@ export function DailyQueue() {
   )
   const total = totalNew + totalReviews
 
+  // Per-deck badges show true, uncapped per-deck counts (getDeckNewCount /
+  // getDeckDueCount) — NOT getNewCards/getReviewsDue, which apply the global
+  // newCardsPerDay cap (slice to newCardsPerDay − studiedNewToday) and so
+  // collapse every deck's new count to ~20. The header totals above stay on
+  // the capped queries because they represent the real inbox queue.
   const decksWithDue = useMemo(
     () =>
       decks
         .filter((d) => !d.isArchived)
         .map((deck) => ({
           deck,
-          newCount: getNewCards(deck.id).length,
-          reviewCount: getReviewsDue(deck.id).length,
+          newCount: getDeckNewCount(deck.id),
+          reviewCount: getDeckDueCount(deck.id),
         }))
         .filter((d) => d.newCount + d.reviewCount > 0),
-    [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getReviewsDue]
+    [decks, cards, fsrsData, getDeckNewCount, getDeckDueCount]
   )
 
   if (total === 0) return null

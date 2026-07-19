@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronRight, Folder as FolderIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Folder } from '@/lib/types'
@@ -119,6 +119,31 @@ interface FolderTreePickerProps {
 export function FolderTreePicker({ folders, value, onChange, noFolderLabel = 'No folder' }: FolderTreePickerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const roots = buildFolderTree(folders.filter((f) => !f.isArchived))
+
+  // Auto-expand the ancestor chain of the selected folder so a pre-selected
+  // nested folder (e.g. a deck created from inside a deeply-nested folder like
+  // Root > Biology > Unit 2 > AOS 2) is actually visible and highlighted,
+  // rather than hidden inside collapsed branches. Only unions in the ancestors
+  // — never collapses folders the user opened manually.
+  useEffect(() => {
+    if (!value) return
+    const parentOf = new Map(folders.map((f) => [f.id, f.parentId ?? null]))
+    const ancestors: string[] = []
+    let cur = parentOf.get(value) ?? null
+    while (cur) {
+      ancestors.push(cur)
+      cur = parentOf.get(cur) ?? null
+    }
+    if (ancestors.length === 0) return
+    setExpanded((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const id of ancestors) {
+        if (!next.has(id)) { next.add(id); changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [value, folders])
 
   const toggle = (id: string) =>
     setExpanded((prev) => {

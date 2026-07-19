@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Card, Deck, Note } from '@/lib/types'
+import type { Card, Deck, Note, ReviewLog } from '@/lib/types'
 import type { FSRSState } from '@/lib/srs'
 
 const TRASH_TTL_MS = 14 * 24 * 60 * 60 * 1000 // 14 days
@@ -21,6 +21,10 @@ export interface TrashEntry {
   // Restoration payloads
   card?: Card
   cardFSRS?: FSRSState
+  // Review logs pruned from history when this card was deleted. Stored so undo
+  // can put them back — deleting a card removes its logs locally AND queues
+  // them for server deletion; without this the history is lost on restore.
+  cardLogs?: ReviewLog[]
   deck?: Deck
   deckCards?: Card[]
   deckFSRS?: Record<string, FSRSState>

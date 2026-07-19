@@ -31,6 +31,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
 import { cn, truncate, formatDate } from '@/lib/utils'
+import { toLocalDateStr } from '@/lib/formatDate'
 import { fsrsRetrievability } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
@@ -530,7 +531,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
               <div className="space-y-1">
                 {cards.map((card, idx) => {
                   const fs = fsrsData[card.id]
-                  const due = fs ? new Date(fs.dueDate) <= new Date() : true
+                  const due = fs ? toLocalDateStr(new Date(fs.dueDate)) <= toLocalDateStr(new Date()) : true
                   const masteryPct = fs && fs.state !== 'new'
                     ? Math.round(fsrsRetrievability(fs) * 100)
                     : null

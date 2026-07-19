@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -24,6 +24,14 @@ export function CreateDeckDialog({ open, onClose, defaultFolderId }: CreateDeckD
   const [description, setDescription] = useState('')
   const [folderId, setFolderId] = useState<string | null>(defaultFolderId ?? null)
   const [nameError, setNameError] = useState('')
+
+  // The dialog stays mounted while closed, so the useState initializer only
+  // ever captures the folder context from initial page mount (root). Resync to
+  // the current folder each time the dialog opens so a deck created from inside
+  // a folder lands in that folder, not at root.
+  useEffect(() => {
+    if (open) setFolderId(defaultFolderId ?? null)
+  }, [open, defaultFolderId])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

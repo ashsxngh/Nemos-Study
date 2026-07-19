@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { useTrashStore, type TrashEntry } from '@/store/useTrashStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { useNotesStore } from '@/store/useNotesStore'
 import { useAppStore } from '@/store/useAppStore'
 import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
@@ -200,8 +201,14 @@ export default function TrashPage() {
         pendingDeletes: {
           ...s.pendingDeletes,
           cards: s.pendingDeletes.cards.filter((id) => id !== entry.card!.id),
+          // Cancel the queued server-side deletion of this card's review logs.
+          reviewLogs: (s.pendingDeletes.reviewLogs ?? []).filter(
+            (lid) => !(entry.cardLogs ?? []).some((l) => l.id === lid)
+          ),
         },
       }))
+      // Put the card's pruned review history back (removed at delete time).
+      useHistoryStore.getState().restoreReviewLogs(entry.cardLogs ?? [])
     } else if (entry.type === 'deck' && entry.deck) {
       useLibraryStore.setState((s) => ({
         decks: [...s.decks, entry.deck!],

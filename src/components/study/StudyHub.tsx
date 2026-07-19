@@ -17,13 +17,15 @@ import { cn } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
 
 export function StudyHub() {
-  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckMastery } = useLibraryStore(
+  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount, getDeckMastery } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
       cards: s.cards,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
       getReviewsDue: s.getReviewsDue,
+      getDeckNewCount: s.getDeckNewCount,
+      getDeckDueCount: s.getDeckDueCount,
       getDeckMastery: s.getDeckMastery,
     }))
   )
@@ -70,13 +72,16 @@ export function StudyHub() {
         .filter((d) => !d.isArchived)
         .map((deck) => ({
           deck,
-          newCount: getNewCards(deck.id).length,
-          reviewCount: getReviewsDue(deck.id).length,
+          // Per-deck badges are uncapped, real per-deck counts (display only) —
+          // not the globally-capped getNewCards / getReviewsDue used for the
+          // inbox queue above.
+          newCount: getDeckNewCount(deck.id),
+          reviewCount: getDeckDueCount(deck.id),
           totalCards: cards.filter((c) => c.deckId === deck.id).length,
           mastery: getDeckMastery(deck.id),
         }))
         .filter((d) => d.totalCards > 0),
-    [decks, cards, fsrsData, reviewLogs, newCardsPerDay, getNewCards, getReviewsDue, getDeckMastery]
+    [decks, cards, fsrsData, getDeckNewCount, getDeckDueCount, getDeckMastery]
   )
 
   const filtered = deckData.filter((d) =>

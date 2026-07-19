@@ -13,6 +13,7 @@
 
 import type { Card, Deck, Exam, Folder } from './types'
 import type { FSRSState } from './srs'
+import { toLocalDateStr } from './formatDate'
 
 // ── Core FSRS math ────────────────────────────────────────────────────────────
 
@@ -139,13 +140,14 @@ export function getPulledForwardCardIds(
   if (examDate <= now) return []
 
   const target = exam.targetRetention ?? 0.90
+  const todayStr = toLocalDateStr(now)
 
   return cards
     .filter((c) => {
       const state = fsrsData[c.id]
       if (!state || state.state === 'new') return false
       const dueDate = new Date(state.dueDate)
-      if (dueDate <= now) return false       // already due — regular queue handles it
+      if (toLocalDateStr(dueDate) <= todayStr) return false  // already due today — regular queue handles it
       if (dueDate <= examDate) return false  // scheduled before exam — fine
       // Card is scheduled after exam — will it still hit the target?
       return fsrsRetentionAtDate(state, examDate) < target

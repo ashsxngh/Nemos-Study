@@ -17,6 +17,9 @@ interface HistoryState {
   sessions: ReviewSession[]
 
   addReviewLog: (log: ReviewLog) => void
+  // Re-adds logs removed by pruneHistory when a card delete is undone. Skips
+  // ids already present so a double-restore can't duplicate history.
+  restoreReviewLogs: (logs: ReviewLog[]) => void
   removeLastLog: () => void
   // Drops history belonging to deleted cards/decks (called by the library
   // store's deleteFolder/deleteDeck/deleteCard/deleteCardsBatch — card-only
@@ -37,6 +40,15 @@ export const useHistoryStore = create<HistoryState>()(
 
       addReviewLog: (log) => {
         set((s) => ({ reviewLogs: [...s.reviewLogs, log] }))
+      },
+
+      restoreReviewLogs: (logs) => {
+        if (!logs.length) return
+        set((s) => {
+          const have = new Set(s.reviewLogs.map((l) => l.id))
+          const toAdd = logs.filter((l) => !have.has(l.id))
+          return toAdd.length ? { reviewLogs: [...s.reviewLogs, ...toAdd] } : {}
+        })
       },
 
       removeLastLog: () => {
