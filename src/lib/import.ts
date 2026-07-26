@@ -1,5 +1,5 @@
 import type { Folder, Deck, Card, CardType } from '@/lib/types'
-import { fsrsInitCard, fsrsBackfillCard } from '@/lib/srs'
+import { fsrsInitCard, fsrsBackfillCard, FSRS6_SCHEDULER_VERSION } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 
 /**
@@ -338,43 +338,45 @@ interface LegacySRSData {
   state?: 'new' | 'review' | 'relearning'
 }
 
-// Converts a legacy SM-2 entry to an FSRS-5 state rather than dropping the
-// card's scheduling history. Approximations: the SM-2 interval stands in for
-// stability (an interval targeting ~90% recall is close to FSRS's definition
-// of S), and difficulty falls back to the FSRS-5 mid-scale default of 5.
+/**
+ * Restores a legacy SM-2 entry as a genuine FSRS new card, keeping only its due
+ * date.
+ *
+ * This used to approximate an FSRS state (SM-2 interval → stability, difficulty
+ * → 5). That is no longer acceptable: the scheduler is now the official FSRS-6
+ * implementation, and handing it invented stability/difficulty would present
+ * fabricated numbers as real memory state. A pre-FSRS backup carries no review
+ * events either, so there is nothing to replay — the honest outcome is that the
+ * card re-enters learning. See `fsrsMigration.ts` for the same reasoning applied
+ * to live rows.
+ */
 function legacySrsToFsrs(srs: LegacySRSData): FSRSState {
-  const reviewed = (srs.repetitions ?? 0) > 0 && srs.lastReviewedAt != null
-  if (!reviewed) {
-    const init = fsrsInitCard(srs.cardId, srs.userId)
-    return { ...init, dueDate: srs.dueDate ?? init.dueDate }
-  }
-  return {
-    cardId: srs.cardId,
-    userId: srs.userId,
-    stability: Math.max(0.1, srs.interval || 0.1),
-    difficulty: 5,
-    retrievability: 0,
-    dueDate: srs.dueDate,
-    lastReviewedAt: srs.lastReviewedAt,
-    repetitions: srs.repetitions,
-    lapses: srs.lapses ?? 0,
-    state: srs.state === 'relearning' ? 'relearning' : 'review',
-  }
+  const init = fsrsInitCard(srs.cardId, srs.userId)
+  return { ...init, dueDate: srs.dueDate ?? init.dueDate }
 }
 
 /**
- * Parse a Nemo backup JSON and return the structured data. Backups from
- * before the SM-2 removal carry a `srsData` record instead of `fsrsData` —
- * those entries are converted to FSRS states so scheduling survives the
- * restore instead of being silently dropped.
+ * Parse a Nemo backup JSON and return the structured data.
+ *
+ * Scheduling state only survives a restore if the backup was written by a
+ * FSRS-6-era build (rows stamped with `schedulerVersion`). Anything older —
+ * a pre-FSRS `srsData` record, or `fsrsData` produced by the retired custom
+ * scheduler — is restored as a genuine FSRS new card with its due date kept.
+ * Those older numbers were not FSRS-6 values and backups carry no `reviewLogs`
+ * to replay, so there is no sound way to reconstruct them.
  */
 export function importFromJSON(jsonText: string): ImportedBackup {
   const parsed = JSON.parse(jsonText) as Partial<ImportedBackup> & {
     srsData?: Record<string, LegacySRSData>
   }
-  let fsrsData: Record<string, FSRSState> = {}
+  const fsrsData: Record<string, FSRSState> = {}
   if (parsed.fsrsData && typeof parsed.fsrsData === 'object') {
-    fsrsData = parsed.fsrsData
+    for (const [cardId, row] of Object.entries(parsed.fsrsData)) {
+      fsrsData[cardId] =
+        row?.schedulerVersion === FSRS6_SCHEDULER_VERSION
+          ? row
+          : { ...fsrsInitCard(cardId, row?.userId ?? ''), dueDate: row?.dueDate ?? new Date().toISOString() }
+    }
   } else if (parsed.srsData && typeof parsed.srsData === 'object') {
     for (const [cardId, srs] of Object.entries(parsed.srsData)) {
       fsrsData[cardId] = legacySrsToFsrs({ ...srs, cardId: srs.cardId ?? cardId })

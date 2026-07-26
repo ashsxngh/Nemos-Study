@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/lib/utils'
-import { fsrsSchedule, DEFAULT_FSRS_PARAMS, type FSRSState } from '@/lib/srs'
+import { fsrsParameters, fsrsReview, type FSRSState } from '@/lib/srs'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import type { Difficulty } from '@/lib/types'
 
@@ -53,7 +53,11 @@ const RATINGS: RatingOption[] = [
 
 function formatIntervalDays(days: number): string {
   if (days <= 0) return 'Today'
-  if (days < 30) return `${days} d`
+  if (days < 1) {
+    const minutes = Math.max(1, Math.round(days * 1440))
+    return `${minutes} min`
+  }
+  if (days < 30) return `${Math.round(days)} d`
   if (days < 365) return `${Math.round(days / 30)} mo`
   const years = Math.round((days / 365) * 10) / 10
   return `${years} yr`
@@ -74,10 +78,10 @@ interface ConfidenceRatingProps {
  * buttons; this panel's own grade choices (including explicit Easy) are
  * independent of that binary mapping.
  *
- * The interval under each label is a real preview: fsrsSchedule (pure) is run
- * once per rating against the card's current FSRS state with the user's own
- * weights/retention settings — the same call reviewCard makes when the rating
- * is actually committed.
+ * The interval under each label is a real preview: the official FSRS-6
+ * scheduler is run once per rating against the card's current FSRS state with
+ * the user's own weights/retention settings — the same call reviewCard makes
+ * when the rating is actually committed.
  */
 export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingProps) {
   const { fsrsWeights, fsrsTargetRetention, fsrsMaxInterval } = useSettingsStore(
@@ -90,27 +94,23 @@ export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingPr
 
   const intervals = useMemo<Record<Difficulty, string> | null>(() => {
     if (!fsrs) return null
-    const params = {
-      ...DEFAULT_FSRS_PARAMS,
+    const params = fsrsParameters({
       weights: fsrsWeights,
       targetRetention: fsrsTargetRetention,
       maximumInterval: fsrsMaxInterval,
-      requestRetention: fsrsTargetRetention,
-    }
+    })
+    // The preview is wall-clock-relative by design (the scheduler anchors on
+    // the review instant). One `now` shared by all four grades keeps the row
+    // internally consistent, and the memo recomputes per card, which is exactly
+    // the freshness needed.
+    const now = new Date()
     const out = {} as Record<Difficulty, string>
     for (const grade of [1, 2, 3, 4] as const) {
-      // Mirrors reviewCard's same-day graduation rule: a new card rated
-      // Good/Easy joins Reviews today, so the preview must say "Today"
-      // rather than the real first-interval date (which only applies from
-      // the *next* review onward) — otherwise this panel would disagree
-      // with what actually happens on click.
-      if (fsrs.state === 'new' && grade >= 3) {
-        out[grade] = 'Today'
-        continue
-      }
-      const next = fsrsSchedule(fsrs, grade, params)
-      // eslint-disable-next-line react-hooks/purity -- the interval preview is wall-clock-relative by design (fsrsSchedule itself anchors on "now"); the memo recomputes per card, which is exactly the freshness needed
-      const days = Math.round((new Date(next.dueDate).getTime() - Date.now()) / 86400000)
+      // Real preview, straight from the official scheduler — the same call
+      // reviewCard makes when the rating is committed, so what's shown is what
+      // happens (including FSRS' short learning-step intervals for a new card).
+      const next = fsrsReview(fsrs, grade, params, now).state
+      const days = (new Date(next.dueDate).getTime() - now.getTime()) / 86400000
       out[grade] = formatIntervalDays(days)
     }
     return out

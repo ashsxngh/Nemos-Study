@@ -62,29 +62,46 @@ create table if not exists cards (
 
 -- fsrs_data — FSRS scheduling state (the only scheduling table; the SM-2
 -- srs_data table was removed along with the SM-2 algorithm).
+-- Storage projection of the official ts-fsrs (FSRS-6) `Card`. Every column
+-- except card_id/user_id/retrievability/scheduler_version/updated_at is written
+-- straight from a scheduler result — see src/lib/srs.ts.
 create table if not exists fsrs_data (
-  card_id          uuid primary key,
-  user_id          uuid not null references auth.users(id) on delete cascade,
-  stability        float not null default 0,
-  difficulty       float not null default 0,
-  retrievability   float not null default 0,
-  due_date         timestamptz not null default now(),
-  last_reviewed_at timestamptz,
-  repetitions      int  not null default 0,
-  lapses           int  not null default 0,
-  state            text not null default 'new',
-  updated_at       timestamptz not null default now()
+  card_id           uuid primary key,
+  user_id           uuid not null references auth.users(id) on delete cascade,
+  stability         float not null default 0,
+  difficulty        float not null default 0,
+  retrievability    float not null default 0,
+  due_date          timestamptz not null default now(),
+  last_reviewed_at  timestamptz,
+  repetitions       int  not null default 0,   -- ← Card.reps
+  lapses            int  not null default 0,
+  state             text not null default 'new',
+  learning_steps    int  not null default 0,   -- ← Card.learning_steps
+  scheduler_version int  not null default 0,   -- 0 = pre-FSRS-6 row, 6 = FSRS-6
+  updated_at        timestamptz not null default now()
 );
 
 -- Adds updated_at for databases created before this existed (incremental sync).
 alter table fsrs_data add column if not exists updated_at timestamptz not null default now();
 
--- Legacy/unused columns confirmed present in the live database but never
--- read or written by any application code (always 0). Documented here,
--- not dropped, so schema.sql matches live reality — see CLAUDE.md Session
--- Log, #7 schema-drift audit.
-alter table fsrs_data add column if not exists elapsed_days int default 0;
+-- FSRS-6 migration — see migration-fsrs6.sql for the full rationale.
+-- learning_steps is real scheduling state (position in the short-term step
+-- machine); scheduler_version drives the idempotent client-side reconstruction
+-- of rows left behind by the retired custom scheduler.
+alter table fsrs_data add column if not exists learning_steps    int not null default 0;
+alter table fsrs_data add column if not exists scheduler_version int not null default 0;
+
+-- scheduled_days was a legacy always-0 column; as of the FSRS-6 migration it
+-- holds Card.scheduled_days (the whole-day interval FSRS last assigned, 0 for a
+-- sub-day learning step) and is genuinely written.
 alter table fsrs_data add column if not exists scheduled_days int default 0;
+
+-- Legacy/unused column confirmed present in the live database but never read or
+-- written by any application code (always 0) — the scheduler recomputes elapsed
+-- days from last_reviewed_at, and the field is deprecated upstream in ts-fsrs.
+-- Documented here, not dropped, so schema.sql matches live reality — see
+-- CLAUDE.md Session Log, #7 schema-drift audit.
+alter table fsrs_data add column if not exists elapsed_days int default 0;
 
 -- review_logs
 create table if not exists review_logs (

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import type { MutableRefObject } from 'react'
 import { createClient, isSupabaseConfigured, getCachedUserId } from '@/lib/supabase/client'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
@@ -17,8 +18,15 @@ import type {
   Note,
   Exam,
 } from '@/lib/types'
-import { fsrsBackfillCard } from '@/lib/srs'
+import {
+  DEFAULT_FSRS_PARAMS,
+  FSRS6_SCHEDULER_VERSION,
+  fsrsBackfillCard,
+  fsrsParameters,
+  isValidFsrsWeights,
+} from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
+import { migrateFsrsToV6 } from '@/lib/fsrsMigration'
 
 const DEBUG_SYNC = false
 
@@ -134,6 +142,135 @@ function stripLegacySm2State(): void {
   }
 }
 
+// ─── Hydration ────────────────────────────────────────────────────────────────
+
+// Minimal shape of zustand's persist API that we depend on here.
+type PersistApi = {
+  persist: {
+    hasHydrated: () => boolean
+    rehydrate: () => Promise<void> | void
+    onFinishHydration: (fn: () => void) => () => void
+  }
+}
+
+/**
+ * Await *genuine* hydration of a persisted store.
+ *
+ * `persist.rehydrate()` alone is not sufficient with an async storage engine
+ * (these stores persist to IndexedDB): awaiting it can resolve while
+ * `hasHydrated()` is still false and the store still holds its initial state.
+ * Observed live — the first mount saw `reviewLogs: []` immediately after
+ * `await useHistoryStore.persist.rehydrate()`, with the real 2 logs only
+ * appearing later.
+ *
+ * That matters because everything below this point reads the stores
+ * synchronously: `migrateHistoryToOwnStore`, `migrateLegacyIds`,
+ * `snapshotPreExistingIds` and — most consequentially — the FSRS-6 migration,
+ * which would read an empty review-log set as "these cards have no history" and
+ * reset them. Waiting on `onFinishHydration` closes that window.
+ *
+ * The timeout is a liveness guard only: if storage is genuinely broken we carry
+ * on with whatever is loaded rather than hanging the app, and the FSRS-6
+ * migration has its own independent bail-out for an untrustworthy dataset.
+ */
+async function ensureHydrated(store: PersistApi, label: string): Promise<boolean> {
+  if (store.persist.hasHydrated()) return true
+  let unsub: (() => void) | undefined
+  const finished = new Promise<boolean>((resolve) => {
+    unsub = store.persist.onFinishHydration(() => resolve(true))
+  })
+  void store.persist.rehydrate()
+  // Hydration may have completed between the check above and the subscription.
+  if (store.persist.hasHydrated()) {
+    unsub?.()
+    return true
+  }
+  const timedOut = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10000))
+  const ok = await Promise.race([finished, timedOut])
+  unsub?.()
+  if (!ok) console.warn(`[SYNC] ensureHydrated: ${label} did not finish hydrating in time`)
+  return ok
+}
+
+// ─── FSRS-6 migration ─────────────────────────────────────────────────────────
+
+// Discard a persisted weight vector that isn't a full FSRS-6 parameter set —
+// i.e. the retired 17-value FSRS-5 array, whether it came from the old Nemos
+// defaults or from the removed home-grown "optimizer". Padding it out to 21
+// would carry the old implementation's numbers (and an FSRS-5 decay) into
+// FSRS-6, so it's replaced with the library's official defaults instead.
+function resetLegacyFsrsWeights(): void {
+  const { fsrsWeights, updateSettings } = useSettingsStore.getState()
+  // Read the length before narrowing — the persisted value is typed number[]
+  // but can be anything (or the wrong length) coming out of localStorage.
+  const describe = Array.isArray(fsrsWeights) ? `length ${fsrsWeights.length}` : typeof fsrsWeights
+  if (isValidFsrsWeights(fsrsWeights)) return
+  console.warn(
+    `[SYNC] resetLegacyFsrsWeights: replacing non-FSRS-6 weight vector (${describe}) with official FSRS-6 defaults`,
+  )
+  updateSettings({ fsrsWeights: [...DEFAULT_FSRS_PARAMS.weights] })
+}
+
+// Rebuild every fsrs_data row that still holds pre-FSRS-6 state, by replaying
+// real review_logs through the official scheduler (see fsrsMigration.ts for the
+// full strategy and its accepted caveats). Idempotent — each row is stamped
+// with schedulerVersion, so a migrated row is never touched again.
+//
+// Must run *after* the initial full pull: replay needs the complete review-log
+// set, and a partial history would understate a card's progress. It also has to
+// be bracketed with applyingRemoteRef so the resulting setState doesn't look
+// like a user edit to the store subscriber (the rows are pushed deliberately by
+// the caller instead).
+function runFsrsV6Migration(applyingRemoteRef: MutableRefObject<boolean>): boolean {
+  const { cards, fsrsData } = useLibraryStore.getState()
+  const { reviewLogs } = useHistoryStore.getState()
+  const { fsrsWeights, fsrsTargetRetention, fsrsMaxInterval } = useSettingsStore.getState()
+
+  const needsMigration = Object.values(fsrsData).some(
+    (f) => f.schedulerVersion !== FSRS6_SCHEDULER_VERSION,
+  )
+  if (!needsMigration) return false
+
+  let migrated: Record<string, FSRSState>
+  let report
+  try {
+    ;({ fsrsData: migrated, report } = migrateFsrsToV6({
+      cards,
+      fsrsData,
+      reviewLogs,
+      params: fsrsParameters({
+        weights: fsrsWeights,
+        targetRetention: fsrsTargetRetention,
+        maximumInterval: fsrsMaxInterval,
+      }),
+    }))
+  } catch (err) {
+    // The migration refuses to run against a dataset it can't trust (see
+    // FsrsMigrationUnsafeError). Leave every row untouched and retry next load.
+    console.error(
+      '[SYNC] FSRS-6 migration aborted, local scheduling state left untouched:',
+      err instanceof Error ? err.message : err,
+    )
+    return false
+  }
+
+  applyingRemoteRef.current = true
+  try {
+    useLibraryStore.setState({ fsrsData: migrated })
+  } finally {
+    applyingRemoteRef.current = false
+  }
+
+  console.info(
+    `[SYNC] FSRS-6 migration: ${report.scanned} row(s) scanned — ` +
+      `${report.replayed} reconstructed from review history, ` +
+      `${report.freshNew} re-created as new cards, ` +
+      `${report.resetWithoutHistory} reset (no surviving history), ` +
+      `${report.alreadyMigrated} already on FSRS-6`,
+  )
+  return true
+}
+
 // IDs that existed in localStorage when this session loaded (snapshotted once,
 // before the first pull). An item that is local-only AND in this set was deleted
 // on another device — drop it. An item that is local-only but NOT in this set
@@ -211,7 +348,7 @@ function mergeIncremental<T extends { id: string }>(serverRows: T[], currentRows
 // Local rows are client-stamped with updatedAt on every write (review/init/
 // reset/undo — see useLibraryStore); server rows get updated_at from the
 // fsrs_data DB trigger on every upsert. fsrs rows are written wholesale on
-// each review (fsrsSchedule returns a complete new object), so whole-row
+// each review (the scheduler returns a complete new card), so whole-row
 // comparison is sufficient — no per-field merge needed.
 function pickFresherFsrs(local: FSRSState | undefined, server: FSRSState): FSRSState {
   if (!local) return server // no local row — server data is simply new, adopt it
@@ -271,11 +408,21 @@ function setLastPullAt(iso: string): void {
   }
 }
 
-async function pullFromSupabase(): Promise<void> {
-  if (!isSupabaseConfigured()) return
+/**
+ * Returns whether the local dataset can be trusted as *complete* afterwards —
+ * i.e. safe to run the FSRS-6 migration against, which reconstructs cards from
+ * their review_logs and would otherwise mistake a failed log fetch for "this
+ * card has no history" and reset it.
+ *
+ * True when there is nothing to pull (local-only install, or signed out — local
+ * storage is then the whole truth), or when a full pull completed with no table
+ * errors (`fullPullDoneThisLoad`, which runPull only sets in that case).
+ */
+async function pullFromSupabase(): Promise<boolean> {
+  if (!isSupabaseConfigured()) return true
   const supabase = createClient()
   const userId = await getCachedUserId(supabase)
-  if (!userId) return
+  if (!userId) return true
 
   // Force a full pull on the first pull of every page load — the watermark is
   // only trusted once this JS lifetime has done one full pull (see
@@ -295,6 +442,7 @@ async function pullFromSupabase(): Promise<void> {
       console.error('[SYNC] pullFromSupabase: full pull failed', err)
     }
   }
+  return fullPullDoneThisLoad
 }
 
 async function runPull(
@@ -760,6 +908,21 @@ async function pushToSupabase(
   // (review/init/reset/undo) stamps updatedAt and takes the normal upsert path.
   const fsrsStamped   = fsrsToUpsert.filter((f) => f.updatedAt)
   const fsrsUnstamped = fsrsToUpsert.filter((f) => !f.updatedAt)
+
+  // learningSteps/scheduledDays/schedulerVersion are optional on FSRSState (a
+  // row persisted before the FSRS-6 migration lacks them), and PostgREST
+  // derives a batch's column list from the *union* of keys across the batch —
+  // so a batch mixing a row that has them with one that doesn't makes it send
+  // an explicit NULL for the missing key, tripping the NOT NULL constraint.
+  // Same failure class as the exams `notes` bug (see CLAUDE.md); normalise the
+  // keys so every row in every batch carries all three.
+  const withFsrsDefaults = (f: FSRSState) =>
+    withUserId({
+      ...f,
+      learningSteps: f.learningSteps ?? 0,
+      scheduledDays: f.scheduledDays ?? 0,
+      schedulerVersion: f.schedulerVersion ?? 0,
+    })
   const reviewLogsToUpsert = reviewLogs.filter((l) => !logDeleteSet.has(l.id) && !pushedLogIds.has(l.id))
 
   // Upsert in batches — large payloads can exceed PostgREST body/row limits.
@@ -793,10 +956,10 @@ async function pushToSupabase(
         )
       : null,
     fsrsStamped.length
-      ? upsertBatched('fsrs_data', fsrsStamped.map(withUserId), { onConflict: 'card_id' })
+      ? upsertBatched('fsrs_data', fsrsStamped.map(withFsrsDefaults), { onConflict: 'card_id' })
       : null,
     fsrsUnstamped.length
-      ? upsertBatched('fsrs_data', fsrsUnstamped.map(withUserId), { onConflict: 'card_id', ignoreDuplicates: true })
+      ? upsertBatched('fsrs_data', fsrsUnstamped.map(withFsrsDefaults), { onConflict: 'card_id', ignoreDuplicates: true })
       : null,
     sessionsToUpsert.length
       ? upsertBatched('review_sessions', sessionsToUpsert.map(withUserId), upsertOpts)
@@ -1272,17 +1435,26 @@ export function useSync(): SyncStatus {
     // only session-created local items are preserved — pre-existing ones
     // absent from the server were deleted elsewhere and are dropped).
     const init = async () => {
-      await useLibraryStore.persist.rehydrate()
-      await useHistoryStore.persist.rehydrate()
-      await useNotesStore.persist.rehydrate()
-      await useExamStore.persist.rehydrate()
-      await useSettingsStore.persist.rehydrate()
+      // Genuine hydration, not just a resolved rehydrate() promise — see
+      // ensureHydrated. Everything below reads these stores synchronously.
+      const hydrated = await Promise.all([
+        ensureHydrated(useLibraryStore, 'nemos-library'),
+        ensureHydrated(useHistoryStore, 'nemos-history'),
+        ensureHydrated(useNotesStore, 'nemos-notes'),
+        ensureHydrated(useExamStore, 'nemos-exams'),
+        ensureHydrated(useSettingsStore, 'nemos-settings'),
+      ])
+      const allHydrated = hydrated.every(Boolean)
       // Lift reviewLogs/sessions out of an old-format library blob into the
       // history store. No-op once migrated.
       migrateHistoryToOwnStore()
       // Strip the removed SM-2 srsData blob / settings keys from persisted
       // state. No-op once stripped.
       stripLegacySm2State()
+      // Drop a persisted 17-value FSRS-5 weight vector before anything reads
+      // it for scheduling. Must precede the pull so the migration below fits
+      // the official defaults rather than a stale array. No-op once valid.
+      resetLegacyFsrsWeights()
       // Rewrite legacy non-UUID ids (pre-crypto.randomUUID data) so pushes
       // don't fail Supabase's uuid columns. No-op when nothing is legacy.
       migrateLegacyIds()
@@ -1291,19 +1463,40 @@ export function useSync(): SyncStatus {
       // server → drop) from "created this session" (not in snapshot → keep).
       snapshotPreExistingIds()
       if (DEBUG_SYNC) console.log('[SYNC] useSync mount: starting initial pull')
-      await pullFromSupabase()
+      const datasetComplete = await pullFromSupabase()
+      // Rebuild any pre-FSRS-6 scheduling rows now that the full pull has
+      // landed, so replay sees the complete review history (and the server's
+      // copy of each row, so two devices don't migrate from divergent state).
+      //
+      // Skipped entirely if the pull couldn't guarantee a complete dataset: a
+      // review_logs fetch that errored while fsrs_data succeeded would look
+      // exactly like "these cards have no history", and the migration would
+      // reset every one of them. Unmigrated rows are simply retried on the next
+      // load, so deferring costs nothing.
+      if (!datasetComplete || !allHydrated) {
+        console.warn(
+          '[SYNC] FSRS-6 migration deferred: ' +
+            (allHydrated
+              ? 'initial pull did not complete cleanly'
+              : 'local stores did not finish hydrating') +
+            ', so review history may be incomplete. Will retry on next load.',
+        )
+        return false
+      }
+      // Returns true when rows changed, which the caller turns into a push.
+      return runFsrsV6Migration(applyingRemoteRef)
     }
 
     setSyncing(true)
     init()
-      .then(() => {
+      .then((fsrsMigrated) => {
         if (!cancelled) {
           if (DEBUG_SYNC) console.log('[SYNC] useSync mount: initial pull done, mountedRef → true')
           setLastSynced(new Date())
           mountedRef.current = true
           // Push any local changes that existed before pull completed (e.g. cards created during load)
           const state = useLibraryStore.getState()
-          if (state.folders.length || state.decks.length || state.cards.length || (state.pendingDeletes.folders ?? []).length || (state.pendingDeletes.decks ?? []).length || (state.pendingDeletes.cards ?? []).length || (state.pendingDeletes.sessions ?? []).length || (state.pendingDeletes.reviewLogs ?? []).length) {
+          if (fsrsMigrated || state.folders.length || state.decks.length || state.cards.length || (state.pendingDeletes.folders ?? []).length || (state.pendingDeletes.decks ?? []).length || (state.pendingDeletes.cards ?? []).length || (state.pendingDeletes.sessions ?? []).length || (state.pendingDeletes.reviewLogs ?? []).length) {
             handlePush()
           }
           // Seed exams/settings to Supabase even if nothing changes after

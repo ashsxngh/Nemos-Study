@@ -6,7 +6,14 @@ import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useSettingsStore } from '@/store/useSettingsStore'
-import { fsrsInitCard, fsrsSchedule, DEFAULT_FSRS_PARAMS, type FSRSState } from '@/lib/srs'
+import {
+  FSRS6_SCHEDULER_VERSION,
+  fsrsInitCard,
+  fsrsParameters,
+  fsrsRetrievability,
+  fsrsReview,
+  type FSRSState,
+} from '@/lib/srs'
 import { cn } from '@/lib/utils'
 
 interface Step {
@@ -39,13 +46,11 @@ export function FSRSSimulator() {
       fsrsMaxInterval: s.fsrsMaxInterval,
     }))
   )
-  const params = {
-    ...DEFAULT_FSRS_PARAMS,
+  const params = fsrsParameters({
     weights: fsrsWeights,
     targetRetention: fsrsTargetRetention,
     maximumInterval: fsrsMaxInterval,
-    requestRetention: fsrsTargetRetention,
-  }
+  })
 
   const [mode, setMode] = useState<'new' | 'manual'>('new')
   const [manualStability, setManualStability] = useState(10)
@@ -59,20 +64,25 @@ export function FSRSSimulator() {
   // starting point, or the result of the last step.
   function baseState(): FSRSState {
     if (history.length > 0) return history[history.length - 1].state
-    if (mode === 'new') return fsrsInitCard('sim', 'sim')
+    if (mode === 'new') return fsrsInitCard('sim', 'sim', new Date(ANCHOR_MS))
     const lastReviewedAt = new Date(ANCHOR_MS - manualDaysSince * 86400000)
-    return {
+    const manual: FSRSState = {
       cardId: 'sim',
       userId: 'sim',
       stability: manualStability,
       difficulty: manualDifficulty,
-      retrievability: Math.pow(1 + manualDaysSince / (9 * manualStability), -1),
+      retrievability: 0,
       dueDate: lastReviewedAt.toISOString(),
       lastReviewedAt: lastReviewedAt.toISOString(),
       repetitions: 1,
       lapses: 0,
       state: 'review',
+      learningSteps: 0,
+      scheduledDays: 0,
+      schedulerVersion: FSRS6_SCHEDULER_VERSION,
     }
+    // R at the anchor instant, from the official forgetting curve.
+    return { ...manual, retrievability: fsrsRetrievability(manual, new Date(ANCHOR_MS), params) }
   }
 
   // The point in time the next press simulates reviewing at — the anchor for
@@ -87,10 +97,13 @@ export function FSRSSimulator() {
 
   function press(grade: 1 | 3) {
     const reviewedAt = nextReviewedAt()
-    const result = fsrsSchedule(current, grade, params, reviewedAt)
+    const result = fsrsReview(current, grade, params, reviewedAt)
     const intervalDays =
-      (new Date(result.dueDate).getTime() - reviewedAt.getTime()) / 86400000
-    setHistory((h) => [...h, { grade, retrievability: result.retrievability, intervalDays, state: result }])
+      (new Date(result.state.dueDate).getTime() - reviewedAt.getTime()) / 86400000
+    setHistory((h) => [
+      ...h,
+      { grade, retrievability: result.retrievability, intervalDays, state: result.state },
+    ])
   }
 
   function reset() {

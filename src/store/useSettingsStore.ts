@@ -10,9 +10,9 @@ interface SettingsData {
   maxReviewsPerDay: number
   sessionLength: number
 
-  // FSRS parameters
-  fsrsWeights: number[]        // 17 weights w0-w16
-  fsrsTargetRetention: number  // default 0.9
+  // FSRS-6 parameters, fed to the official scheduler via fsrsParameters().
+  fsrsWeights: number[]        // 21 values w0-w20 (w20 = decay)
+  fsrsTargetRetention: number  // FSRS request_retention — default 0.9
   fsrsMaxInterval: number      // default 36500
 
   // Burnout / workload

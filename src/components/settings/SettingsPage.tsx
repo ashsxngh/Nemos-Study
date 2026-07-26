@@ -1,13 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { Sun, Brain, Bell, Keyboard, Database, AlertTriangle, Sparkles, Activity } from 'lucide-react'
+import { Sun, Brain, Bell, Keyboard, Database, AlertTriangle, Activity } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
-import { optimizeFsrsWeights, MIN_REVIEWS_FOR_OPTIMIZATION } from '@/lib/srs'
 import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
 import {
   Toggle,
@@ -46,28 +45,12 @@ const shortcuts = [
 
 export function SettingsPage() {
   const [activeSection, setActiveSection] = useState('appearance')
-  const { theme, setTheme, addToast } = useAppStore(
-    useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme, addToast: s.addToast }))
+  const { theme, setTheme } = useAppStore(
+    useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme }))
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const settings = useSettingsStore()
   const { updateSettings, resetSettings } = settings
-
-  // ── FSRS weight optimization ───────────────────────────────────────────────
-  const handleOptimizeWeights = () => {
-    const result = optimizeFsrsWeights(
-      reviewLogs.map((l) => ({ cardId: l.cardId, rating: l.rating, reviewedAt: l.reviewedAt }))
-    )
-    if (!result) {
-      addToast({
-        type: 'warning',
-        message: `Not enough review history yet (needs ~${MIN_REVIEWS_FOR_OPTIMIZATION}+ repeat reviews). Keep studying and try again.`,
-      })
-      return
-    }
-    updateSettings({ fsrsWeights: result.weights })
-    addToast({ type: 'success', message: `Weights optimized from ${result.reviewCount} reviews.` })
-  }
 
   // ── Projected daily load ───────────────────────────────────────────────────
   const projectedLoad = (() => {
@@ -250,31 +233,13 @@ export function SettingsPage() {
 
                   <div className="space-y-2 mt-4">
                     <p className="text-xs font-medium text-[var(--text-secondary)]">
-                      FSRS-5 weights (w0–w16)
+                      FSRS-6 parameters (w0–w20)
                     </p>
                     <p className="text-xs text-[var(--text-muted)]">
-                      FSRS-5 uses machine-learning optimized weights. Change these only if you have
+                      FSRS-6 uses machine-learning optimized parameters. Change these only if you have
                       optimized parameters from your own data.
                     </p>
                     <FSRSWeightsGrid />
-                  </div>
-
-                  {/* Optimize weights from review history */}
-                  <div className="mt-4 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius)] p-4 flex items-center justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-[var(--accent-subtle)] flex items-center justify-center shrink-0">
-                        <Sparkles size={15} className="text-[var(--accent)]" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text-primary)]">Optimize weights</p>
-                        <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                          Tune the scheduler to your actual recall — based on {reviewLogs.length.toLocaleString()} reviews.
-                        </p>
-                      </div>
-                    </div>
-                    <Button variant="primary" size="sm" onClick={handleOptimizeWeights}>
-                      Optimize Now
-                    </Button>
                   </div>
 
                   <div className="mt-3 flex justify-end">

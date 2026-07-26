@@ -13,6 +13,7 @@ import { useSettingsStore } from '@/store/useSettingsStore'
 import { exportAsJSON, exportDecksAsCSV } from '@/lib/export'
 import { importFromCSV } from '@/lib/import'
 import { restoreBackup } from '@/lib/restoreBackup'
+import { DEFAULT_FSRS_PARAMS } from '@/lib/srs'
 import { deleteAllData } from '@/lib/deleteAllData'
 import { cn } from '@/lib/utils'
 import type { Theme } from '@/lib/types'
@@ -30,10 +31,9 @@ export const THEMES: { value: Theme; label: string; icon: React.ElementType }[] 
   { value: 'system', label: 'System', icon: Monitor },
 ]
 
-export const FSRS5_DEFAULT_WEIGHTS = [
-  0.4072, 1.1829, 3.1262, 15.4722, 7.2102, 0.5316, 1.0651, 0.0589, 1.3547, 0.1049,
-  1.0, 1.9898, 0.11, 0.29, 2.2700, 0.1790, 2.9898,
-]
+// Official FSRS-6 defaults, re-exported from the scheduler adapter so this UI
+// can never drift from what the library actually uses.
+export const FSRS6_DEFAULT_WEIGHTS = DEFAULT_FSRS_PARAMS.weights
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
 
@@ -148,13 +148,13 @@ export function ResetFSRSDefaultsButton() {
       size="sm"
       onClick={() =>
         updateSettings({
-          fsrsWeights: FSRS5_DEFAULT_WEIGHTS,
-          fsrsTargetRetention: 0.9,
-          fsrsMaxInterval: 36500,
+          fsrsWeights: [...DEFAULT_FSRS_PARAMS.weights],
+          fsrsTargetRetention: DEFAULT_FSRS_PARAMS.targetRetention,
+          fsrsMaxInterval: DEFAULT_FSRS_PARAMS.maximumInterval,
         })
       }
     >
-      Reset to FSRS-5 defaults
+      Reset to FSRS-6 defaults
     </Button>
   )
 }

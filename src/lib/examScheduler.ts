@@ -1,30 +1,39 @@
 /**
- * FSRS-powered exam scheduling engine.
+ * Exam scheduling engine, layered on top of FSRS.
  *
- * Core insight: the FSRS retrievability formula R = (1 + t/(9·S))^-1 lets us
- * predict recall on *any* future date given a card's current stability S and
- * the time t (days) since its last review. We use this to:
+ * Core insight: FSRS' forgetting curve predicts recall on *any* future date
+ * given a card's current stability S and the time t (days) since its last
+ * review. We use that to:
  *
  *   1. Predict exam-day retention for every card.
  *   2. Identify cards scheduled past the exam ("pull-forward" candidates).
  *   3. Build a per-day load forecast so reviews spread evenly.
  *   4. Assign urgency scores so cards with low predicted retention surface first.
+ *
+ * This module owns no memory model of its own: the curve itself comes from the
+ * official scheduler via `fsrsRetrievability` (see `srs.ts`). Exam-driven
+ * prioritisation stays an explicit Nemos feature on top — FSRS is never asked
+ * to know about deadlines.
  */
 
 import type { Card, Deck, Exam, Folder } from './types'
-import type { FSRSState } from './srs'
+import { fsrsRetrievability, type FSRSState } from './srs'
 import { toLocalDateStr } from './formatDate'
 
-// ── Core FSRS math ────────────────────────────────────────────────────────────
+// ── Retention prediction (delegated to FSRS) ──────────────────────────────────
 
-/** Predicted retrievability on `targetDate` given current FSRS state. */
+/**
+ * Predicted retrievability on `targetDate` given current FSRS state, using the
+ * official FSRS-6 forgetting curve.
+ *
+ * Note this deliberately does not clamp t at 0 the way the scheduler does: a
+ * target date before the last review means the exam is already behind us, for
+ * which "full retention" is the right answer for readiness reporting.
+ */
 export function fsrsRetentionAtDate(state: FSRSState, targetDate: Date): number {
   if (!state.lastReviewedAt || state.stability <= 0) return 0
-  const t =
-    (targetDate.getTime() - new Date(state.lastReviewedAt).getTime()) /
-    (1000 * 60 * 60 * 24)
-  if (t <= 0) return 1 // reviewing in the past → full retention
-  return Math.pow(1 + t / (9 * state.stability), -1)
+  if (targetDate.getTime() <= new Date(state.lastReviewedAt).getTime()) return 1
+  return fsrsRetrievability(state, targetDate)
 }
 
 // ── Folder/deck resolution ────────────────────────────────────────────────────

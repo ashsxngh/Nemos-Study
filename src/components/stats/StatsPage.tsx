@@ -17,7 +17,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, formatDate } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
-import { fsrsRetrievability } from '@/lib/srs'
+import { fsrsForgettingCurve, fsrsRetrievability } from '@/lib/srs'
 
 // ── useCountUp hook ───────────────────────────────────────────────────────────
 
@@ -329,8 +329,11 @@ export function StatsPage() {
       for (let i = 1; i < logs.length; i++) {
         const prev = logs[i - 1], curr = logs[i]
         const t = (new Date(curr.reviewedAt).getTime() - new Date(prev.reviewedAt).getTime()) / 86400000
+        // The previous review's scheduled interval stands in for stability
+        // (an interval targeting the retention goal approximates S); the curve
+        // itself is FSRS-6's own.
         const S = Math.max(0.1, prev.scheduledInterval)
-        const predictedR = Math.pow(1 + t / (9 * S), -1)
+        const predictedR = fsrsForgettingCurve(t, S)
         const b = buckets.find((b) => predictedR >= b.min && predictedR < b.max) ?? buckets[buckets.length - 1]
         b.total++
         if (curr.rating >= 2) b.remembered++
@@ -362,7 +365,7 @@ export function StatsPage() {
         if (logs[i].rating !== 1) continue
         const t = (new Date(logs[i].reviewedAt).getTime() - new Date(logs[i - 1].reviewedAt).getTime()) / 86400000
         const S = Math.max(0.1, logs[i - 1].scheduledInterval)
-        const R = Math.pow(1 + t / (9 * S), -1)
+        const R = fsrsForgettingCurve(t, S)
         const b = buckets.find((b) => R >= b.min && R < b.max) ?? buckets[buckets.length - 1]
         b.count++
         totalLapses++

@@ -231,10 +231,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-[var(--text-secondary)]">
-                      FSRS-5 weights (w0–w16)
+                      FSRS-6 parameters (w0–w20)
                     </p>
                     <p className="text-xs text-[var(--text-muted)]">
-                      FSRS-5 uses machine-learning optimized weights. Change these only if you have
+                      FSRS-6 uses machine-learning optimized parameters. Change these only if you have
                       optimized parameters from your own data.
                     </p>
                     <FSRSWeightsGrid />

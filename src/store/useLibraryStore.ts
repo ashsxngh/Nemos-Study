@@ -5,9 +5,9 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Folder, Deck, Card, ReviewLog, FolderColor, CardType } from '@/lib/types'
 import {
   fsrsInitCard,
-  fsrsSchedule,
+  fsrsParameters,
+  fsrsReview,
   fsrsRetrievability,
-  DEFAULT_FSRS_PARAMS,
 } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 import { useSettingsStore } from '@/store/useSettingsStore'
@@ -528,36 +528,25 @@ export const useLibraryStore = create<LibraryState>()(
 
         const existing = get().fsrsData[cardId] ?? fsrsInitCard(cardId, USER_ID)
         const wasNew = existing.state === 'new'
-        const fsrsParams = {
-          ...DEFAULT_FSRS_PARAMS,
+
+        // All scheduling is delegated to the official FSRS-6 scheduler. Nemos
+        // applies no interval override of its own — in particular there is no
+        // longer a same-day graduation hack: FSRS-6's own learning steps put a
+        // just-answered new card a few minutes out, so it stays reachable today
+        // (Nemos' due-list buckets by local calendar day) and only earns a real
+        // multi-day interval once it graduates. That is the behaviour the old
+        // override was approximating by hand.
+        const params = fsrsParameters({
           weights: fsrsWeights,
           targetRetention: fsrsTargetRetention,
           maximumInterval: fsrsMaxInterval,
-          requestRetention: fsrsTargetRetention,
-        }
-        const updated = fsrsSchedule(existing, rating, fsrsParams)
-        // Same-day graduation: a new card correctly rated (Good/Easy) should
-        // join Reviews today, not wait for FSRS's real first interval — the
-        // real interval only kicks in from the *next* review onward. Local
-        // start-of-day (not Date.now()) so every card graduated today shares
-        // one due date regardless of what time it was reviewed, consistent
-        // with toLocalDateStr's local-midnight day-boundary convention used
-        // everywhere else in the app.
-        if (wasNew && rating >= 3) {
-          const startOfToday = new Date()
-          startOfToday.setHours(0, 0, 0, 0)
-          updated.dueDate = startOfToday.toISOString()
-        }
-        // Client recency stamp for the sync pull merge — fsrsSchedule spreads
-        // the previous state, so without this a row pulled from the server
-        // would carry its stale server updated_at forward and the pull merge
-        // couldn't tell this review is newer than the server's copy.
-        updated.updatedAt = new Date().toISOString()
+        })
+        const { state: updated, scheduledDays } = fsrsReview(existing, rating, params)
 
-        // Derive a whole-day interval for the review log
-        const daysDiff =
-          (new Date(updated.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-        const logInterval = Math.max(1, Math.round(daysDiff))
+        // Client recency stamp for the sync pull merge — without this a row
+        // pulled from the server could carry a stale server updated_at forward
+        // and the pull merge couldn't tell this review is newer.
+        updated.updatedAt = new Date().toISOString()
 
         // The caller's ReviewSession id, so logs are joinable to the session
         // they were reviewed in (Session Fatigue groups logs by sessionId).
@@ -572,7 +561,10 @@ export const useLibraryStore = create<LibraryState>()(
           rating,
           responseMs,
           reviewedAt: new Date().toISOString(),
-          scheduledInterval: logInterval,
+          // The official scheduler's own whole-day interval for this review
+          // (0 for a sub-day learning/relearning step) rather than a derived
+          // guess. Stats already treat a non-positive interval as "no interval".
+          scheduledInterval: scheduledDays,
           ease: updated.difficulty,
           wasNew,
         }
