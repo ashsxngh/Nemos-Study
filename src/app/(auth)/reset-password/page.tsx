@@ -6,10 +6,13 @@ import { useRouter } from 'next/navigation'
 import { BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 
 export default function ResetPasswordPage() {
-  const [ready, setReady] = useState(false)
+  // Nothing to verify when the build shipped without Supabase credentials —
+  // start "ready" so the page shows its invalid-link message instead of
+  // spinning on "Verifying link…" forever.
+  const [ready, setReady] = useState(() => !isSupabaseConfigured())
   const [validLink, setValidLink] = useState(false)
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -22,6 +25,8 @@ export default function ResetPasswordPage() {
   // this effect runs that exchange has usually already completed, but the
   // PASSWORD_RECOVERY event covers the case where it resolves just after.
   useEffect(() => {
+    if (!isSupabaseConfigured()) return
+
     const supabase = createClient()
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -29,7 +34,7 @@ export default function ResetPasswordPage() {
         setValidLink(true)
         setReady(true)
       }
-    })
+    }).catch(() => setReady(true))
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
@@ -59,15 +64,20 @@ export default function ResetPasswordPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error: authError } = await supabase.auth.updateUser({ password })
+    try {
+      const supabase = createClient()
+      const { error: authError } = await supabase.auth.updateUser({ password })
 
-    if (authError) {
-      setError(authError.message)
-      setLoading(false)
-    } else {
+      if (authError) {
+        setError(authError.message)
+        return
+      }
       router.push('/')
       router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update password. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 

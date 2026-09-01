@@ -9,11 +9,42 @@ export function isSupabaseConfigured(): boolean {
   return !!(url && key && url.startsWith('https://') && !url.includes('your_supabase'))
 }
 
+/**
+ * Message shown when the app was built without Supabase credentials.
+ *
+ * These are inlined by Next.js at BUILD time, not read at runtime — so a
+ * deployed bundle missing them cannot be repaired from the browser. This is
+ * what shipped to GitHub Pages when the Actions workflow had no `env:` block
+ * on its build step; `createBrowserClient` threw an opaque library error and
+ * callers hung forever awaiting a promise that had already rejected.
+ */
+export const SUPABASE_NOT_CONFIGURED_MESSAGE =
+  'This build has no Supabase credentials, so account features are unavailable. ' +
+  'Your data is still saved on this device.'
+
 export function createClient() {
+  if (!isSupabaseConfigured()) {
+    throw new Error(SUPABASE_NOT_CONFIGURED_MESSAGE)
+  }
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+}
+
+/**
+ * Absolute URL for an in-app path, including the deployment's base path.
+ *
+ * Needed anywhere a URL leaves the app and comes back — Supabase's
+ * `redirectTo`, for instance. `window.location.origin` alone drops the
+ * `/Nemos-Study` subpath and lands the user on the GitHub Pages root, which
+ * 404s. Next rewrites <Link>/router paths for us, but not strings we hand to
+ * third parties.
+ */
+export function siteUrl(path: string): string {
+  const base = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+  const suffix = path.startsWith('/') ? path : `/${path}`
+  return `${window.location.origin}${base}${suffix}`
 }
 
 // ── Cached auth user id ─────────────────────────────────────────────────────

@@ -20,15 +20,23 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
+    try {
+      const supabase = createClient()
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (authError) {
-      setError(authError.message)
-      setLoading(false)
-    } else {
+      if (authError) {
+        setError(authError.message)
+        return
+      }
       router.push('/')
       router.refresh()
+    } catch (err) {
+      // Without this the spinner span forever: createClient() throws
+      // synchronously inside this async function when the build shipped
+      // without credentials, so setLoading(false) was never reached.
+      setError(err instanceof Error ? err.message : 'Sign in failed. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 

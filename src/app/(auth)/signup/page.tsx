@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, siteUrl } from '@/lib/supabase/client'
 
 export default function SignupPage() {
   const [name, setName] = useState('')
@@ -20,18 +20,23 @@ export default function SignupPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { name } },
-    })
+    try {
+      const supabase = createClient()
+      const { error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { name }, emailRedirectTo: siteUrl('/login') },
+      })
 
-    if (authError) {
-      setError(authError.message)
-      setLoading(false)
-    } else {
+      if (authError) {
+        setError(authError.message)
+        return
+      }
       setSuccess(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign up failed. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 

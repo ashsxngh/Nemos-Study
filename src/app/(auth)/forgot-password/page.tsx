@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, siteUrl } from '@/lib/supabase/client'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -18,16 +18,23 @@ export default function ForgotPasswordPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error: authError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    })
+    try {
+      const supabase = createClient()
+      // siteUrl() keeps the /Nemos-Study base path — a bare
+      // window.location.origin sent users to the GitHub Pages root, which 404s.
+      const { error: authError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: siteUrl('/reset-password'),
+      })
 
-    if (authError) {
-      setError(authError.message)
-      setLoading(false)
-    } else {
+      if (authError) {
+        setError(authError.message)
+        return
+      }
       setSuccess(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send reset link. Please try again.')
+    } finally {
+      setLoading(false)
     }
   }
 

@@ -55,12 +55,11 @@ jobs:
           cache: ${{ steps.detect-package-manager.outputs.manager }}
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        with:
-          # Automatically inject basePath in your Next.js configuration file and disable
-          # server side image optimization (https://nextjs.org/docs/api-reference/next/image#unoptimized).
-          #
-          # You may remove this line if you want to manage the configuration yourself.
-          static_site_generator: next
+        # NOTE: `static_site_generator: next` is deliberately NOT set. That input
+        # makes the action rewrite next.config at build time to inject basePath /
+        # assetPrefix / images.unoptimized. Those are now declared explicitly in
+        # next.config.ts (with NEXT_PUBLIC_BASE_PATH below), so the build is
+        # reproducible locally and nothing mutates the config behind our back.
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -73,8 +72,52 @@ jobs:
             ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-
       - name: Install dependencies
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
+      # Fail loudly instead of shipping a broken bundle. Next.js inlines
+      # NEXT_PUBLIC_* at BUILD time: if these are missing the build still
+      # succeeds, but every createBrowserClient() call in the deployed site
+      # throws "Your project's URL and API key are required".
+      - name: Verify Supabase secrets are present
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          missing=0
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ]; then
+            echo "::error::Missing repository secret NEXT_PUBLIC_SUPABASE_URL"
+            missing=1
+          fi
+          if [ -z "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Missing repository secret NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            missing=1
+          fi
+          if [ "$missing" = "1" ]; then
+            echo "Add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "Both Supabase secrets are present."
+
       - name: Build with Next.js
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          # Site is served from https://<user>.github.io/Nemos-Study/
+          NEXT_PUBLIC_BASE_PATH: /Nemos-Study
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
+
+      # Guards against a regression of the exact bug this pipeline shipped:
+      # a successful build whose bundle contains no Supabase project URL.
+      - name: Verify Supabase config was inlined into the bundle
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+        run: |
+          host=$(echo "$NEXT_PUBLIC_SUPABASE_URL" | sed -E 's#^https?://##; s#/.*##')
+          if grep -rqF "$host" out/_next/static; then
+            echo "Supabase URL is present in the exported bundle."
+          else
+            echo "::error::Build produced no Supabase URL in out/_next/static — env vars did not reach the build."
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
