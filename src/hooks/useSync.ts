@@ -26,7 +26,8 @@ import {
   isValidFsrsWeights,
 } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
-import { migrateFsrsToV6 } from '@/lib/fsrsMigration'
+import { migrateFsrsToV6, replayCardHistory } from '@/lib/fsrsMigration'
+import { toLocalDateStr } from '@/lib/formatDate'
 
 const DEBUG_SYNC = false
 
@@ -445,6 +446,51 @@ async function pullFromSupabase(): Promise<boolean> {
   return fullPullDoneThisLoad
 }
 
+// PostgREST applies a server-side row cap to every SELECT (Supabase's
+// `db-max-rows`, 1000 by default — empirically confirmed to be exactly 1000 on
+// this project). The cap is applied even when the request asks for more, and
+// the response is truncated *silently*: 200 OK, no error, just fewer rows. Any
+// table that can exceed it (cards, fsrs_data, review_logs, review_sessions)
+// must be read page by page with an explicit .range(), or a full pull quietly
+// drops everything past row 1000.
+//
+// `build` must produce a query with a deterministic .order() — without one
+// PostgREST gives no stable row order across pages, so ranges could overlap or
+// skip rows. `{ count: 'exact' }` lets the loop stop as soon as every row has
+// been seen (one request for small tables, no wasted round-trip).
+const PAGE_SIZE = 1000
+
+type PgErrorLike = { message?: string; code?: string; details?: string; hint?: string }
+
+async function fetchAllRows(
+  build: (from: number, to: number) => PromiseLike<{
+    data: unknown[] | null
+    error: PgErrorLike | null
+    count?: number | null
+  }>,
+): Promise<{ data: unknown[] | null; error: PgErrorLike | null }> {
+  const out: unknown[] = []
+  let expected: number | null = null
+  let from = 0
+  for (;;) {
+    const res = await build(from, from + PAGE_SIZE - 1)
+    if (res.error) return { data: null, error: res.error }
+    const rows = res.data ?? []
+    out.push(...rows)
+    if (typeof res.count === 'number') expected = res.count
+    // An empty page is the only definitive end-of-set signal, and advancing by
+    // rows.length (never by PAGE_SIZE) means the walk stays correct whatever
+    // the server's cap turns out to be — so this loop cannot truncate.
+    if (rows.length === 0) break
+    from += rows.length
+    // Fast path: the exact count spares the extra empty-page round-trip, which
+    // matters because most of these tables fit in a single page.
+    if (expected !== null && out.length >= expected) break
+  }
+  if (DEBUG_SYNC) console.log(`[SYNC] fetchAllRows: ${out.length} row(s) in ${Math.ceil(out.length / PAGE_SIZE) || 1} page(s)`)
+  return { data: out, error: null }
+}
+
 async function runPull(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -464,30 +510,44 @@ async function runPull(
     examsRes,
     settingsRes,
   ] = await Promise.all([
-    since !== null
-      ? supabase.from('folders').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('folders').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('decks').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('decks').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('cards').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('cards').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('fsrs_data').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('fsrs_data').select('*').eq('user_id', userId),
+    // Every list query below goes through fetchAllRows: PostgREST silently
+    // truncates any single SELECT at the server row cap (1000 here), so a bare
+    // .select() drops rows past that with no error. Ordered by primary key so
+    // the paged ranges are stable.
+    fetchAllRows((from, to) => {
+      const q = supabase.from('folders').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('id').range(from, to)
+    }),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('decks').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('id').range(from, to)
+    }),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('cards').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('id').range(from, to)
+    }),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('fsrs_data').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('card_id').range(from, to)
+    }),
     // review_sessions has no updated_at and isn't part of the incremental-pull
-    // scope — always fetched in full (it's cheap, append-mostly, low volume).
-    supabase.from('review_sessions').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('review_logs').select('*').eq('user_id', userId).gt('reviewed_at', since)
-      : supabase.from('review_logs').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('notes').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('notes').select('*').eq('user_id', userId),
-    since !== null
-      ? supabase.from('exams').select('*').eq('user_id', userId).gt('updated_at', since)
-      : supabase.from('exams').select('*').eq('user_id', userId),
+    // scope — always fetched in full (append-mostly, but it still grows past
+    // the row cap over time, so it pages like everything else).
+    fetchAllRows((from, to) =>
+      supabase.from('review_sessions').select('*', { count: 'exact' }).eq('user_id', userId).order('id').range(from, to)),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('review_logs').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('reviewed_at', since) : q).order('id').range(from, to)
+    }),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('notes').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('id').range(from, to)
+    }),
+    fetchAllRows((from, to) => {
+      const q = supabase.from('exams').select('*', { count: 'exact' }).eq('user_id', userId)
+      return (since !== null ? q.gt('updated_at', since) : q).order('id').range(from, to)
+    }),
+    // Single row by construction — no cap concern, left as-is.
     since !== null
       ? supabase.from('user_settings').select('*').eq('user_id', userId).gt('updated_at', since).maybeSingle()
       : supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
@@ -613,15 +673,68 @@ async function runPull(
     // backfill is unstamped (no updatedAt — see fsrsBackfillCard), so it loses
     // to any real row in pickFresherFsrs and is pushed insert-only; it's also
     // absent from lastPushedFsrs, so the next push cycle sends it to the server.
+    //
+    // A backfill must never *invent* a fresh "new" card for a card that has
+    // actually been studied. fsrsBackfillCard produces state:'new' with no
+    // history, so applying it to a reviewed card silently wipes its schedule
+    // — the card drops back into the New queue and has to be re-learned, and
+    // the next local review then pushes that reset state to the server. (This
+    // is how cards ended up in state:'new' while still carrying review_logs.)
+    // So when the card has history, reconstruct from that history instead,
+    // replaying the real review_logs through the official scheduler — the
+    // same routine the FSRS-6 migration uses. Like fsrsBackfillCard, the
+    // result is left unstamped so any real row still beats it.
+    //
+    // Both forms are also refused for a card whose schedule was written today
+    // (local row updated today, or a review logged today): a pull is a
+    // background mechanism, and a card answered today must not have its
+    // schedule changed by one. Nothing is lost by waiting — the row is either
+    // already correct locally or arrives on a later pull.
+    // Full known history for the replay: the local store holds every log this
+    // device knows about, and `reviewLogs` holds this pull's server rows (on an
+    // incremental pull, only those since the watermark). Union them by id — the
+    // history store's own merge happens further down, after this setState.
+    const logsByCardForBackfill = new Map<string, ReviewLog[]>()
+    const seenLogIds = new Set<string>()
+    for (const log of [...useHistoryStore.getState().reviewLogs, ...(reviewLogs ?? [])]) {
+      if (seenLogIds.has(log.id)) continue
+      seenLogIds.add(log.id)
+      const list = logsByCardForBackfill.get(log.cardId)
+      if (list) list.push(log)
+      else logsByCardForBackfill.set(log.cardId, [log])
+    }
+    const backfillParams = fsrsParameters({
+      weights: useSettingsStore.getState().fsrsWeights,
+      targetRetention: useSettingsStore.getState().fsrsTargetRetention,
+      maximumInterval: useSettingsStore.getState().fsrsMaxInterval,
+    })
+    const todayStr = toLocalDateStr(new Date())
+
     let backfilled = 0
+    let reconstructed = 0
+    let skippedSameDay = 0
     for (const c of mergedCards) {
-      if (!mergedFsrsData[c.id]) {
+      if (mergedFsrsData[c.id]) continue
+      const cardLogs = logsByCardForBackfill.get(c.id) ?? []
+      if (cardLogs.some((l) => toLocalDateStr(new Date(l.reviewedAt)) === todayStr)) {
+        skippedSameDay++
+        continue
+      }
+      if (cardLogs.length > 0) {
+        const replayed = replayCardHistory({ cardId: c.id, userId: c.userId }, cardLogs, backfillParams)
+        delete replayed.updatedAt
+        mergedFsrsData[c.id] = replayed
+        reconstructed++
+      } else {
         mergedFsrsData[c.id] = fsrsBackfillCard(c.id, c.userId)
         backfilled++
       }
     }
-    if (backfilled > 0 && DEBUG_SYNC) {
-      console.log('[SYNC] pullFromSupabase: backfilled', backfilled, 'missing fsrs_data entr(ies)')
+    if ((backfilled > 0 || reconstructed > 0 || skippedSameDay > 0) && DEBUG_SYNC) {
+      console.log(
+        '[SYNC] pullFromSupabase: fsrs_data gaps —', backfilled, 'backfilled as new,',
+        reconstructed, 'reconstructed from review_logs,', skippedSameDay, 'skipped (answered today)',
+      )
     }
 
     return {

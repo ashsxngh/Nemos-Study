@@ -17,6 +17,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, formatDate } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
+import { activeStudyMs, capCardMs } from '@/lib/activeTime'
 import { fsrsForgettingCurve, fsrsRetrievability } from '@/lib/srs'
 
 // ── useCountUp hook ───────────────────────────────────────────────────────────
@@ -152,8 +153,7 @@ export function StatsPage() {
       getReviewsDue: s.getReviewsDue,
     }))
   )
-  const { sessions, reviewLogs } = useHistoryStore(
-    useShallow((s) => ({ sessions: s.sessions, reviewLogs: s.reviewLogs }))
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs
   )
   const { burnoutWarningEnabled, burnoutThresholdCards, leechThreshold } = useSettingsStore(
     useShallow((s) => ({
@@ -176,15 +176,12 @@ export function StatsPage() {
     const d = new Date(); d.setMonth(d.getMonth() - 1); return d
   }, [])
 
+  // Active foreground time per card (each capped at 60s), not session wall
+  // clock — see lib/activeTime.ts.
   const monthMinutes = useMemo(() => {
-    const monthSessions = sessions.filter((s) => s.endedAt && new Date(s.startedAt) > oneMonthAgo)
-    return Math.round(
-      monthSessions.reduce((sum, s) => {
-        if (!s.endedAt) return sum
-        return sum + (new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000
-      }, 0)
-    )
-  }, [sessions, oneMonthAgo])
+    const monthLogs = reviewLogs.filter((l) => new Date(l.reviewedAt) > oneMonthAgo)
+    return Math.round(activeStudyMs(monthLogs) / 60000)
+  }, [reviewLogs, oneMonthAgo])
 
   const streak = useMemo(() => computeStreak(reviewLogs), [reviewLogs])
 
@@ -227,7 +224,9 @@ export function StatsPage() {
 
   const avgResponseByRating = useMemo(() => {
     const byRating: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [] }
-    reviewLogs.forEach((l) => { if (l.responseMs > 0) byRating[l.rating].push(l.responseMs) })
+    // Capped: a card left open in a background tab used to drag this average
+    // to ~100s. capCardMs also floors the occasional negative/NaN row.
+    reviewLogs.forEach((l) => { if (l.responseMs > 0) byRating[l.rating].push(capCardMs(l.responseMs)) })
     return Object.fromEntries(
       Object.entries(byRating).map(([r, ms]) => [
         r,
@@ -813,7 +812,11 @@ export function StatsPage() {
                   <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} interval={4} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-primary)' }} formatter={(v) => (v == null ? 'No data' : `${v}%`)} />
-                  <Line type="monotone" dataKey="retention" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls={false} />
+                  {/* connectNulls: a day with no reviews is a gap in knowledge of
+                      retention, not a 0% day — draw straight through it to the next
+                      real point rather than breaking the line. Recharts' own option,
+                      so no interpolated data points are fabricated. */}
+                  <Line type="monotone" dataKey="retention" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             )}

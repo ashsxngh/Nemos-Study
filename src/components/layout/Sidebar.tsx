@@ -10,20 +10,16 @@ import {
   FileText,
   BarChart3,
   Calendar,
-  ChevronRight,
   ChevronLeft,
   Search,
   Settings,
   Trash2,
-  Plus,
-  BookOpen,
   Sparkles,
   RotateCcw,
   Inbox,
   WifiOff,
 } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/SettingsPanel'
-import { CreateDeckDialog } from '@/components/library/CreateDeckDialog'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
@@ -69,9 +65,7 @@ export function Sidebar() {
   )
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [showNewDeckForm, setShowNewDeckForm] = useState(false)
 
   // getNewCards/getReviewsDue/getDueCards are the most expensive queries in
   // the app (O(cards) scans with sorting/interleaving) — memoized so a
@@ -100,17 +94,6 @@ export function Sidebar() {
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0])
 
-  const toggleFolder = (id: string) =>
-    setExpandedFolders((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-
-  const rootFolders = folders.filter((f) => !f.parentId && !f.isArchived)
-  const rootDecks   = decks.filter((d) => !d.folderId && !d.isArchived)
-
-  const deckCardCount = (deckId: string) => cards.filter((c) => c.deckId === deckId).length
 
   if (sidebarCollapsed) {
     return (
@@ -168,7 +151,7 @@ export function Sidebar() {
             </Tooltip>
           )}
           <Tooltip content="Settings" side="right">
-            <button onClick={() => setSettingsOpen(true)} className="flex items-center justify-center w-11 h-11 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
+            <button onClick={() => setSettingsOpen((v) => !v)} className="flex items-center justify-center w-11 h-11 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
               <Settings size={17} />
             </button>
           </Tooltip>
@@ -265,62 +248,12 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* Decks tree */}
-      <div className="flex-1 overflow-y-auto px-4 min-h-0">
-        <p className="meta-label text-[var(--text-muted)] opacity-70 px-4 mt-3 mb-2">Decks</p>
-        <div className="space-y-0.5">
-          {rootFolders.map((folder) => {
-            const isExpanded = expandedFolders.has(folder.id)
-            const childDecks = decks.filter((d) => d.folderId === folder.id && !d.isArchived)
-            return (
-              <div key={folder.id}>
-                <button
-                  onClick={() => toggleFolder(folder.id)}
-                  className="w-full flex items-center gap-2 h-9 px-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                  <ChevronRight size={13} className={cn('shrink-0 text-[var(--text-muted)] transition-transform duration-150', isExpanded && 'rotate-90')} />
-                  <BookOpen size={15} className="shrink-0" />
-                  <span className="flex-1 text-left truncate">{folder.name}</span>
-                </button>
-                {isExpanded && childDecks.map((deck) => (
-                  <Link
-                    key={deck.id}
-                    href="/library"
-                    className="flex items-center gap-2 h-9 pl-10 pr-3 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors"
-                  >
-                    <span className="flex-1 truncate">{deck.name}</span>
-                    <span className="font-mono text-[11px] text-[var(--text-muted)] shrink-0">{deckCardCount(deck.id)}</span>
-                  </Link>
-                ))}
-              </div>
-            )
-          })}
-
-          {rootDecks.map((deck) => (
-            <Link
-              key={deck.id}
-              href="/library"
-              className="flex items-center gap-2 h-9 px-3 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <ChevronRight size={13} className="shrink-0 text-transparent" />
-              <BookOpen size={15} className="shrink-0" />
-              <span className="flex-1 truncate">{deck.name}</span>
-              <span className="font-mono text-[11px] text-[var(--text-muted)] shrink-0">{deckCardCount(deck.id)}</span>
-            </Link>
-          ))}
-        </div>
-      </div>
+      {/* Deck browsing lives on the Library page — the sidebar deliberately
+          carries navigation and study counts only. */}
+      <div className="flex-1 min-h-0" />
 
       {/* Bottom actions — Stitch: big periwinkle New Deck above mono utility rows */}
       <div className="px-4 pb-5 pt-4 border-t border-[var(--border)] shrink-0 space-y-1">
-        <button
-          onClick={() => setShowNewDeckForm(true)}
-          className="w-full mb-3 py-3 bg-[var(--accent)] text-[var(--accent-fg)] font-bold text-[15px] rounded-lg flex items-center justify-center gap-2 hover:bg-[var(--accent-hover)] active:scale-95 transition-all duration-100"
-        >
-          <Plus size={18} className="shrink-0" />
-          New Deck
-        </button>
-
         {/* Sync status — only visible on error, hidden during active study sessions */}
         {showSyncError && (
           <button
@@ -333,7 +266,7 @@ export function Sidebar() {
         )}
 
         <button
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setSettingsOpen((v) => !v)}
           className="flex items-center gap-3 px-4 py-2 w-full rounded-lg transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <Settings size={17} className="shrink-0" strokeWidth={1.75} />
@@ -358,7 +291,6 @@ export function Sidebar() {
       </div>
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <CreateDeckDialog open={showNewDeckForm} onClose={() => setShowNewDeckForm(false)} />
     </aside>
   )
 }

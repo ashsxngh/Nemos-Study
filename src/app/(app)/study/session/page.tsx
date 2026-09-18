@@ -35,6 +35,7 @@ import { fsrsRetrievability } from '@/lib/srs'
 import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
 import { cn, formatDuration, formatDate, generateId } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
+import { ActiveTimer, subscribeToActivity, activeStudyMs } from '@/lib/activeTime'
 import type { Card, Difficulty } from '@/lib/types'
 
 // ── Session abandonment recovery ──────────────────────────────────────────────
@@ -164,7 +165,14 @@ function SessionContent() {
     }))
   )
 
-  const cardShownAtRef = useRef<number>(Date.now())
+  // Per-card and whole-session stopwatches that only run while the tab is
+  // visible and focused (see lib/activeTime.ts). These replace the old
+  // `Date.now()` timestamp, which counted every backgrounded minute as study
+  // time — the live data held a 19.3-hour responseMs because of it.
+  const cardTimerRef = useRef<ActiveTimer | null>(null)
+  if (cardTimerRef.current === null) cardTimerRef.current = new ActiveTimer()
+  const sessionTimerRef = useRef<ActiveTimer | null>(null)
+  if (sessionTimerRef.current === null) sessionTimerRef.current = new ActiveTimer()
   // Tracks the persisted ReviewSession record (useHistoryStore.sessions) for
   // this study session — separate from useStudyStore's local sessionId.
   const librarySessionIdRef = useRef<string | null>(null)
@@ -505,9 +513,17 @@ function SessionContent() {
 
   /* Reset timer & UI when card changes */
   useEffect(() => {
-    cardShownAtRef.current = Date.now()
+    cardTimerRef.current?.reset()
     setShowMoreRatings(false)
   }, [currentIndex])
+
+  /* Drive both stopwatches from real visibility/focus events */
+  useEffect(() => {
+    const timers = [cardTimerRef.current, sessionTimerRef.current].filter(
+      (t): t is ActiveTimer => t !== null,
+    )
+    return subscribeToActivity(timers)
+  }, [])
 
   /* Close options menu on outside click */
   useEffect(() => {
@@ -617,7 +633,45 @@ function SessionContent() {
         return
       }
 
-      const responseMs = Date.now() - cardShownAtRef.current
+      // ── Schedule-write policy ───────────────────────────────────────────
+      // A card's schedule (fsrs_data) and its permanent history (review_logs)
+      // may only be written by a genuine Reviews-session rating. Two passes
+      // deliberately do not qualify:
+      //
+      //  - The missed-cards retry pass. Those cards were already rated, in
+      //    this same session, minutes ago; the second pass exists to drill
+      //    them while the concept is fresh, not to re-grade them. Letting it
+      //    call reviewCard() re-rated a card that had already been answered
+      //    today and overwrote the first pass's real schedule.
+      //  - Planner "Study Weakest" (exam prep, outside the Reviews queue).
+      //    It may still take a *new* card through its first exposure, since
+      //    that is the only way a card can ever be learned, but it must never
+      //    reschedule a card already in review/relearning.
+      //
+      // A drill rating still advances the queue and drives the in-session UI
+      // counters; it just leaves no trace in the store or on the server.
+      const isRetryPass = sessionPhase === 'retry'
+      const isExamWeakest = modeParam === 'weakest'
+      // Weakest may still teach a genuinely new card for the first time; the
+      // retry pass may not write anything at all.
+      const drillOnly = isRetryPass || (isExamWeakest && !isNew)
+
+      if (drillOnly) {
+        if (rating === 1) setMissedReviewCount((c) => c + 1)
+        setHistory((h) => [...h, currentIndex])
+        setAnimatingOut(rating === 1 ? 'left' : 'right')
+        setTimeout(() => {
+          setAnimatingOut(null)
+          nextCard()
+          ratingInFlightRef.current = false
+        }, 180)
+        return
+      }
+
+      // Active foreground time on this card, capped at 60s — the same value
+      // that feeds review_logs.responseMs, the Avg Response Time stat, the
+      // burnout pace projection and every study-time total.
+      const responseMs = cardTimerRef.current?.cappedElapsed() ?? 0
       const prevFSRS = useLibraryStore.getState().fsrsData[card.id]
 
       const logId = generateId()
@@ -660,7 +714,7 @@ function SessionContent() {
       }, 180)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, currentIndex, deckId, animatingOut]
+    [queue, currentIndex, deckId, animatingOut, sessionPhase, modeParam]
   )
 
   /* ── Undo last review ── */
@@ -785,6 +839,18 @@ function SessionContent() {
     const card = queue[currentIndex]
     if (!card) return
     setShowOptionsMenu(false)
+    // "Reset review history" rewrites the card's schedule, so it is a Reviews-
+    // flow action only. In a drill (missed-cards retry, Study Weakest) the
+    // button is hidden; this guard keeps the handler honest if it is reached
+    // another way (stale menu, keyboard path added later).
+    if (sessionPhase === 'retry' || modeParam === 'weakest') {
+      useAppStore.getState().addToast({
+        type: 'info',
+        message: "Review history can only be reset from a Reviews session",
+        duration: 3000,
+      })
+      return
+    }
     resetCardSRS(card.id)
     useAppStore.getState().addToast({ type: 'info', message: 'Review history reset', duration: 2000 })
   }
@@ -871,6 +937,11 @@ function SessionContent() {
     return () => document.removeEventListener('keydown', handleKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAnswer, currentIndex, queue, history, handleUndo, studyShortcuts, showEditDialog, showHistoryDialog, showDeleteConfirm, showBurnoutNudge])
+
+  // True whenever this session is a drill rather than a real review pass: the
+  // session-end missed-cards retry, or Planner "Study Weakest". Nothing in a
+  // drill may modify an already-scheduled card's review status.
+  const isDrillContext = sessionPhase === 'retry' || modeParam === 'weakest'
 
   const isFirstPassDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'first'
   const isSessionDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'retry'
@@ -998,7 +1069,9 @@ function SessionContent() {
     const totalLogged = logs.length - newCardReviewedCount
     const correct = logs.filter((l) => l.rating >= 3).length - newCardCorrectCount
     const accuracy = totalLogged > 0 ? Math.round((correct / totalLogged) * 100) : 0
-    const elapsed = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 1000) : 0
+    // Active study time for this session, not wall clock: the sum of each
+    // card's capped foreground time. Sitting on this screen adds nothing.
+    const elapsed = Math.round(activeStudyMs(logs) / 1000)
 
     return (
       <div className="flex flex-col items-center justify-center flex-1 p-6 focus-gradient">
@@ -1561,14 +1634,16 @@ function SessionContent() {
                 <Pencil size={13} style={{ color: 'var(--text-secondary)' }} />
                 Edit card
               </button>
-              <button
-                onClick={handleResetSRS}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                <RefreshCw size={13} style={{ color: 'var(--text-secondary)' }} />
-                Reset review history
-              </button>
+              {!isDrillContext && (
+                <button
+                  onClick={handleResetSRS}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  <RefreshCw size={13} style={{ color: 'var(--text-secondary)' }} />
+                  Reset review history
+                </button>
+              )}
               <button
                 onClick={() => { setShowOptionsMenu(false); setShowHistoryDialog(true) }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-left hover:bg-[var(--bg-hover)] transition-colors"

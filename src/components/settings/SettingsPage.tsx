@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
+import { capCardMs } from '@/lib/activeTime'
 import { FSRSSimulator } from '@/components/settings/FSRSSimulator'
 import {
   Toggle,
@@ -56,7 +57,7 @@ export function SettingsPage() {
   const projectedLoad = (() => {
     const timed = reviewLogs.filter((l) => l.responseMs > 0)
     const avgSec = timed.length > 0
-      ? Math.min(30, Math.max(3, timed.reduce((s, l) => s + l.responseMs, 0) / timed.length / 1000 + 3))
+      ? Math.min(30, Math.max(3, timed.reduce((s, l) => s + capCardMs(l.responseMs), 0) / timed.length / 1000 + 3))
       : 9
     const weekAgo = Date.now() - 7 * 86400000
     const recentReviews = reviewLogs.filter((l) => new Date(l.reviewedAt).getTime() >= weekAgo).length

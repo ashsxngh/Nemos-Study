@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { getPeriodRange, logsInRange, type Period } from '@/lib/periods'
+import { activeStudyMs } from '@/lib/activeTime'
 
 function useCountUp(target: number, duration = 800): number {
   const [count, setCount] = useState(0)
@@ -24,8 +24,7 @@ function useCountUp(target: number, duration = 800): number {
 interface StatsOverviewProps { period: Period }
 
 export function StatsOverview({ period }: StatsOverviewProps) {
-  const { reviewLogs, sessions } = useHistoryStore(
-    useShallow((s) => ({ reviewLogs: s.reviewLogs, sessions: s.sessions }))
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs
   )
   const { start, end } = getPeriodRange(period)
 
@@ -48,18 +47,10 @@ export function StatsOverview({ period }: StatsOverviewProps) {
     ? reviewLogs.filter((l) => !l.wasNew).length
     : reviewOnlyLogs.length
 
-  // Study time in period
-  const periodSessions = sessions.filter((s) => {
-    if (!s.endedAt) return false
-    const t = new Date(s.startedAt)
-    return t >= start && t <= end
-  })
-  const reviewTimeMin = Math.round(
-    periodSessions.reduce((sum, s) => {
-      if (!s.endedAt) return sum
-      return sum + (new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000
-    }, 0)
-  )
+  // Study time in period — active foreground time per card (each capped at
+  // 60s), not session wall clock. The old `endedAt - startedAt` sum counted
+  // backgrounded tabs, interruptions and time parked on the completion screen.
+  const reviewTimeMin = Math.round(activeStudyMs(periodLogs) / 60000)
 
   const animatedCards     = useCountUp(cardsReviewed)
   const animatedRetention = useCountUp(retention)

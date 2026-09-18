@@ -100,6 +100,23 @@ function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] 
 // monopolize the front of the queue — decks with more overdue severity get
 // pulled from more often, but every deck with due cards gets interleaved in.
 
+// A card already answered today is done for today, whatever the grade.
+//
+// FSRS's learning and relearning steps are deliberately sub-day (1m / 10m), so
+// a card rated "Missed" comes back due ~10 minutes later — inside the same
+// local calendar day Nemos buckets its queues by. Without this check the card
+// stayed in the due set the instant it was answered, which is why the Reviews
+// counter only ever decremented on a correct answer: a wrong answer rescheduled
+// the card to later today and it was immediately counted as due again.
+//
+// Answering is what clears a card from today's queue; the grade only decides
+// how soon it returns afterwards. A missed card is genuinely due again
+// tomorrow (it is overdue from its 10-minute step), which is correct SRS
+// behaviour — this only stops it reappearing within the same day.
+function answeredToday(fs: FSRSState | undefined, todayStr: string): boolean {
+  return !!fs?.lastReviewedAt && toLocalDateStr(new Date(fs.lastReviewedAt)) === todayStr
+}
+
 function daysOverdue(dueDateIso: string): number {
   return Math.max(0, (Date.now() - new Date(dueDateIso).getTime()) / 86400000)
 }
@@ -653,8 +670,11 @@ export const useLibraryStore = create<LibraryState>()(
 
         const todayStr = toLocalDateStr(now)
         const due = pool.filter((c) => {
-          if (pulledForwardIds.has(c.id)) return true
           const fs = fsrsData[c.id]
+          // Checked before the exam pull-forward branch: a card answered today
+          // is done for today even if an exam would otherwise pull it forward.
+          if (answeredToday(fs, todayStr)) return false
+          if (pulledForwardIds.has(c.id)) return true
           if (!fs || fs.state === 'new') return false
           return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
         })
@@ -760,6 +780,8 @@ export const useLibraryStore = create<LibraryState>()(
         return cards.filter((c) => {
           if (c.deckId !== deckId || c.isArchived) return false
           const fs = fsrsData[c.id]
+          // Same rule as getReviewsDue — the badge must track the queue.
+          if (answeredToday(fs, todayStr)) return false
           if (!fs || fs.state === 'new') return false
           return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
         }).length

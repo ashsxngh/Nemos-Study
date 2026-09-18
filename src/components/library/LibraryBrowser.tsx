@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
-  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown, Plus,
+  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown, Plus, FolderInput,
 } from 'lucide-react'
 import {
   DndContext,
@@ -28,6 +28,7 @@ import { AnchoredMenu, MenuItemRow, type MenuItem } from '@/components/ui/Menu'
 import { DeckView } from '@/components/library/DeckView'
 import { StudyModePopup } from '@/components/library/StudyModePopup'
 import { FolderTreePicker } from '@/components/library/FolderTreePicker'
+import { MoveFolderDialog } from '@/components/library/MoveFolderDialog'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useAppStore } from '@/store/useAppStore'
@@ -237,7 +238,10 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null)
   const [draggingDeckId, setDraggingDeckId] = useState<string | null>(null)
   const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null)
-  const [sortBy, setSortBy] = useState<SortBy>('alpha')
+  // Default: newest deck first. Plain component state — nothing persists a
+  // sort choice, so this is only the first-load default and any selection the
+  // user makes in the toolbar still wins for as long as the view is mounted.
+  const [sortBy, setSortBy] = useState<SortBy>('created')
   const [activeTags, setActiveTags] = useState<string[]>([])
   // Session-only filters — reset on reload, not persisted.
   const [filterStarred, setFilterStarred] = useState(false)
@@ -248,6 +252,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
   // Bulk deck selection — select decks in the current folder and move them
   // to another folder in one action.
   const [selectedDeckIds, setSelectedDeckIds] = useState<Set<string>>(new Set())
+  const [movingFolder, setMovingFolder] = useState<FolderType | null>(null)
   const [showBulkMoveDecks, setShowBulkMoveDecks] = useState(false)
   const [bulkMoveFolderTarget, setBulkMoveFolderTarget] = useState<string | null>(null)
 
@@ -665,6 +670,11 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
               {visibleFolders.map((folder) => {
                 const folderMenuItems: DropdownItem[] = [
                   {
+                    label: 'Move to folder',
+                    icon: <FolderInput size={12} />,
+                    onClick: () => setMovingFolder(folder),
+                  },
+                  {
                     label: folder.isStarred ? 'Unstar' : 'Star',
                     icon: <Star size={12} />,
                     onClick: () => updateFolder(folder.id, { isStarred: !folder.isStarred }),
@@ -858,6 +868,8 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
       <StudyModePopup deck={studyPopupDeck} onClose={() => setStudyPopupDeck(null)} />
 
+      <MoveFolderDialog folder={movingFolder} onClose={() => setMovingFolder(null)} />
+
       {/* Bulk: move selected decks to a folder */}
       <Dialog
         open={showBulkMoveDecks}
@@ -919,6 +931,7 @@ function LibraryTreeTable({
   )
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [movingFolder, setMovingFolder] = useState<FolderType | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteState | null>(null)
   const q = search.toLowerCase()
 
@@ -970,6 +983,11 @@ function LibraryTreeTable({
   }
 
   const folderMenu = (folder: FolderType): DropdownItem[] => [
+    {
+      label: 'Move to folder',
+      icon: <FolderInput size={12} />,
+      onClick: () => setMovingFolder(folder),
+    },
     {
       label: folder.isStarred ? 'Unstar' : 'Star',
       icon: <Star size={12} />,
@@ -1137,6 +1155,8 @@ function LibraryTreeTable({
           setConfirmDelete(null)
         }}
       />
+
+      <MoveFolderDialog folder={movingFolder} onClose={() => setMovingFolder(null)} />
     </div>
   )
 }

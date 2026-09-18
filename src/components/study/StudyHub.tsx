@@ -15,6 +15,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
+import { activeStudyMs } from '@/lib/activeTime'
 
 export function StudyHub() {
   const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount, getDeckMastery } = useLibraryStore(
@@ -29,8 +30,7 @@ export function StudyHub() {
       getDeckMastery: s.getDeckMastery,
     }))
   )
-  const { reviewLogs, sessions } = useHistoryStore(
-    useShallow((s) => ({ reviewLogs: s.reviewLogs, sessions: s.sessions }))
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs
   )
   const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
   const [search, setSearch] = useState('')
@@ -44,13 +44,9 @@ export function StudyHub() {
 
   const todayStr = toLocalDateStr(new Date())
   const todayLogs = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === todayStr)
-  const todaySessions = sessions.filter((s) => s.endedAt && toLocalDateStr(new Date(s.startedAt)) === todayStr)
-  const todayMinutes = Math.round(
-    todaySessions.reduce((sum, s) => {
-      if (!s.endedAt) return sum
-      return sum + (new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000
-    }, 0)
-  )
+  // Active foreground time per card (each capped at 60s), not session wall
+  // clock — see lib/activeTime.ts.
+  const todayMinutes = Math.round(activeStudyMs(todayLogs) / 60000)
   const todayReviewLogs = todayLogs.filter((l) => !l.wasNew)
   const todayAccuracy = todayReviewLogs.length > 0
     ? Math.round((todayReviewLogs.filter((l) => l.rating >= 2).length / todayReviewLogs.length) * 100)
