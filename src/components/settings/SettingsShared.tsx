@@ -120,7 +120,7 @@ export function FSRSWeightsGrid() {
     useShallow((s) => ({ fsrsWeights: s.fsrsWeights, updateSettings: s.updateSettings }))
   )
   return (
-    <div className="grid grid-cols-4 gap-1.5">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
       {fsrsWeights.map((w, i) => (
         <div key={i} className="flex flex-col gap-0.5">
           <label className="font-mono text-[10px] uppercase tracking-wide text-[var(--text-muted)]">w[{i}]</label>

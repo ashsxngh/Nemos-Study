@@ -14,6 +14,7 @@ import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { PERIOD_OPTIONS, type Period } from '@/lib/periods'
 import { cn } from '@/lib/utils'
+import { MobileNavButton } from '@/components/layout/MobileNavButton'
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('today')
@@ -51,11 +52,14 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[1200px] mx-auto px-6 py-10 space-y-8 pb-16">
+      <div className="max-w-[1200px] mx-auto px-4 md:px-6 py-6 md:py-10 space-y-8 pb-16">
         {/* Welcome header — Stitch dashboard hero row */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--text-primary)] tracking-tight">Welcome back.</h1>
+            <div className="flex items-center gap-2">
+              <MobileNavButton className="-ml-2" />
+              <h1 className="text-2xl font-semibold text-[var(--text-primary)] tracking-tight">Welcome back.</h1>
+            </div>
             <p className="text-[15px] text-[var(--text-secondary)] mt-1">
               {dueCount > 0 ? (
                 <>You have <span className="text-[var(--accent)] font-bold">{dueCount} {dueCount === 1 ? 'card' : 'cards'}</span> scheduled for today.</>

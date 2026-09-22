@@ -20,6 +20,7 @@ import {
   importFromCSV,
   importFromJSON,
 } from '@/lib/import'
+import { archivedDeckIds, archivedFolderIds } from '@/lib/archive'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,8 +135,11 @@ function DeckTreePicker({
   value: string | null
   onChange: (id: string | null) => void
 }) {
-  const activeDecks = decks.filter((d) => !d.isArchived)
-  const flat = flattenFolderTree(buildFolderTree(folders.filter((f) => !f.isArchived)))
+  // Inherited archive — an archived folder's decks and subfolders are archived too.
+  const archivedDecks = archivedDeckIds(decks, folders)
+  const archivedFolders = archivedFolderIds(folders)
+  const activeDecks = decks.filter((d) => !archivedDecks.has(d.id))
+  const flat = flattenFolderTree(buildFolderTree(folders.filter((f) => !archivedFolders.has(f.id))))
   const unfoldered = activeDecks.filter((d) => !d.folderId)
 
   return (

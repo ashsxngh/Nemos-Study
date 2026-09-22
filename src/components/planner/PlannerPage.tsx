@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { cn, formatDate } from '@/lib/utils'
 import { useExamStore } from '@/store/useExamStore'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { archivedDeckIds } from '@/lib/archive'
 import { useAppStore } from '@/store/useAppStore'
 import {
   computeExamRetentionStats,
@@ -207,7 +208,9 @@ function ExamEditPanel({ exam, onClose }: { exam: Exam; onClose: () => void }) {
   // Individually-linked decks (not covered via a folder)
   const linkedDecks = decks.filter((d) => exam.deckIds.includes(d.id))
   // Decks not yet covered by any linked folder or direct link
-  const unlinkedDecks = decks.filter((d) => !examDeckIds.includes(d.id) && !d.isArchived)
+  // Inherited archive — a deck inside an archived folder is archived too.
+  const archivedDecks = archivedDeckIds(decks, folders)
+  const unlinkedDecks = decks.filter((d) => !examDeckIds.includes(d.id) && !archivedDecks.has(d.id))
   // Root-level folders for tree rendering
   const rootFolders = folders
     .filter((f) => f.parentId === null && !f.isArchived)
@@ -651,7 +654,7 @@ export function PlannerPage({ addingExam = false, onExamAdded }: PlannerPageProp
               <X size={14} />
             </button>
           </div>
-          <form onSubmit={handleExamSubmit} className="grid grid-cols-2 gap-3">
+          <form onSubmit={handleExamSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input placeholder="Exam name *" value={examName} onChange={(e) => setExamName(e.target.value)} required autoFocus
               className="col-span-2 text-sm bg-[var(--bg-hover)] border border-[var(--border)] rounded-[var(--radius-sm)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]" />
             <input placeholder="Subject *" value={examSubject} onChange={(e) => setExamSubject(e.target.value)} required

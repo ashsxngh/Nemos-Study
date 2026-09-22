@@ -1086,7 +1086,7 @@ function SessionContent() {
           </div>
 
           {/* Stat tiles — mono labels, display numbers */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               { label: 'Accuracy', value: `${accuracy}%`, accent: true },
               { label: 'Cards', value: String(totalLogged), sub: `${formatDuration(elapsed)} elapsed` },
@@ -1434,7 +1434,7 @@ function SessionContent() {
               {/* Retention transparency panel — shown when "Show card details" is on */}
               {showCardDetailsEnabled && retentionInfo && (
                 <div className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <div className="grid grid-cols-4 gap-2 px-4 py-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 py-2.5">
                     <div>
                       <p className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Stability</p>
                       <p className="font-mono text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{retentionInfo.stability.toFixed(1)}d</p>
@@ -1699,7 +1699,7 @@ function SessionContent() {
 
       {/* ── Review history dialog ── */}
       <Dialog open={showHistoryDialog} onClose={() => setShowHistoryDialog(false)} title="Review History" size="md">
-        <div className="overflow-y-auto max-h-96">
+        <div className="overflow-y-auto overflow-x-auto max-h-96">
           {cardLogs.length === 0 ? (
             <div className="p-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
               No review history yet.

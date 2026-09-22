@@ -9,6 +9,7 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { AnchoredMenu } from '@/components/ui/Menu'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
+import { MobileNavButton } from '@/components/layout/MobileNavButton'
 
 interface HeaderProps {
   title?: string
@@ -46,7 +47,8 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
   const notifications: { id: string; message: string; time: string }[] = []
 
   return (
-    <header className="flex items-center h-16 px-6 bg-[var(--bg-base)]/80 backdrop-blur-md shrink-0 gap-4 z-40">
+    <header className="flex items-center h-16 px-4 md:px-6 bg-[var(--bg-base)]/80 backdrop-blur-md shrink-0 gap-2 md:gap-4 z-40">
+      <MobileNavButton />
       <div className="flex-1 min-w-0 flex items-center gap-4">
         {breadcrumbs ?? (
           title && (
@@ -55,7 +57,11 @@ export function Header({ title, actions, breadcrumbs }: HeaderProps) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      {/* On phones the page actions + global controls can exceed the viewport
+          (Library alone is ~480px of buttons). Rather than hiding controls or
+          restyling every page's buttons, the row scrolls sideways below `md`;
+          from `md` up it is the original non-shrinking cluster. */}
+      <div className="flex items-center gap-2 min-w-0 overflow-x-auto no-scrollbar md:shrink-0 md:overflow-visible">
         {actions}
 
         {syncError && (

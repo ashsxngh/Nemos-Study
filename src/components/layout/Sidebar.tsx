@@ -43,10 +43,12 @@ const STUDY_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync } = useAppStore(
+  const { sidebarCollapsed, toggleSidebar, openCommandPalette, syncError, manualSync, mobileNavOpen, setMobileNavOpen } = useAppStore(
     useShallow((s) => ({
       sidebarCollapsed: s.sidebarCollapsed,
       toggleSidebar: s.toggleSidebar,
+      mobileNavOpen: s.mobileNavOpen,
+      setMobileNavOpen: s.setMobileNavOpen,
       openCommandPalette: s.openCommandPalette,
       syncError: s.syncError,
       manualSync: s.manualSync,
@@ -77,7 +79,7 @@ export function Sidebar() {
   )
   const reviewsDue = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, fsrsData, getReviewsDue]
+    [cards, decks, folders, fsrsData, reviewLogs, getReviewsDue]
   )
   const dueCards = useMemo(
     () => getDueCards(),
@@ -95,9 +97,45 @@ export function Sidebar() {
     href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0])
 
 
+
+  // Below `md` the sidebar is an off-canvas drawer: taken out of the flex flow
+  // (`fixed`) so the content column gets the full viewport width, and slid off
+  // screen unless opened. A fixed 260px rail left only ~130px of a 390px phone
+  // for the entire app, and the shell's `overflow-hidden` clipped the rest away
+  // rather than letting it scroll. From `md` up nothing changes.
+  // NB: `relative` must NOT be appended at the call sites. `cn` runs
+  // tailwind-merge, which treats `fixed` and `relative` as the same position
+  // group and lets the later one win — that silently kept the drawer in the
+  // flex flow, so the content column still only got ~130px. `md:relative`
+  // restores the positioning context for the collapse toggle on desktop.
+  const shellClass = cn(
+    'flex flex-col h-screen border-r border-[var(--border)] bg-[var(--bg-sidebar)]',
+    'fixed inset-y-0 left-0 z-50 transition-transform duration-200',
+    mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
+    'md:relative md:translate-x-0 md:z-auto md:shrink-0'
+  )
+
+  // Tapping a destination should dismiss the drawer; on desktop it is a no-op.
+  const closeDrawer = () => setMobileNavOpen(false)
+
+  // Backdrop lives outside the <aside> so it can sit under it in the stack.
+  const backdrop = mobileNavOpen ? (
+    <div
+      className="fixed inset-0 z-40 bg-black/50 md:hidden"
+      onClick={closeDrawer}
+      aria-hidden="true"
+    />
+  ) : null
+
   if (sidebarCollapsed) {
     return (
-      <aside className="flex flex-col h-screen border-r border-[var(--border)] transition-all duration-150 shrink-0 relative w-16 bg-[var(--bg-sidebar)]">
+      <>
+      {backdrop}
+      <aside className={cn(shellClass, 'w-16')} onClick={(e) => {
+        // Any nav tap inside the drawer closes it (mobile only — on desktop
+        // the drawer state is never true).
+        if ((e.target as HTMLElement).closest('a')) closeDrawer()
+      }}>
         <button
           onClick={toggleSidebar}
           className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full border border-[var(--border)] bg-[var(--bg-sidebar)] flex items-center justify-center shadow-sm hover:bg-[var(--bg-hover)] transition-colors"
@@ -163,11 +201,16 @@ export function Sidebar() {
         </div>
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </aside>
+      </>
     )
   }
 
   return (
-    <aside className="flex flex-col h-screen border-r border-[var(--border)] transition-all duration-150 shrink-0 relative w-[260px] bg-[var(--bg-sidebar)]">
+    <>
+    {backdrop}
+    <aside className={cn(shellClass, 'w-[260px]')} onClick={(e) => {
+      if ((e.target as HTMLElement).closest('a')) closeDrawer()
+    }}>
       {/* Edge collapse toggle */}
       <button
         onClick={toggleSidebar}
@@ -292,5 +335,6 @@ export function Sidebar() {
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </aside>
+    </>
   )
 }

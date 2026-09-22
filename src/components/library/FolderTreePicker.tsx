@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { ChevronRight, Folder as FolderIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Folder } from '@/lib/types'
+import { archivedFolderIds } from '@/lib/archive'
 
 export interface FolderNode {
   folder: Folder
@@ -118,7 +119,11 @@ interface FolderTreePickerProps {
  */
 export function FolderTreePicker({ folders, value, onChange, noFolderLabel = 'No folder' }: FolderTreePickerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const roots = buildFolderTree(folders.filter((f) => !f.isArchived))
+  // Inherited archive — filtering by the folder's own flag alone would let a
+  // subfolder of an archived folder resurface as a root once its parent is
+  // filtered out of the tree.
+  const archivedFolders = archivedFolderIds(folders)
+  const roots = buildFolderTree(folders.filter((f) => !archivedFolders.has(f.id)))
 
   // Auto-expand the ancestor chain of the selected folder so a pre-selected
   // nested folder (e.g. a deck created from inside a deeply-nested folder like

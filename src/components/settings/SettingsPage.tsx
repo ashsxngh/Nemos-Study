@@ -123,7 +123,7 @@ export function SettingsPage() {
                 <div>
                   <p className="text-sm font-semibold text-[var(--text-primary)] mb-0.5">Customize card appearance</p>
                   <p className="text-xs text-[var(--text-muted)] mb-3">Choose what information appears under a card in the deck page.</p>
-                  <div className="grid grid-cols-3 gap-x-4 gap-y-2.5 mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2.5 mb-4">
                     {(
                       [
                         { key: 'progress', label: 'Progress' },

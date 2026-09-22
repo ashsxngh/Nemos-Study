@@ -142,7 +142,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
         {/* Panel */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-[480px] max-w-full bg-[var(--bg-surface)] border-r border-[var(--border)] overflow-y-auto shadow-2xl flex flex-col"
+          className="absolute left-0 top-0 bottom-0 w-full max-w-[480px] max-w-full bg-[var(--bg-surface)] border-r border-[var(--border)] overflow-y-auto shadow-2xl flex flex-col"
           style={{
             transform: open ? 'translateX(0)' : 'translateX(-100%)',
             transition: 'transform 0.2s ease',

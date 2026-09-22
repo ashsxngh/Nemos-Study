@@ -13,6 +13,7 @@ import { Progress } from '@/components/ui/Progress'
 import { Badge } from '@/components/ui/Badge'
 import { useShallow } from 'zustand/react/shallow'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { archivedDeckIds } from '@/lib/archive'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn, formatDate } from '@/lib/utils'
@@ -143,10 +144,11 @@ export function StatsPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const router = useRouter()
 
-  const { cards, decks, fsrsData, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore(
+  const { cards, decks, folders, fsrsData, getDeckMastery, getNewCards, getReviewsDue } = useLibraryStore(
     useShallow((s) => ({
       cards: s.cards,
       decks: s.decks,
+      folders: s.folders,
       fsrsData: s.fsrsData,
       getDeckMastery: s.getDeckMastery,
       getNewCards: s.getNewCards,
@@ -235,9 +237,12 @@ export function StatsPage() {
     ) as Record<number, number | null>
   }, [reviewLogs])
 
+  // Archiving is inherited: a deck inside an archived folder is archived too.
+  const archivedDecks = useMemo(() => archivedDeckIds(decks, folders), [decks, folders])
+
   const deckStats = useMemo(() => {
     return decks
-      .filter((d) => !d.isArchived)
+      .filter((d) => !archivedDecks.has(d.id))
       .map((deck) => ({
         id: deck.id,
         name: deck.name,
@@ -280,7 +285,7 @@ export function StatsPage() {
 
   const subjectMastery = useMemo(() => {
     return decks
-      .filter((d) => !d.isArchived)
+      .filter((d) => !archivedDecks.has(d.id))
       .map((deck) => ({
         subject: deck.name,
         mastery: getDeckMastery(deck.id),
@@ -649,7 +654,7 @@ export function StatsPage() {
   // ════════════════════════════════════════════════════════════════════════════
 
   const deckRetentionDrift = useMemo(() => {
-    const results = decks.filter((d) => !d.isArchived).map((deck) => {
+    const results = decks.filter((d) => !archivedDecks.has(d.id)).map((deck) => {
       const deckCardIds = new Set(cards.filter((c) => c.deckId === deck.id).map((c) => c.id))
       const deckLogs = reviewLogs.filter((l) => deckCardIds.has(l.cardId))
       const months = Array.from({ length: 3 }, (_, i) => {
@@ -1101,7 +1106,7 @@ export function StatsPage() {
             </p>
             {!reviewTiming ? <EmptyState message="Need at least 10 consecutive review pairs" /> : (
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
                     { label: 'Early', rate: reviewTiming.earlyRate, passRate: reviewTiming.earlyPassRate, detail: `avg ${reviewTiming.avgDaysEarly}d early`, icon: ArrowUp, color: 'text-sky-400' },
                     { label: 'On time', rate: reviewTiming.onTimeRate, passRate: reviewTiming.onTimePassRate, detail: '±1.5 days', icon: Target, color: 'text-[var(--success)]' },

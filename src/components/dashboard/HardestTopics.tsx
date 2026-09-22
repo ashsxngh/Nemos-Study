@@ -5,20 +5,25 @@ import { AlertTriangle } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { Progress } from '@/components/ui/Progress'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { archivedDeckIds } from '@/lib/archive'
 
 export function HardestTopics() {
-  const { decks, cards, fsrsData, getDeckMastery } = useLibraryStore(
+  const { decks, folders, cards, fsrsData, getDeckMastery } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
+      folders: s.folders,
       cards: s.cards,
       fsrsData: s.fsrsData,
       getDeckMastery: s.getDeckMastery,
     }))
   )
 
+  // Archiving is inherited: a deck inside an archived folder is archived too.
+  const archivedDecks = useMemo(() => archivedDeckIds(decks, folders), [decks, folders])
+
   const ranked = useMemo(() => {
     return decks
-      .filter((d) => !d.isArchived)
+      .filter((d) => !archivedDecks.has(d.id))
       .map((deck) => {
         const deckCards = cards.filter((c) => c.deckId === deck.id)
         // A deck nobody has started yet isn't "hard" — it just has no
@@ -33,7 +38,7 @@ export function HardestTopics() {
       .filter((d) => d.reviewedCount > 0)
       .sort((a, b) => a.mastery - b.mastery)
       .slice(0, 5)
-  }, [decks, cards, fsrsData, getDeckMastery])
+  }, [decks, archivedDecks, cards, fsrsData, getDeckMastery])
 
   return (
     <div className="card-surface p-8">

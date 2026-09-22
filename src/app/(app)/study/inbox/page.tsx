@@ -34,7 +34,7 @@ export default function InboxPage() {
   )
   const reviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, fsrsData, getReviewsDue]
+    [cards, decks, folders, fsrsData, reviewLogs, getReviewsDue]
   )
 
   const isEmpty = dueCards.length === 0

@@ -1,5 +1,37 @@
 @AGENTS.md
 
+# Rules
+
+These are permanent product invariants. They outrank any individual fix, audit
+finding, refactor or cleanup. If a change you are about to make would affect
+one of them as a side effect, STOP and flag it before proceeding.
+
+## Same-day graduation (HARD, PERMANENT, NON-NEGOTIABLE)
+
+**Same-day graduation is a hard, permanent requirement. Never remove, gate, or
+delay it as a side effect of any other fix. Only change this behavior if
+explicitly instructed to change same-day graduation specifically.**
+
+Concretely, a newly learned card MUST:
+
+1. Graduate into Reviews on the **same day** it is first learned.
+2. Be **visible and answerable** in Reviews that same day (inbox, Reviews page,
+   session queue), and be counted in the due badges.
+3. Only stop counting as due **after it has actually been answered as a review**
+   that day — never before.
+
+This has been true throughout the project's life. A fix for something else
+(counters, due-date recounting, `answeredToday` checks, exam pull-forward,
+daily limits, anything) is NEVER grounds to touch it. Note the distinction that
+has broken it before: *"don't re-count a card that was already answered today"*
+and *"don't show a card that graduated today"* are two different rules, and
+only the first one is wanted.
+
+Guard rails: `src/store/sameDayGraduation.test.ts` locks the full lifecycle
+down. If it fails, the bug is in your change. The mechanism lives in
+`graduatedTodayIds()` in `src/store/useLibraryStore.ts`, which every
+`answeredToday()` gate must be paired with.
+
 # Sync architecture (`src/hooks/useSync.ts`)
 
 `useSync` is a single React hook mounted once at the app layout level. It owns all Supabase communication.
@@ -189,3 +221,221 @@ Prompt (verbatim, condensed): (1) Remove the standalone "DECKS" section (deck li
 **4 — decks use a `FolderTreePicker` dialog with a "Library root" option; folders now do too.** Decks move via the bulk "Move to folder" dialog (`LibraryBrowser.tsx:863`), where `noFolderLabel="Library root"` sets `folderId: null`. Folder menus had only Star/Archive/Delete in **both** renderers (grid/list `folderMenuItems:666`, tree-table `folderMenu:972`). New `MoveFolderDialog.tsx` mirrors the deck dialog exactly — same picker, same "Library root" label, setting `parentId: null` — wired into both menus with a "Move to folder" item. Targets exclude the folder and its whole subtree (`subtreeIds`) so a folder can't be moved inside itself.
 
 Files touched: `src/lib/activeTime.ts` (new — capped, visibility/focus-gated timing), `src/components/library/MoveFolderDialog.tsx` (new — folder move incl. root), `src/store/useLibraryStore.ts` (`answeredToday` rule in `getReviewsDue`/`getDeckDueCount`), `src/app/(app)/study/session/page.tsx` (active timers, capped responseMs, `isDrillContext`, reset-SRS gate), `src/components/layout/Sidebar.tsx` (Decks section removed), `src/components/library/LibraryBrowser.tsx` (default sort `created`, folder Move menu + dialog), `src/components/stats/StatsPage.tsx` (connectNulls, active study time, capped avg response), `src/components/dashboard/StatsOverview.tsx` + `src/components/study/StudyHub.tsx` (active study time), `src/components/settings/SettingsPage.tsx` (capped burnout pace). `tsc --noEmit` clean, 52/52 tests pass, `next build` clean, lint at baseline.
+
+### Fix: same-day graduation regression — `answeredToday` gate swallowed a new card's first exposure
+
+Prompt (verbatim): URGENT REGRESSION: Same-day graduation has been broken by a recent fix and must be restored immediately. This is a hard product requirement, not up for reinterpretation.
+
+HARD RULE, PERMANENT, NON-NEGOTIABLE:
+A newly learned card MUST graduate into Reviews the SAME DAY it is first learned. This has been true throughout this entire project and must remain true. Do NOT remove, gate, delay, or otherwise interfere with same-day graduation for any reason, under any fix, ever — unless I explicitly and specifically ask you to change same-day graduation behavior in so many words. A fix for something else (counters, due-date recounting, answeredToday checks, exam pull-forward, anything) is NEVER grounds to touch this. If a fix you're about to make would affect same-day graduation as a side effect, STOP and flag it to me before proceeding instead of just doing it.
+
+What likely broke it: the recent answeredToday() gate (added to fix the reviews counter not decrementing on wrong answers) was placed before the exam pull-forward branch in getReviewsDue/getDeckDueCount, and is confirmed to apply uniformly to all cards including brand-new ones on their first rating (wasNew === true). This is almost certainly now also preventing a newly-graduated card from appearing in Reviews at all today, not just preventing it from being double-counted after being answered once.
+
+Fix required:
+1. Find every place answeredToday() (or equivalent) is used to gate due/review counting.
+2. Confirm whether it is currently preventing a same-day-graduated card from appearing in Reviews on the day it graduates, at all — not just preventing a re-count after being answered. These are two different things and must be handled separately:
+   - Correct: a card graduates today, appears in Reviews today, is answerable today, is visible in the due count today.
+   - Also correct: once that card has been answered today, it should not be re-counted as due again later today (this is the fix from last session, keep this part).
+   - Wrong (the current bug): the card never appearing in Reviews / never being answerable on its graduation day at all.
+3. Fix so same-day graduation is fully restored: a card learned today graduates into Reviews today, is visible and answerable today, gets answered once today, and only then stops re-counting as due for the rest of that day (consistent with the once-per-day-for-everyone rule already established).
+
+Test explicitly before reporting done: learn a brand new card right now, confirm it appears in the Reviews/due list immediately after grading it out of New Cards, confirm it's answerable, confirm the due badge count reflects it correctly both before and after being answered.
+
+Run tsc --noEmit and next build to verify. Do not commit or push — leave changes unstaged for me to review and push myself. List every file touched with a one-line summary.
+
+Append to CLAUDE.md under ## Session Log: this prompt verbatim, root cause, fix summary. Add a permanent, prominent note under the Rules section (not just the session log) stating: "Same-day graduation is a hard, permanent requirement. Never remove, gate, or delay it as a side effect of any other fix. Only change this behavior if explicitly instructed to change same-day graduation specifically." This note must persist across all future sessions.
+
+**Confirmed, and worse than reported.** The diagnosis in the prompt was exactly right. `answeredToday(fs, todayStr)` (`useLibraryStore.ts:116`) tests only `fsrsData[cardId].lastReviewedAt` — and a brand-new card's **first exposure stamps `lastReviewedAt` just like any other rating**, so the gate could not tell "graduated 30 seconds ago" from "already reviewed today". Reproduced live against the real store (node/vitest, nothing about the scheduler mocked): create deck → create card → `reviewCard(id, 3, …)`. Immediately after the first rating:
+
+```
+fsrs:  state=learning  due=+10m (today)  lastReviewedAt=now  reps=1
+getNewCards      → 0     (correct: it left New)
+getReviewsDue    → []    ← WRONG
+getDeckDueCount  → 0     ← WRONG
+getDueCards      → []    ← WRONG
+```
+
+So it was not merely missing from Reviews: with `getDueCards` empty too, a just-learned card **vanished from the entire app** — inbox, Reviews page, session queue and every due badge — until the next calendar day. Exactly the "never appearing / never answerable on its graduation day" case the prompt named as the bug. The `answeredToday` placement before the exam pull-forward branch was correct and is unchanged; the defect was the predicate itself, not its position. Audited for other gates: `answeredToday` has exactly two call sites (`getReviewsDue:676`, `getDeckDueCount:784`), no daily-review-limit gate exists in queue building at all, and `getPulledForwardCardIds` was not involved — so this was the sole cause.
+
+**Fix.** New `graduatedTodayIds(todayStr)` in `useLibraryStore.ts` returns the cards whose **only** answer today was their first exposure — a `wasNew === true` log today with no ordinary log since (built in one O(logs) pass, mirroring `getNewCards`'s existing `wasNewTodayCardIds` scan). Both gates became `answeredToday(fs, todayStr) && !graduatedToday.has(c.id)`. The two rules are now genuinely separate: *answered today* still suppresses, *graduated today* is exempt until actually reviewed. Deliberately **additive, not a replacement** — a log with no `wasNew` key (pre-`wasNew`-era rows) counts as an ordinary review, and a card with no logs at all still falls through to the old suppress behaviour, so missing history can never resurrect a genuinely-reviewed card. `answeredToday` itself is unchanged but now carries a ⚠️ comment forbidding its use as a standalone due gate.
+
+Because these two queries now read `reviewLogs`, `reviewLogs` was added to the `useMemo` dependency arrays at every consuming call site (two of which had to newly subscribe to it). `session/page.tsx`'s `buildQueue` is deliberately untouched — it has an explicit `eslint-disable` and rebuilds only at session start.
+
+**Verified end to end**, not by inspection: new permanent regression suite `src/store/sameDayGraduation.test.ts` drives the real store through the whole lifecycle and asserts the card is in `getReviewsDue(deck)`, `getReviewsDue()`, `getDueCards(deck)` and `getDeckDueCount === 1` on its graduation day, then absent from all four after one review — plus a wrong-answer case (once-per-day rule still holds) and a no-logs review card (still suppressed). `tsc --noEmit` clean, `next build` clean, **55/55 tests pass** (52 pre-existing + 3 new). Left unstaged. One incidental finding, not a bug: a `learning` card rated Again returns to `learning`, not `relearning` — ts-fsrs only uses `relearning` from `review` state.
+
+Files touched:
+- `src/store/useLibraryStore.ts` — added `graduatedTodayIds()`; both `answeredToday` gates (`getReviewsDue`, `getDeckDueCount`) now exempt cards that graduated today.
+- `src/store/sameDayGraduation.test.ts` — **new**: permanent regression suite locking the same-day graduation lifecycle.
+- `CLAUDE.md` — new top-level `# Rules` section with the permanent same-day-graduation invariant, plus this log entry.
+- `src/app/(app)/study/reviews/page.tsx` — subscribes to `reviewLogs`; added to the `getReviewsDue` memo deps.
+- `src/components/library/LibraryBrowser.tsx` — subscribes to `reviewLogs`; added to the `getDeckDueCount` memo deps.
+- `src/app/(app)/study/inbox/page.tsx` — `reviewLogs` added to the `getReviewsDue` memo deps.
+- `src/components/study/StudyHub.tsx` — `reviewLogs` added to the `getReviewsDue` and per-deck count memo deps.
+- `src/components/dashboard/DailyQueue.tsx` — `reviewLogs` added to the `getReviewsDue` and per-deck badge memo deps.
+- `src/components/layout/Sidebar.tsx` — `reviewLogs` added to the `getReviewsDue` memo deps.
+
+### Fix: archived decks — block new-card introduction, keep reviews, add library indicator
+
+Prompt (verbatim): Bug/Feature: Archive behavior on decks needs to be fixed and completed.
+
+INTENDED BEHAVIOR (confirm this doesn't already exist before assuming it's missing):
+1. An archived deck gets a visual indicator in the deck list/library — a small red dot or
+   distinct color/badge on the deck row — so it's visually obvious it's archived.
+2. Cards belonging to an archived deck must be EXCLUDED from the New Cards queue/box
+   (getNewCards or equivalent) — no new cards from an archived deck should ever be
+   introduced/queued for first-time study.
+3. Cards belonging to an archived deck must STILL remain fully active in the review/SRS
+   system — i.e. if a card already has review history/scheduling, it keeps showing up in
+   Reviews/Due (getReviewsDue, getDeckDueCount) on its normal schedule. Archiving a deck
+   must NOT pull its cards out of spaced repetition. Only new-card introduction is blocked.
+
+INVESTIGATE FIRST:
+1. Find where "archived" status lives today — field on deck (and/or card) in the store and
+   in Supabase (archived: boolean vs archivedAt: timestamp?). Report which.
+2. Find every place that currently reads this archived field, and every place that queries
+   decks/cards but does NOT check it. Specifically check:
+   - New Cards queue (must exclude archived-deck cards — this is likely broken or missing)
+   - Reviews/Due queue and per-deck due count (must NOT exclude them — confirm this is
+     currently correct; if it's wrongly excluding already-scheduled cards, that's also a bug)
+   - Library/deck list view (needs the new visual indicator)
+   - Any bulk "all cards"/duplicate-detection/search paths — decide if archived should be
+     visible there and say why
+3. Check whether archived status is a deck-level flag only, and if so, how "is this card's
+   parent deck archived" is currently determined for the New Cards filter (join/lookup vs a
+   denormalized flag on the card). Report inconsistencies (e.g. some queries check the deck,
+   some check a stale per-card copy of the flag).
+4. Report findings with file/line references BEFORE making changes.
+
+FIX:
+- Make New Cards queue exclude any card whose deck is archived.
+- Ensure Reviews/Due queue explicitly does NOT filter out archived-deck cards (add a test/
+  comment making this intentional, since it's the easy thing to get wrong).
+- Add the archived indicator (red dot or distinct treatment) to the deck list UI, using
+  existing design tokens/components rather than inventing new styling patterns.
+- Fix any other query found in step 2 that's inconsistent with the intended behavior above.
+
+VERIFY:
+- Run tsc --noEmit and next build, fix any resulting errors.
+- Do not commit or push. Leave changes unstaged.
+- List every file touched with a one-line summary of what changed.
+
+Append to CLAUDE.md under "## Session Log": this prompt (verbatim), findings, and fix
+summary — 3-4 lines max.
+
+**Findings.** `isArchived` is a **boolean** (not `archivedAt`) on Folder/Deck/Card/Note (`types.ts:34,49,68,107`; `schema.sql:23,37,55,145` `is_archived`), and deck-level vs card-level are independent — archiving a deck never touches its cards. Answer to step 3: **neither a join nor a denormalized flag — the lookup simply did not exist.** `getNewCards` (`useLibraryStore.ts:651`) filtered only card-level `!c.isArchived` plus an orphan check against *all* decks, so **archived decks kept feeding new cards into the inbox** (item 2 broken, confirmed). Item 3 was already correct but only by accident — nothing documented it. Item 1 missing: `LibraryBrowser.tsx:303` shows archived decks with no marker at all. Inconsistency worth recording: StudyHub/DailyQueue/Stats/Planner/import/FolderTreePicker all drop archived decks from their *per-deck lists*, while their header totals came from `getNewCards()`/`getDueCards()` which did not — so an archived deck contributed new cards to the inbox total with no row to account for them. Deliberately unchanged: CommandPalette search still finds archived decks (you must be able to find one to unarchive it); duplicate detection (`CardEditor.tsx:72`) is already deck-scoped so archiving cannot affect it; the per-deck Study popup (`getDeckNewAll`) still offers new cards, since that is an explicit act on that one deck, not automatic introduction.
+
+**Fix.** `getNewCards` now builds an `archivedDeckIds` set and excludes those cards; `getReviewsDue` is unchanged but carries a ⚠️ comment stating the non-exclusion is intentional and load-bearing. New `src/store/archivedDeck.test.ts` locks both halves plus the card-level/deck-level distinction. Library deck rows (grid, list, tree-table) gained an `ArchivedDot` marker — the existing `Archive` lucide icon in the existing `var(--danger)` token, placed exactly where the Star marker sits. `tsc --noEmit` clean, `next build` clean, **59/59 tests pass** (55 + 4 new). Left unstaged.
+
+Files touched:
+- `src/store/useLibraryStore.ts` — `getNewCards` excludes archived-deck cards; `getReviewsDue` gains a ⚠️ comment that its non-exclusion is intentional.
+- `src/store/archivedDeck.test.ts` — **new**: locks "no new cards from archived decks" and "reviews keep running regardless".
+- `src/components/library/LibraryBrowser.tsx` — new `ArchivedDot` indicator wired into all three deck renderers.
+- `CLAUDE.md` — this log entry.
+
+**Follow-up correction (same session) — archive is INHERITED down the folder tree.** User: *"no the decks within a archived folder are archived. that should only be overriden if or when the user specifically goes and unarchives it"*. The first pass treated deck archive as a deck-level flag only and merely *flagged* folder cascade as an open gap; that was wrong. New `src/lib/archive.ts` (`archivedFolderIds` / `archivedDeckIds`) resolves the full ancestor chain — memoised, with an explicit cycle + orphaned-parent guard so a corrupted tree can't hang the queue — and is now the single source of truth for "is this deck archived". **Deliberately inheritance, not a cascade write:** each item keeps its own `isArchived` flag untouched, so nothing un-archives implicitly and unarchiving a folder restores exactly the items that were archived *by inheritance* while anything the user archived individually stays archived. A cascade write would have destroyed that distinction irreversibly and pushed hundreds of rows to Supabase. Wired through the store (`getArchivedDeckIds`, consumed by `getNewCards`) and every surface that filtered `!d.isArchived` on a flat deck list (StudyHub, DailyQueue, HardestTopics, StatsPage ×3, PlannerPage's unlinked-deck list, the import picker) plus the two folder pickers, where filtering by a folder's own flag alone let a subfolder of an archived folder resurface as a tree root. Library markers now distinguish self-archived from folder-inherited in their tooltip. Reviews remain untouched — an inherited-archived deck keeps reviewing exactly like a directly-archived one, locked by three new tests. **Known behaviour, not a bug:** individually unarchiving a deck that sits inside an archived folder has no visible effect until the folder is unarchived (the folder governs); its own flag still records the intent. `tsc --noEmit` clean, `next build` clean, **65/65 tests pass**, lint unchanged at its 12-error baseline (all pre-existing `set-state-in-effect` / `no-unescaped-entities` in untouched lines — verified by linting the HEAD copies of the same files).
+
+Additional files touched by the follow-up:
+- `src/lib/archive.ts` — **new**: inherited-archive resolver (`archivedFolderIds`, `archivedDeckIds`) with cycle/orphan guards.
+- `src/store/useLibraryStore.ts` — new `getArchivedDeckIds()` query; `getNewCards` now excludes inherited-archived decks.
+- `src/components/library/LibraryBrowser.tsx` — `ArchivedDot` gained a self-vs-inherited tooltip; markers added to folder rows and wired into all five renderers.
+- `src/components/study/StudyHub.tsx`, `src/components/dashboard/DailyQueue.tsx`, `src/components/dashboard/HardestTopics.tsx`, `src/components/stats/StatsPage.tsx`, `src/components/planner/PlannerPage.tsx`, `src/app/(app)/import/page.tsx` — flat deck-list filters now use the inherited set (each subscribes `folders`).
+- `src/components/library/FolderTreePicker.tsx` — hides the whole subtree of an archived folder, not just the folder itself.
+- `src/store/archivedDeck.test.ts` — six more tests: cascade at depth, reviews unaffected, selective restore on unarchive, plus helper unit tests for cycles/orphans/root decks.
+
+### Archive-inheritance UX gap + mobile responsive layout
+
+Prompt (verbatim): This session covers two unrelated fixes. Do both, in order, each with its own investigate-
+first / fix / verify cycle. Don't let one bleed into the other's file changes.
+
+======================================================================
+PART A — Archive-inheritance follow-up: fix the silent-unarchive UX gap
+and independently verify the last session's claims
+======================================================================
+
+CONTEXT: Folder-level archive inheritance was just added (src/lib/archive.ts,
+getArchivedDeckIds(), getNewCards excludes inherited-archived decks). One behavior was
+flagged but left unfixed: individually unarchiving a deck that sits inside an archived
+folder flips that deck's own isArchived flag to false in the background, but the deck
+still shows as archived (governed by the parent folder) with NO visible feedback that
+anything happened. A user clicking "unarchive" on that deck sees no change and will
+assume the click didn't register.
+
+FIX:
+1. When a deck's own flag is unarchived but it's still effectively archived via an
+   ancestor folder, surface that state explicitly in the UI — e.g. the deck row/tooltip
+   should say something like "Inherited from archived folder — unarchive the folder to
+   restore" instead of looking identical to a plain archived deck or an active deck.
+2. Confirm this doesn't require a third state on the deck record — it shouldn't, since
+   the deck's own flag already correctly records intent (per the existing design); this
+   is a display-layer fix only. If you find it genuinely needs a data model change, stop
+   and report why before changing the schema.
+
+INDEPENDENTLY VERIFY (don't just re-assert the prior session's claims):
+3. Run lint on the full changed file set. For each of the 12 previously-reported
+   pre-existing errors (4 set-state-in-effect, 8 no-unescaped-entities in StatsPage/
+   Planner/StudyHub/FolderTreePicker), confirm via git diff/git blame that none fall on
+   lines actually touched this session or last. Report the actual command output, not a
+   summary.
+4. Show the full diff for src/lib/archive.ts specifically — the cycle-guard and
+   orphaned-parent-guard logic is the highest-risk part of this change and needs a human-
+   readable diff, not just a description.
+5. Manually retest in-browser: archive a folder → individually unarchive one deck inside
+   it → confirm the new UI feedback from step 1 actually appears → unarchive the folder →
+   confirm that deck (and only that deck, not others archived individually) comes back
+   correctly.
+
+======================================================================
+PART B — Mobile responsive layout audit and fix
+======================================================================
+
+Bug: Website looks broken/bad on mobile phone screens. Audit and fix responsive layout
+issues across the site.
+
+INVESTIGATE FIRST:
+1. Check the HTML head for a viewport meta tag:
+   <meta name="viewport" content="width=device-width, initial-scale=1">
+   If missing, this alone causes mobile browsers to render at desktop width and zoom out —
+   report if it's missing and where it needs to go (likely _document.tsx/layout.tsx or
+   equivalent root template).
+2. Grep the codebase for fixed pixel widths on layout containers, nav bars, cards, modals,
+   and tables (width: NNNpx, min-width: NNNpx) — list every offender with file/line, and
+   flag which ones are large enough to cause horizontal overflow/scroll on a ~375–430px
+   wide screen.
+3. Check whether the site uses Flexbox/Grid with wrapping (flex-wrap, grid-template-columns
+   with minmax/auto-fit) or rigid multi-column layouts that don't reflow on small screens.
+4. Search for existing @media (max-width: ...) breakpoints — report what exists today and
+   what pages/components have NONE (meaning they only render the desktop layout at every
+   size).
+5. Check images and tables for missing max-width: 100%; height: auto (or equivalent), which
+   causes overflow on phones.
+6. Check font sizes — are they using rem/em (scalable) or hardcoded px that stays too large/
+   small on small screens?
+7. Report every location found with file/line references BEFORE making changes, grouped by
+   severity (breaks layout / causes horizontal scroll, vs. just looks cramped/off).
+
+FIX:
+- Add the viewport meta tag if missing.
+- Replace fixed-px widths on layout containers with responsive equivalents (max-width +
+  width: 100%, or flex/grid with wrapping) — preserve the existing visual design intent,
+  don't redesign, just make it reflow.
+- Add missing media query breakpoints for components that need real restructuring on small
+  screens (e.g. nav collapsing, multi-column grids going to 1 column, sidebars stacking
+  below content).
+- Ensure images/tables don't overflow their container on narrow viewports.
+- Test against common breakpoints: 375px (small phone), 390-430px (standard phone), 768px
+  (tablet) — don't just eyeball one size.
+
+======================================================================
+VERIFY (both parts)
+======================================================================
+- Run tsc --noEmit and next build, fix any resulting errors.
+- Do not commit or push. Leave changes unstaged.
+- List every file touched with a one-line summary, grouped under "Part A" and "Part B"
+  so the diffs are easy to review separately.
+
+Append to CLAUDE.md under "## Session Log": this prompt (verbatim), findings, and fix
+summary — 3-4 lines MAX. If the actual entry is longer than that when you're done, trim
+it before appending — don't paste the full chat response in.
+
+**A —** Display-layer only, no third state needed: `ArchivedDot` now renders inherited archive as a muted `FolderArchive` glyph with "Inherited from archived folder — unarchive the folder to restore", distinct from the red `Archive` of a self-archived item. Verified in a real browser (Playwright against the static export): unarchiving a self-archived deck inside an archived folder visibly flips red→muted where it was previously a no-op, and unarchiving the folder restored exactly the two inherited decks while the individually-archived one stayed archived. Independently re-checked the prior session's lint claim — all 12 (now 15, as Part B widened the changed set) errors are pre-existing, confirmed by intersecting each error line against `git diff -U0 HEAD` hunks (0 hits) and `git blame` dating them to commits d15e9dec/25a1f39d/f4e39236/ddfcb9ad.
+**B —** Viewport meta was already correct (`layout.tsx:25`); the real bug was the shell: a fixed 260px sidebar as a flex sibling left **130px of a 390px phone** for the whole app, and `overflow-hidden` on the content column *clipped* the remainder rather than letting it scroll — so nothing was reachable. Sidebar is now an off-canvas drawer below `md` (backdrop + `MobileNavButton` hamburger), restoring the content column to the full 390px. Trap worth remembering: `cn()` runs tailwind-merge, which collapsed `fixed` against a call-site `relative` and silently kept the drawer in flow — use `md:relative`, never a bare `relative`, alongside it. Also: 8 never-collapsing `grid-cols-N`, `SettingsPanel`'s `w-[480px]`, the ~480px header toolbar (now sideways-scrolling below `md`), page gutters, and a global `img/video { max-width: 100% }` guard (markdown card content had none).

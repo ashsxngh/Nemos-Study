@@ -100,7 +100,7 @@ export function ShortcutsPanel() {
         </div>
 
         {/* Groups — 2-column grid */}
-        <div className="grid grid-cols-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2">
           {SHORTCUTS.map((group, gi) => (
             <div
               key={group.group}

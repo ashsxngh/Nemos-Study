@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
+import { archivedDeckIds } from '@/lib/archive'
 
 export function DailyQueue() {
-  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount } = useLibraryStore(
+  const { decks, folders, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
+      folders: s.folders,
       cards: s.cards,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
@@ -24,13 +26,16 @@ export function DailyQueue() {
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const newCardsPerDay = useSettingsStore((s) => s.newCardsPerDay)
 
+  // Archiving is inherited: a deck inside an archived folder is archived too.
+  const archivedDecks = useMemo(() => archivedDeckIds(decks, folders), [decks, folders])
+
   const totalNew = useMemo(
     () => getNewCards().length,
     [cards, decks, fsrsData, reviewLogs, newCardsPerDay, getNewCards]
   )
   const totalReviews = useMemo(
     () => getReviewsDue().length,
-    [cards, decks, fsrsData, getReviewsDue]
+    [cards, decks, fsrsData, reviewLogs, getReviewsDue]
   )
   const total = totalNew + totalReviews
 
@@ -42,14 +47,14 @@ export function DailyQueue() {
   const decksWithDue = useMemo(
     () =>
       decks
-        .filter((d) => !d.isArchived)
+        .filter((d) => !archivedDecks.has(d.id))
         .map((deck) => ({
           deck,
           newCount: getDeckNewCount(deck.id),
           reviewCount: getDeckDueCount(deck.id),
         }))
         .filter((d) => d.newCount + d.reviewCount > 0),
-    [decks, cards, fsrsData, getDeckNewCount, getDeckDueCount]
+    [decks, archivedDecks, cards, fsrsData, reviewLogs, getDeckNewCount, getDeckDueCount]
   )
 
   if (total === 0) return null

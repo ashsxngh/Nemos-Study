@@ -16,11 +16,13 @@ import { useSettingsStore } from '@/store/useSettingsStore'
 import { cn } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
 import { activeStudyMs } from '@/lib/activeTime'
+import { archivedDeckIds } from '@/lib/archive'
 
 export function StudyHub() {
-  const { decks, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount, getDeckMastery } = useLibraryStore(
+  const { decks, folders, cards, fsrsData, getNewCards, getReviewsDue, getDeckNewCount, getDeckDueCount, getDeckMastery } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
+      folders: s.folders,
       cards: s.cards,
       fsrsData: s.fsrsData,
       getNewCards: s.getNewCards,
@@ -42,6 +44,9 @@ export function StudyHub() {
     if (saved) { try { setGoalTargets(JSON.parse(saved)) } catch {} }
   }, [])
 
+  // Archiving is inherited: a deck inside an archived folder is archived too.
+  const archivedDecks = useMemo(() => archivedDeckIds(decks, folders), [decks, folders])
+
   const todayStr = toLocalDateStr(new Date())
   const todayLogs = reviewLogs.filter((l) => toLocalDateStr(new Date(l.reviewedAt)) === todayStr)
   // Active foreground time per card (each capped at 60s), not session wall
@@ -58,14 +63,14 @@ export function StudyHub() {
   )
   const allReviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, fsrsData, getReviewsDue]
+    [cards, decks, fsrsData, reviewLogs, getReviewsDue]
   )
   const inboxTotal = allNewCards.length + allReviews.length
 
   const deckData = useMemo(
     () =>
       decks
-        .filter((d) => !d.isArchived)
+        .filter((d) => !archivedDecks.has(d.id))
         .map((deck) => ({
           deck,
           // Per-deck badges are uncapped, real per-deck counts (display only) —
@@ -77,7 +82,7 @@ export function StudyHub() {
           mastery: getDeckMastery(deck.id),
         }))
         .filter((d) => d.totalCards > 0),
-    [decks, cards, fsrsData, getDeckNewCount, getDeckDueCount, getDeckMastery]
+    [decks, archivedDecks, cards, fsrsData, reviewLogs, getDeckNewCount, getDeckDueCount, getDeckMastery]
   )
 
   const filtered = deckData.filter((d) =>
@@ -280,7 +285,7 @@ export function StudyHub() {
           </Button>
         </div>
         <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-surface)] p-8">
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {[
               // Deliberately counts all cards studied today (new + reviews) —
               // it's a daily volume goal, so the label says "studied", not

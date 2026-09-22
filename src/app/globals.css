@@ -91,6 +91,16 @@
 
 * { box-sizing: border-box; }
 
+/* Media never overflows its container on a narrow screen. Markdown-rendered
+   card content can contain arbitrary <img>/<video> with intrinsic widths far
+   wider than a phone, and there is no per-element class to hang this on. */
+img, video, canvas, svg:not([width]) { max-width: 100%; }
+img, video { height: auto; }
+
+/* Sideways-scrolling toolbars on phones: keep the swipe, drop the scrollbar. */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
 /* Stitch typographic scale: body-md is 15px Inter 1.5 — a 16px root keeps
    Tailwind's rem scale close to the mock's spacing rhythm (text-sm ≈ 14px
    body, text-xs ≈ 12px meta) and decompresses all rem-based padding/gaps. */

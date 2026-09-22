@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { Header } from '@/components/layout/Header'
 import { Button } from '@/components/ui/Button'
 import { useLibraryStore } from '@/store/useLibraryStore'
+import { useHistoryStore } from '@/store/useHistoryStore'
 
 export default function ReviewsPage() {
   const { cards, decks, folders, fsrsData, getReviewsDue } = useLibraryStore(
@@ -18,9 +19,12 @@ export default function ReviewsPage() {
       getReviewsDue: s.getReviewsDue,
     }))
   )
+  // getReviewsDue exempts cards that graduated today from the once-per-day
+  // rule, which it reads from reviewLogs — so reviewLogs is a real dependency.
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
   const reviews = useMemo(
     () => getReviewsDue(),
-    [cards, decks, folders, fsrsData, getReviewsDue]
+    [cards, decks, folders, fsrsData, reviewLogs, getReviewsDue]
   )
 
   const isEmpty = reviews.length === 0

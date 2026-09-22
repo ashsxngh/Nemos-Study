@@ -14,6 +14,10 @@ export interface PlannerTask {
 interface AppState {
   theme: Theme
   sidebarCollapsed: boolean
+  // Off-canvas nav drawer, phone widths only. Deliberately left out of
+  // `partialize` below: a drawer that reopened itself on reload would cover
+  // the app on every cold start.
+  mobileNavOpen: boolean
   commandPaletteOpen: boolean
   shortcutsPanelOpen: boolean
   toasts: ToastData[]
@@ -29,6 +33,7 @@ interface AppState {
   setTheme: (theme: Theme) => void
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
+  setMobileNavOpen: (v: boolean) => void
   openCommandPalette: () => void
   closeCommandPalette: () => void
   openShortcutsPanel: () => void
@@ -51,6 +56,7 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       theme: 'dark',
       sidebarCollapsed: false,
+      mobileNavOpen: false,
       commandPaletteOpen: false,
       shortcutsPanelOpen: false,
       toasts: [],
@@ -69,6 +75,7 @@ export const useAppStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+      setMobileNavOpen: (v) => set({ mobileNavOpen: v }),
       openCommandPalette: () => set({ commandPaletteOpen: true }),
       closeCommandPalette: () => set({ commandPaletteOpen: false }),
       openShortcutsPanel: () => set({ shortcutsPanelOpen: true }),

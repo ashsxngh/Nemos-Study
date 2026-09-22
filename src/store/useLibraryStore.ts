@@ -19,6 +19,7 @@ import { generateId } from '@/lib/utils'
 import { createIDBStorage } from '@/lib/idbStorage'
 import { CARD_TEXT_MAX_LENGTH, NAME_MAX_LENGTH } from '@/lib/limits'
 import { toLocalDateStr } from '@/lib/formatDate'
+import { archivedDeckIds } from '@/lib/archive'
 
 const USER_ID = 'local-user'
 
@@ -78,6 +79,7 @@ interface LibraryState {
   getDeckBoth: (deckId: string) => Card[]
   // Display-only per-deck badge counts — uncapped, no global newCardsPerDay /
   // daily-review-limit / exam-pull-forward gating. NOT for queue building.
+  getArchivedDeckIds: () => Set<string>
   getDeckNewCount: (deckId: string) => number
   getDeckDueCount: (deckId: string) => number
   getDeckCards: (deckId: string) => Card[]
@@ -113,8 +115,39 @@ function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] 
 // how soon it returns afterwards. A missed card is genuinely due again
 // tomorrow (it is overdue from its 10-minute step), which is correct SRS
 // behaviour — this only stops it reappearing within the same day.
+//
+// ⚠️ This is a LOW-LEVEL predicate. Never use it on its own to gate the due
+// queue: a brand-new card's FIRST exposure also stamps `lastReviewedAt`, and
+// suppressing that would delete same-day graduation — a hard, permanent
+// product requirement (see the Rules section of CLAUDE.md). Always pair it
+// with `graduatedTodayIds()` below, as `getReviewsDue`/`getDeckDueCount` do.
 function answeredToday(fs: FSRSState | undefined, todayStr: string): boolean {
   return !!fs?.lastReviewedAt && toLocalDateStr(new Date(fs.lastReviewedAt)) === todayStr
+}
+
+// Cards whose ONLY answer today was their first exposure out of New Cards
+// (a `wasNew` log, and no ordinary review log since).
+//
+// These are exactly the cards that graduated today. They MUST remain visible
+// and answerable in Reviews for the rest of today — that is same-day
+// graduation, and it is non-negotiable. Once such a card is answered again
+// today the answer is an ordinary review (`wasNew !== true`), it drops out of
+// this set, and the once-per-day rule above takes over as normal.
+//
+// A log with no `wasNew` key at all (pre-`wasNew`-era rows) is deliberately
+// treated as an ordinary review, so a missing flag can never resurrect a card
+// that was genuinely reviewed today.
+function graduatedTodayIds(todayStr: string): Set<string> {
+  const { reviewLogs } = useHistoryStore.getState()
+  const firstExposure = new Set<string>()
+  const realReview = new Set<string>()
+  for (const l of reviewLogs) {
+    if (toLocalDateStr(new Date(l.reviewedAt)) !== todayStr) continue
+    if (l.wasNew === true) firstExposure.add(l.cardId)
+    else realReview.add(l.cardId)
+  }
+  for (const id of realReview) firstExposure.delete(id)
+  return firstExposure
 }
 
 function daysOverdue(dueDateIso: string): number {
@@ -616,8 +649,13 @@ export const useLibraryStore = create<LibraryState>()(
         const { newCardsPerDay } = useSettingsStore.getState()
         const todayStr = toLocalDateStr(new Date())
         const deckSet = new Set(decks.map((d) => d.id))
+        // Archiving stops NEW cards being introduced — but only new ones. The
+        // deck's already-scheduled cards stay in Reviews forever (see
+        // `getReviewsDue`, which deliberately does NOT filter this set).
+        // Inherited: a deck inside an archived folder counts as archived too.
+        const archivedDecks = get().getArchivedDeckIds()
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
-          .filter((c) => !c.isArchived && deckSet.has(c.deckId))
+          .filter((c) => !c.isArchived && deckSet.has(c.deckId) && !archivedDecks.has(c.deckId))
 
         // Count new cards introduced today using wasNew-flagged logs (Issue 7).
         // This correctly excludes lapsed graduated cards.
@@ -651,6 +689,13 @@ export const useLibraryStore = create<LibraryState>()(
       getReviewsDue: (deckId) => {
         const { cards, fsrsData, decks, folders } = get()
         const deckSet = new Set(decks.map((d) => d.id))
+        // ⚠️ INTENTIONAL: cards from an ARCHIVED DECK are **not** filtered out
+        // here. Archiving a deck blocks new-card introduction only
+        // (`getNewCards`); anything already in the SRS schedule keeps coming up
+        // for review on its normal interval. Archiving must never silently pull
+        // learned cards out of spaced repetition. Locked by
+        // `src/store/archivedDeck.test.ts`. Card-level `isArchived` (leech
+        // auto-suspend) is a different flag and DOES remove the card.
         const pool = (deckId ? cards.filter((c) => c.deckId === deckId) : cards)
           .filter((c) => !c.isArchived && deckSet.has(c.deckId))
         const now = new Date()
@@ -669,11 +714,15 @@ export const useLibraryStore = create<LibraryState>()(
         }
 
         const todayStr = toLocalDateStr(now)
+        // Cards that graduated today are exempt from the once-per-day rule —
+        // they must appear in Reviews on their graduation day. See
+        // `graduatedTodayIds`.
+        const graduatedToday = graduatedTodayIds(todayStr)
         const due = pool.filter((c) => {
           const fs = fsrsData[c.id]
           // Checked before the exam pull-forward branch: a card answered today
           // is done for today even if an exam would otherwise pull it forward.
-          if (answeredToday(fs, todayStr)) return false
+          if (answeredToday(fs, todayStr) && !graduatedToday.has(c.id)) return false
           if (pulledForwardIds.has(c.id)) return true
           if (!fs || fs.state === 'new') return false
           return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
@@ -767,6 +816,15 @@ export const useLibraryStore = create<LibraryState>()(
       // list. Deliberately uncapped and independent of getNewCards/getDueCards —
       // those apply the global newCardsPerDay cap and daily review limit for
       // queue building, which must NOT leak into per-deck badge display.
+      // Deck ids that are archived outright OR sit inside an archived folder.
+      // Archiving is inherited down the folder tree (see `@/lib/archive`), so
+      // every "is this deck archived" question must go through here rather
+      // than reading `deck.isArchived` directly.
+      getArchivedDeckIds: () => {
+        const { decks, folders } = get()
+        return archivedDeckIds(decks, folders)
+      },
+
       getDeckNewCount: (deckId) => {
         const { cards, fsrsData } = get()
         return cards.filter(
@@ -777,11 +835,13 @@ export const useLibraryStore = create<LibraryState>()(
       getDeckDueCount: (deckId) => {
         const { cards, fsrsData } = get()
         const todayStr = toLocalDateStr(new Date())
+        const graduatedToday = graduatedTodayIds(todayStr)
         return cards.filter((c) => {
           if (c.deckId !== deckId || c.isArchived) return false
           const fs = fsrsData[c.id]
-          // Same rule as getReviewsDue — the badge must track the queue.
-          if (answeredToday(fs, todayStr)) return false
+          // Same rule as getReviewsDue — the badge must track the queue,
+          // same-day graduation exemption included.
+          if (answeredToday(fs, todayStr) && !graduatedToday.has(c.id)) return false
           if (!fs || fs.state === 'new') return false
           return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
         }).length

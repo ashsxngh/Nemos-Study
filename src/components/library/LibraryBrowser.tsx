@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   Folder, BookOpen, Star, MoreHorizontal, ChevronRight,
   Home, Grid3X3, List, Search, ArrowLeft,
-  Archive, Trash2, Play, GripVertical, Rows3, ChevronDown, Plus, FolderInput,
+  Archive, FolderArchive, Trash2, Play, GripVertical, Rows3, ChevronDown, Plus, FolderInput,
 } from 'lucide-react'
 import {
   DndContext,
@@ -31,6 +31,7 @@ import { FolderTreePicker } from '@/components/library/FolderTreePicker'
 import { MoveFolderDialog } from '@/components/library/MoveFolderDialog'
 import { useLibraryStore } from '@/store/useLibraryStore'
 import { useHistoryStore } from '@/store/useHistoryStore'
+import { archivedDeckIds, archivedFolderIds } from '@/lib/archive'
 import { useAppStore } from '@/store/useAppStore'
 import type { FolderColor, Folder as FolderType, Deck as DeckType } from '@/lib/types'
 
@@ -116,6 +117,40 @@ function ConfirmDeleteDialog({
 // at call sites throughout this file.
 type DropdownItem = MenuItem
 
+// Archived-deck marker for the deck rows. Sits where the Star marker sits and
+// reuses the existing danger token — archiving is a deck-level state that must
+// be obvious at a glance in the library, because it silently stops new cards
+// being introduced from that deck (see `getNewCards`).
+/** undefined = not archived; 'self' = archived directly; 'folder' = inherited. */
+type ArchivedVia = 'self' | 'folder' | undefined
+
+function ArchivedDot({
+  via, size = 12, className,
+}: { via: ArchivedVia; size?: number; className?: string }) {
+  if (!via) return null
+  // The two states must be told apart at a glance, not only by tooltip:
+  // unarchiving a deck inside an archived folder clears its own flag but
+  // leaves it archived by inheritance, and with one shared appearance that
+  // click looked like it had done nothing at all.
+  const inherited = via === 'folder'
+  const label = inherited
+    ? 'Inherited from archived folder — unarchive the folder to restore. No new cards are introduced; reviews continue as normal.'
+    : 'Archived — no new cards are introduced; reviews continue as normal'
+  return (
+    <span
+      title={label}
+      className={cn(
+        'inline-flex shrink-0',
+        inherited ? 'text-[var(--text-muted)] opacity-80' : 'text-[var(--danger)]',
+        className
+      )}
+    >
+      {inherited ? <FolderArchive size={size} aria-label="Archived via parent folder" />
+                 : <Archive size={size} aria-label="Archived" />}
+    </span>
+  )
+}
+
 function ItemDropdown({ items }: { items: DropdownItem[] }) {
   return (
     <div onClick={(e) => e.stopPropagation()}>
@@ -197,6 +232,9 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     }))
   )
   const sessions = useHistoryStore((s) => s.sessions)
+  // getDeckDueCount exempts cards that graduated today from the once-per-day
+  // rule, which it reads from reviewLogs — so reviewLogs is a real dependency.
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
 
   // The due/new/mastery queries are the most expensive in the app — memoize
   // per-deck results keyed by deck id instead of recomputing (and re-scanning
@@ -215,7 +253,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
     const map = new Map<string, number>()
     for (const d of decks) map.set(d.id, getDeckDueCount(d.id))
     return map
-  }, [decks, cards, fsrsData, getDeckDueCount])
+  }, [decks, cards, fsrsData, reviewLogs, getDeckDueCount])
 
   const masteryByDeck = useMemo(() => {
     const map = new Map<string, number>()
@@ -296,6 +334,15 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
       return inCurrent && matchesSearch
     })
     .sort((a, b) => a.order - b.order)
+
+  // Archiving is inherited down the folder tree, so the library marker can't
+  // read `isArchived` directly — a deck inside an archived folder is archived
+  // too, and must look it.
+  const archivedFolders = useMemo(() => archivedFolderIds(folders), [folders])
+  const deckArchivedVia = (d: DeckType): ArchivedVia =>
+    d.isArchived ? 'self' : d.folderId && archivedFolders.has(d.folderId) ? 'folder' : undefined
+  const folderArchivedVia = (f: FolderType): ArchivedVia =>
+    f.isArchived ? 'self' : archivedFolders.has(f.id) ? 'folder' : undefined
 
   const visibleDecks = decks.filter((d) => {
     const inCurrent = d.folderId === currentFolderId
@@ -453,7 +500,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="px-6 py-8 max-w-[1200px] mx-auto">
+      <div className="px-4 md:px-6 py-6 md:py-8 max-w-[1200px] mx-auto">
         {/* Page intro — Stitch: big title + secondary subtitle */}
         <div className="mb-6">
           <h2 className="text-[32px] font-semibold text-[var(--text-primary)] tracking-tight leading-tight">Library</h2>
@@ -706,6 +753,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     folder={folder}
                     cardCount={totalCards}
                     childCount={childCount}
+                    archivedVia={folderArchivedVia(folder)}
                     onClick={() => navigateToFolder(folder.id)}
                     menuItems={folderMenuItems}
                   />
@@ -714,6 +762,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     key={folder.id}
                     folder={folder}
                     cardCount={totalCards}
+                    archivedVia={folderArchivedVia(folder)}
                     onClick={() => navigateToFolder(folder.id)}
                     menuItems={folderMenuItems}
                   />
@@ -787,6 +836,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     mastery={mastery}
                     dueCount={dueCountByDeck.get(deck.id) ?? 0}
                     newCount={newCountByDeck.get(deck.id) ?? 0}
+                    archivedVia={deckArchivedVia(deck)}
                     onClick={() => openDeck(deck.id)}
                     onStudyClick={setStudyPopupDeck}
                     menuItems={deckMenuItems}
@@ -799,6 +849,7 @@ export function LibraryBrowser({ onNewFolder, onNewDeck, onFolderChange }: Libra
                     deck={deck}
                     cardCount={cardCount}
                     mastery={mastery}
+                    archivedVia={deckArchivedVia(deck)}
                     onClick={() => openDeck(deck.id)}
                     onStudyClick={setStudyPopupDeck}
                     menuItems={deckMenuItems}
@@ -929,6 +980,13 @@ function LibraryTreeTable({
       deleteDeck: s.deleteDeck,
     }))
   )
+
+  // Inherited archive — see the identical markers in the grid/list views.
+  const archivedFolders = useMemo(() => archivedFolderIds(folders), [folders])
+  const treeDeckArchivedVia = (d: DeckType): ArchivedVia =>
+    d.isArchived ? 'self' : d.folderId && archivedFolders.has(d.folderId) ? 'folder' : undefined
+  const treeFolderArchivedVia = (f: FolderType): ArchivedVia =>
+    f.isArchived ? 'self' : archivedFolders.has(f.id) ? 'folder' : undefined
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [movingFolder, setMovingFolder] = useState<FolderType | null>(null)
@@ -1073,6 +1131,7 @@ function LibraryTreeTable({
             <Folder size={15} className={cn('shrink-0', FOLDER_COLORS[folder.color])} />
             <span className="text-sm font-medium text-[var(--text-primary)] truncate">{folder.name}</span>
             {folder.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)] shrink-0" />}
+            <ArchivedDot via={treeFolderArchivedVia(folder)} size={11} />
           </div>
           <div className="col-span-1 text-center text-xs text-[var(--text-muted)]">
             {counts.newCount > 0 ? counts.newCount : '–'}
@@ -1103,6 +1162,7 @@ function LibraryTreeTable({
               {deck.name}
             </span>
             {deck.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)] shrink-0" />}
+            <ArchivedDot via={treeDeckArchivedVia(deck)} size={11} />
           </div>
           <div className={cn('col-span-1 text-center text-xs', counts.newCount > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]')}>
             {counts.newCount > 0 ? counts.newCount : '–'}
@@ -1167,9 +1227,11 @@ function FolderCardGrid({
   folder,
   cardCount,
   childCount,
+  archivedVia,
   onClick,
   menuItems,
 }: {
+  archivedVia: ArchivedVia
   folder: FolderType
   cardCount: number
   childCount: number
@@ -1220,6 +1282,7 @@ function FolderCardGrid({
         </div>
         <div className="flex items-center gap-1.5">
           {folder.isStarred && <Star size={13} className="text-[var(--warning)] fill-[var(--warning)] mt-0.5" />}
+          <ArchivedDot via={archivedVia} size={13} className="mt-0.5" />
           <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--bg-active)] text-[var(--text-secondary)] tracking-wide">
             {childCount} {childCount === 1 ? 'Folder' : 'Folders'}
           </span>
@@ -1240,9 +1303,11 @@ function FolderCardGrid({
 function FolderCardList({
   folder,
   cardCount,
+  archivedVia,
   onClick,
   menuItems,
 }: {
+  archivedVia: ArchivedVia
   folder: FolderType
   cardCount: number
   onClick: () => void
@@ -1288,6 +1353,7 @@ function FolderCardList({
       <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{folder.name}</span>
       <span className="text-xs text-[var(--text-muted)]">{cardCount} cards</span>
       {folder.isStarred && <Star size={11} className="text-[var(--warning)] fill-[var(--warning)]" />}
+      <ArchivedDot via={archivedVia} size={11} />
       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
         <ItemDropdown items={menuItems} />
       </div>
@@ -1297,9 +1363,10 @@ function FolderCardList({
 }
 
 function DeckCardGrid({
-  deck, cardCount, mastery, dueCount, newCount, onClick, onStudyClick, menuItems, checked, onToggleCheck,
+  deck, cardCount, mastery, dueCount, newCount, archivedVia, onClick, onStudyClick, menuItems, checked, onToggleCheck,
 }: {
   deck: DeckType; cardCount: number; mastery: number; dueCount: number; newCount: number
+  archivedVia: ArchivedVia
   onClick: () => void; onStudyClick: (deck: DeckType) => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
 }) {
@@ -1352,6 +1419,7 @@ function DeckCardGrid({
         </div>
         <div className="flex items-center gap-1.5">
           {deck.isStarred && <Star size={13} className="text-[var(--warning)] fill-[var(--warning)] mt-0.5" />}
+          <ArchivedDot via={archivedVia} size={13} className="mt-0.5" />
           {dueCount > 0 && (
             <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--danger-subtle)] text-[var(--danger)] tracking-wide">
               {dueCount} Due
@@ -1402,8 +1470,9 @@ function DeckCardGrid({
 }
 
 function DeckCardList({
-  deck, cardCount, mastery, onClick, onStudyClick, menuItems, checked, onToggleCheck,
+  deck, cardCount, mastery, archivedVia, onClick, onStudyClick, menuItems, checked, onToggleCheck,
 }: {
+  archivedVia: ArchivedVia
   deck: DeckType; cardCount: number; mastery: number
   onClick: () => void; onStudyClick: (deck: DeckType) => void; menuItems: DropdownItem[]
   checked?: boolean; onToggleCheck?: (id: string) => void
@@ -1452,7 +1521,8 @@ function DeckCardList({
       {/* Clickable body */}
       <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer" onClick={onClick}>
         <BookOpen size={14} className="text-[var(--accent)] flex-shrink-0" />
-        <span className="flex-1 text-sm text-[var(--text-primary)] truncate">{deck.name}</span>
+        <span className="flex-1 min-w-0 text-sm text-[var(--text-primary)] truncate">{deck.name}</span>
+        <ArchivedDot via={archivedVia} size={12} />
         <span className="text-xs text-[var(--text-muted)]">{cardCount} cards</span>
         <span className="text-xs text-[var(--text-muted)]">{mastery}%</span>
       </div>
