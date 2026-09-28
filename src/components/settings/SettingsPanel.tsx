@@ -152,7 +152,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Settings</h2>
             <button
-              onClick={onClose}
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
               className="w-6 h-6 flex items-center justify-center rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
               aria-label="Close settings"
             >

@@ -189,7 +189,7 @@ export function Sidebar() {
             </Tooltip>
           )}
           <Tooltip content="Settings" side="right">
-            <button onClick={() => setSettingsOpen((v) => !v)} className="flex items-center justify-center w-11 h-11 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
+            <button onClick={(e) => { e.stopPropagation(); setSettingsOpen((v) => !v); }} className="flex items-center justify-center w-11 h-11 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
               <Settings size={17} />
             </button>
           </Tooltip>
@@ -309,7 +309,7 @@ export function Sidebar() {
         )}
 
         <button
-          onClick={() => setSettingsOpen((v) => !v)}
+          onClick={(e) => { e.stopPropagation(); setSettingsOpen((v) => !v); }}
           className="flex items-center gap-3 px-4 py-2 w-full rounded-lg transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <Settings size={17} className="shrink-0" strokeWidth={1.75} />
