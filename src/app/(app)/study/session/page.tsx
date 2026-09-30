@@ -259,8 +259,20 @@ function SessionContent() {
 
   // Missed (rating 1, non-new) counter for badge and progress segment
   const [missedReviewCount, setMissedReviewCount] = useState(0)
-  // Two-stage session end: 'first' = first pass in progress/done, 'retry' = reviewing missed cards
-  const [sessionPhase, setSessionPhase] = useState<'first' | 'retry'>('first')
+  // Session stages: 'first' = first pass, 'retry' = redo-missed drill (loops
+  // pass after pass until a pass has zero misses), 'done' = completion screen.
+  const [sessionPhase, setSessionPhase] = useState<'first' | 'retry' | 'done'>('first')
+  // Ratings given in the current redo pass (drill-only, never written).
+  // A card with no entry was skipped and counts as still missed.
+  const [retryRatings, setRetryRatings] = useState<Map<string, number>>(new Map())
+  // One entry per rating in this pass, so Undo knows whether the last rating
+  // actually wrote (revert via the undo stack) or was a drill (just step back).
+  const [rateKinds, setRateKinds] = useState<{ kind: 'write' | 'drill'; cardId: string; rating: number }[]>([])
+  // Capped active time (activeTime.ts) of every rating this session — writes,
+  // drills and Missed new-card reshows alike. Length = repetitions; sum = the
+  // New Cards summary's Time Elapsed. Missed new cards leave no review log, so
+  // `logs` alone can't count reshows.
+  const [ratingTimes, setRatingTimes] = useState<number[]>([])
 
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | 'delete' | null>(null)
@@ -389,6 +401,9 @@ function SessionContent() {
     setNewCardCorrectCount(0)
     setMissedReviewCount(0)
     setSessionPhase('first')
+    setRetryRatings(new Map())
+    setRateKinds([])
+    setRatingTimes([])
     if (!burnoutCheckedRef.current && sessionCards.length > 0) {
       burnoutCheckedRef.current = true
       checkBurnoutAndMaybeNudge()
@@ -430,6 +445,9 @@ function SessionContent() {
     setNewCardCorrectCount(pendingRecovery.logs.filter((l) => l.wasNew && l.rating >= 3).length)
     setMissedReviewCount(pendingRecovery.logs.filter((l) => !l.wasNew && l.rating === 1).length)
     setSessionPhase('first')
+    setRetryRatings(new Map())
+    setRateKinds([])
+    setRatingTimes(pendingRecovery.logs.map((l) => l.responseMs ?? 0))
     setPendingRecovery(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRecovery])
@@ -618,6 +636,8 @@ function SessionContent() {
       }
 
       ratingInFlightRef.current = true
+      const ratedMs = cardTimerRef.current?.cappedElapsed() ?? 0
+      setRatingTimes((t) => [...t, ratedMs])
 
       const isNew = (useLibraryStore.getState().fsrsData[card.id]?.state ?? 'new') === 'new'
 
@@ -627,6 +647,9 @@ function SessionContent() {
         setTimeout(() => {
           setAnimatingOut(null)
           requeueCurrentCard()
+          // The next card appears at the same index, so the index-keyed
+          // timer reset never fires — restart it here instead.
+          cardTimerRef.current?.reset()
           setHistory((h) => [...h, currentIndex])
           ratingInFlightRef.current = false
         }, 120)
@@ -652,11 +675,25 @@ function SessionContent() {
       // counters; it just leaves no trace in the store or on the server.
       const isRetryPass = sessionPhase === 'retry'
       const isExamWeakest = modeParam === 'weakest'
+      //  - Any card that is not in today's Reviews set right now. Whatever
+      //    screen the session was opened from (cram, random, failed-only,
+      //    deck-all, "Review Again", a resumed snapshot), a rating only lands
+      //    if the card is genuinely due per `getReviewsDue` — which already
+      //    applies the once-per-day rule (`answeredToday`) AND its same-day
+      //    graduation exemption (`graduatedTodayIds`). Reusing that exact
+      //    predicate is deliberate: a card that graduated today is in the
+      //    Reviews set, so its first review still writes (CLAUDE.md Rules);
+      //    after that it drops out and further ratings today are drills.
+      //
       // Weakest may still teach a genuinely new card for the first time; the
       // retry pass may not write anything at all.
-      const drillOnly = isRetryPass || (isExamWeakest && !isNew)
+      const inReviewsToday =
+        isNew || useLibraryStore.getState().getReviewsDue().some((c) => c.id === card.id)
+      const drillOnly = isRetryPass || (isExamWeakest && !isNew) || !inReviewsToday
 
       if (drillOnly) {
+        if (isRetryPass) setRetryRatings((m) => new Map(m).set(card.id, rating))
+        setRateKinds((k) => [...k, { kind: 'drill', cardId: card.id, rating }])
         if (rating === 1) setMissedReviewCount((c) => c + 1)
         setHistory((h) => [...h, currentIndex])
         setAnimatingOut(rating === 1 ? 'left' : 'right')
@@ -702,6 +739,7 @@ function SessionContent() {
       if (prevFSRS) {
         const postReviewUpdatedAt = useLibraryStore.getState().fsrsData[card.id]?.updatedAt
         pushUndo(card.id, prevFSRS, logId, isNew, rating, postReviewUpdatedAt)
+        setRateKinds((k) => [...k, { kind: 'write', cardId: card.id, rating }])
       }
       setHistory((h) => [...h, currentIndex])
 
@@ -719,6 +757,29 @@ function SessionContent() {
 
   /* ── Undo last review ── */
   const handleUndo = useCallback(() => {
+    const last = rateKinds[rateKinds.length - 1]
+    // Last rating was a drill: it wrote nothing, so there is nothing to revert
+    // in the store — just step back to that card.
+    if (last?.kind === 'drill') {
+      setRateKinds((k) => k.slice(0, -1))
+      setRatingTimes((t) => t.slice(0, -1))
+      setRetryRatings((m) => {
+        const next = new Map(m)
+        next.delete(last.cardId)
+        return next
+      })
+      if (last.rating === 1) setMissedReviewCount((c) => Math.max(0, c - 1))
+      decrementIndex()
+      useAppStore.getState().addToast({ type: 'info', message: 'Undid last rating', duration: 2000 })
+      return
+    }
+    // In the redo pass the undo stack only holds first-pass reviews; undoing
+    // one from here would rewrite a schedule from inside the drill.
+    if (sessionPhase === 'retry') {
+      useAppStore.getState().addToast({ type: 'info', message: 'Nothing to undo', duration: 2000 })
+      return
+    }
+    if (last) setRateKinds((k) => k.slice(0, -1))
     const entry = popUndo()
     if (!entry) return
     // Guard against a pre-FSRS-only recovery snapshot missing the field
@@ -741,6 +802,7 @@ function SessionContent() {
       useLibraryStore.getState().setFSRSData(entry.cardId, entry.prevFSRS)
     }
     useHistoryStore.getState().removeLastLog()
+    setRatingTimes((t) => t.slice(0, -1))
     decrementIndex()
     if (entry.isNew) {
       setNewCardReviewedCount((c) => Math.max(0, c - 1))
@@ -752,7 +814,7 @@ function SessionContent() {
       if (entry.rating === 1) setMissedReviewCount((c) => Math.max(0, c - 1))
     }
     useAppStore.getState().addToast({ type: 'info', message: 'Undid last review', duration: 2000 })
-  }, [popUndo, decrementIndex])
+  }, [popUndo, decrementIndex, rateKinds, sessionPhase])
 
   /* ── Go back one card in history ── */
   function handleBack() {
@@ -942,12 +1004,46 @@ function SessionContent() {
   // session-end missed-cards retry, or Planner "Study Weakest". Nothing in a
   // drill may modify an already-scheduled card's review status.
   const isDrillContext = sessionPhase === 'retry' || modeParam === 'weakest'
+  // Undo is offered for a drill rating (step back) or a real write — but in the
+  // redo pass never for first-pass reviews (see handleUndo).
+  const canUndo = rateKinds.length > 0 || (sessionPhase !== 'retry' && undoStack.length > 0)
 
-  const isFirstPassDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'first'
-  const isSessionDone = loaded && queue.length > 0 && currentIndex >= queue.length && sessionPhase === 'retry'
+  // A session that did anything must end on the summary — including one whose
+  // queue emptied because its last card(s) were deleted, which used to fall
+  // through to the "All caught up" start screen instead.
+  const hadActivity = ratingTimes.length > 0 || logs.length > 0
+  const isFirstPassDone = loaded && (queue.length > 0 || hadActivity) && currentIndex >= queue.length && sessionPhase === 'first'
+  const isRetryPassDone = loaded && currentIndex >= queue.length && sessionPhase === 'retry'
+  const isSessionDone = sessionPhase === 'done'
   const isComplete = isFirstPassDone || isSessionDone
+
+  // Redo-missed loop: at the end of each pass, re-run only the cards still
+  // missed (rated Missed, or skipped). The drill ends only after a full pass
+  // with zero misses. Drill ratings never write, so looping is side-effect free.
+  useEffect(() => {
+    if (!isRetryPassDone) return
+    const stillMissed = queue.filter((c) => (retryRatings.get(c.id) ?? 1) === 1)
+    if (stillMissed.length === 0) {
+      // A pass can end by rating, skip or delete — reacting here, once, beats
+      // duplicating the transition into each of those handlers.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSessionPhase('done')
+      return
+    }
+    reorderQueue(stillMissed, 0)
+    setRetryRatings(new Map())
+    setRateKinds([])
+    setHistory([])
+    setMissedReviewCount(0)
+    useAppStore.getState().addToast({
+      type: 'info',
+      message: `${stillMissed.length} still missed — going again`,
+      duration: 2500,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRetryPassDone])
   const isLoading = !loaded
-  const hasNoCards = loaded && queue.length === 0
+  const hasNoCards = loaded && queue.length === 0 && !hadActivity && sessionPhase === 'first'
 
   // Missed cards from first pass (for intermediate screen and retry queue)
   const firstPassMissedCards: Card[] = isFirstPassDone ? (() => {
@@ -1043,6 +1139,9 @@ function SessionContent() {
               reorderQueue(firstPassMissedCards, 0)
               setSessionPhase('retry')
               setMissedReviewCount(0)
+              setRetryRatings(new Map())
+              setRateKinds([])
+              setHistory([])
             }}
             className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
             style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
@@ -1051,7 +1150,7 @@ function SessionContent() {
             Review missed cards ({missedN})
           </button>
           <button
-            onClick={() => setSessionPhase('retry')}
+            onClick={() => setSessionPhase('done')}
             className="w-full text-center text-[15px] py-4 rounded-[var(--radius-lg)] transition-colors hover:bg-[var(--bg-hover)]"
             style={{ color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}
           >
@@ -1073,6 +1172,29 @@ function SessionContent() {
     // card's capped foreground time. Sitting on this screen adds nothing.
     const elapsed = Math.round(activeStudyMs(logs) / 1000)
 
+    // New Cards sessions get their own tiles: every rating in them is a first
+    // exposure, so the review-only Accuracy/Cards/Correct above are all 0.
+    const isNewSession = resolvedMode === 'new-only' || resolvedMode === 'deck-new'
+    // Same definition as Stats' "Total cards learned": left New this session.
+    const learned = logs.filter((l) => l.wasNew && l.rating >= 3).length
+    // Every time a card was rated, Missed reshows included.
+    const repetitions = ratingTimes.length
+    const newElapsed = Math.round(ratingTimes.reduce((a, b) => a + b, 0) / 1000)
+    const reshows = Math.max(0, repetitions - learned)
+    const learnPct = repetitions > 0 ? Math.round((learned / repetitions) * 100) : 0
+
+    const tiles: { label: string; value: string; sub?: string; accent?: boolean }[] = isNewSession
+      ? [
+          { label: 'Time Elapsed', value: formatDuration(newElapsed), accent: true },
+          { label: 'Cards Learned', value: String(learned) },
+          { label: 'Repetitions', value: String(repetitions) },
+        ]
+      : [
+          { label: 'Accuracy', value: `${accuracy}%`, accent: true },
+          { label: 'Cards', value: String(totalLogged), sub: `${formatDuration(elapsed)} elapsed` },
+          { label: 'Correct', value: String(correct) },
+        ]
+
     return (
       <div className="flex flex-col items-center justify-center flex-1 p-6 focus-gradient">
         <div className="w-full max-w-[640px] animate-fade-in space-y-6">
@@ -1080,18 +1202,14 @@ function SessionContent() {
           <div className="text-center space-y-2">
             <p className="meta-label text-[var(--text-muted)]">Session Summary</p>
             <h1 className="text-[28px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              You&apos;ve completed your review{deckName && deckName !== 'All cards' ? ' of ' : '.'}
+              {isNewSession ? 'You’ve finished learning' : 'You’ve completed your review'}{deckName && deckName !== 'All cards' ? (isNewSession ? ' ' : ' of ') : '.'}
               {deckName && deckName !== 'All cards' && <span style={{ color: 'var(--accent)' }}>{deckName}</span>}
             </h1>
           </div>
 
           {/* Stat tiles — mono labels, display numbers */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              { label: 'Accuracy', value: `${accuracy}%`, accent: true },
-              { label: 'Cards', value: String(totalLogged), sub: `${formatDuration(elapsed)} elapsed` },
-              { label: 'Correct', value: String(correct) },
-            ].map(({ label, value, sub, accent }) => (
+            {tiles.map(({ label, value, sub, accent }) => (
               <div key={label} className="card-surface p-6 text-center">
                 <p className="meta-label text-[var(--text-secondary)] mb-3">{label}</p>
                 <p className="text-[2.25rem] font-semibold tracking-tight leading-none" style={{ color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>
@@ -1106,11 +1224,21 @@ function SessionContent() {
           <div className="card-surface p-6">
             <div className="flex justify-between mb-3">
               <span className="font-mono text-[13px]" style={{ color: 'var(--text-secondary)' }}>Recall Breakdown</span>
-              <span className="font-mono text-[13px]" style={{ color: totalLogged - correct > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                {totalLogged - correct} {totalLogged - correct === 1 ? 'card' : 'cards'} missed
-              </span>
+              {isNewSession ? (
+                <span className="font-mono text-[13px]" style={{ color: reshows > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                  {reshows} {reshows === 1 ? 'reshow' : 'reshows'}
+                </span>
+              ) : (
+                <span className="font-mono text-[13px]" style={{ color: totalLogged - correct > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                  {totalLogged - correct} {totalLogged - correct === 1 ? 'card' : 'cards'} missed
+                </span>
+              )}
             </div>
-            <Progress value={accuracy} max={100} size="lg" color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
+            {isNewSession ? (
+              <Progress value={learnPct} max={100} size="lg" color={learnPct >= 80 ? 'success' : learnPct >= 60 ? 'accent' : 'danger'} />
+            ) : (
+              <Progress value={accuracy} max={100} size="lg" color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
+            )}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -1132,6 +1260,9 @@ function SessionContent() {
                 setNewCardCorrectCount(0)
                 setMissedReviewCount(0)
                 setSessionPhase('first')
+                setRetryRatings(new Map())
+                setRateKinds([])
+                setRatingTimes([])
               }}
               className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
               style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
@@ -1140,12 +1271,12 @@ function SessionContent() {
               Review Again
             </button>
             <button
-              onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/study') }}
+              onClick={() => { isExitingRef.current = true; clearRecovery(); endLibrarySession(); reset(); router.push('/') }}
               className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] transition-colors hover:bg-[var(--bg-hover)]"
               style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
               <ArrowLeft size={16} />
-              Back to Study
+              Back to Dashboard
             </button>
           </div>
         </div>
@@ -1504,7 +1635,7 @@ function SessionContent() {
       >
         <div className="flex-1 flex items-center gap-2 min-w-0">
           {/* ↩ Undo */}
-          {undoStack.length > 0 && (
+          {canUndo && (
             <button
               onClick={handleUndo}
               className="flex items-center justify-center w-12 h-12 rounded-lg transition-colors hover:bg-[var(--bg-active)] active:scale-90 shrink-0"
@@ -1515,7 +1646,7 @@ function SessionContent() {
             </button>
           )}
 
-          {!zenMode && undoStack.length > 0 && (
+          {!zenMode && canUndo && (
             <div className="h-6 w-px mx-2 shrink-0" style={{ background: 'var(--border)' }} />
           )}
 

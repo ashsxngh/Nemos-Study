@@ -447,3 +447,15 @@ it before appending — don't paste the full chat response in.
 ### Fix: Settings button no longer opens panel (event propagation bug)
 
 **Root cause:** Button's click event bubbled to backdrop, which immediately closed the panel — `setSettingsOpen(true)` then `setSettingsOpen(false)` in same event cycle. Happened after toggle fix because previous `setSettingsOpen(true)` always-true pattern masked the propagation bug; toggle exposes it. **Fix:** Added `e.stopPropagation()` to both settings buttons (collapsed + expanded) and close button in SettingsPanel header. Now: open/close toggles correctly, backdrop click closes without interference, Escape closes without interference.
+
+### Fix: settings panel rendered as a faint vertical line
+
+Prompt: settings tap shows only a faint white line; investigate CSS/positioning. **Root cause:** the mobile-drawer `translate` on `<aside>` made it the containing block for the panel's `position: fixed`, so the panel collapsed to zero width. **Fix:** portal the panel to `<body>`; the offset now follows the sidebar's real width.
+
+### Redo-missed loop + once-per-day write gate
+
+Prompt: refix redo-missed screen; audit all card interfaces. **Found:** redo pass ran once; Undo there reverted first-pass reviews; cram/random/failed/"Review Again" re-rated answered cards. **Fix:** redo loops until zero misses; `handleRate` writes only if new or in `getReviewsDue`.
+
+### Session summary: always shown, dashboard exit, New Cards tiles
+
+Prompt: summary always at session end; Back→Dashboard; New Cards metrics. **Fix:** queue emptied by deletes now reaches summary; button routes `/`; New Cards sessions show Time Elapsed/Cards Learned/Repetitions from per-rating capped times.

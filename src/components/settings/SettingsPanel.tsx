@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Sun, Brain, Bell, Keyboard, Database, AlertTriangle, Activity } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store/useAppStore'
@@ -114,7 +115,9 @@ function SectionHeading({ icon: Icon, label }: SectionHeadingProps) {
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
-  const { theme, setTheme } = useAppStore(useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme })))
+  const { theme, setTheme, sidebarCollapsed } = useAppStore(
+    useShallow((s) => ({ theme: s.theme, setTheme: s.setTheme, sidebarCollapsed: s.sidebarCollapsed }))
+  )
   const settings = useSettingsStore()
   const { updateSettings } = settings
 
@@ -128,21 +131,28 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  // Portalled to <body>: the panel is mounted inside the sidebar <aside>, which
+  // carries a `translate` (mobile drawer). Any transform makes the aside the
+  // containing block for `position: fixed` descendants, so `fixed inset-0`
+  // collapsed to the aside's own box — a zero-width sliver showing only the
+  // panel's border. Offset tracks the real rail width (0 on mobile).
+  return createPortal(
     <>
       {/* Fixed overlay positioned after the sidebar */}
       <div
-        className="fixed inset-0 z-40"
-        style={{ left: 'var(--sidebar-width, 220px)' }}
+        className={cn(
+          'fixed inset-0 z-40 left-0',
+          sidebarCollapsed ? 'md:left-16' : 'md:left-[260px]'
+        )}
       >
         {/* Backdrop */}
         <div className="absolute inset-0 bg-black/30" onClick={onClose} />
 
         {/* Panel */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-full max-w-[480px] max-w-full bg-[var(--bg-surface)] border-r border-[var(--border)] overflow-y-auto shadow-2xl flex flex-col"
+          className="absolute left-0 top-0 bottom-0 w-full md:w-[25vw] md:min-w-[360px] bg-[var(--bg-surface)] border-r border-[var(--border)] overflow-y-auto shadow-2xl flex flex-col"
           style={{
             transform: open ? 'translateX(0)' : 'translateX(-100%)',
             transition: 'transform 0.2s ease',
@@ -371,6 +381,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   )
 }
