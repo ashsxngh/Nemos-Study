@@ -31,7 +31,7 @@ import { useLibraryStore } from '@/store/useLibraryStore'
 import { useSettingsStore } from '@/store/useSettingsStore'
 import { useAppStore } from '@/store/useAppStore'
 import { cn, truncate, formatDate } from '@/lib/utils'
-import { toLocalDateStr } from '@/lib/formatDate'
+import { useHistoryStore } from '@/store/useHistoryStore'
 import { fsrsRetrievability } from '@/lib/srs'
 import type { FSRSState } from '@/lib/srs'
 import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
@@ -261,6 +261,7 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
   const {
     decks, allCards, fsrsData,
     getDeckCards, getDeckMastery, deleteCard, deleteCardsBatch, updateCardsBatch, resetCardSRS,
+    getDueTodayIds,
   } = useLibraryStore(
     useShallow((s) => ({
       decks: s.decks,
@@ -272,7 +273,13 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
       deleteCardsBatch: s.deleteCardsBatch,
       updateCardsBatch: s.updateCardsBatch,
       resetCardSRS: s.resetCardSRS,
+      getDueTodayIds: s.getDueTodayIds,
     }))
+  )
+  const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const dueTodayIds = useMemo(
+    () => getDueTodayIds(deckId),
+    [allCards, fsrsData, reviewLogs, deckId, getDueTodayIds]
   )
   const deck = decks.find((d) => d.id === deckId)
   const cards = useMemo(() => getDeckCards(deckId), [allCards, deckId, getDeckCards])
@@ -531,7 +538,10 @@ export function DeckView({ deckId, onStudy }: DeckViewProps) {
               <div className="space-y-1">
                 {cards.map((card, idx) => {
                   const fs = fsrsData[card.id]
-                  const due = fs ? toLocalDateStr(new Date(fs.dueDate)) <= toLocalDateStr(new Date()) : true
+                  // Learned cards: exactly the Reviews-queue rule (same-day
+                  // graduation + once-per-day). New cards keep their existing
+                  // "Due" badge (they are always available to learn).
+                  const due = !fs || fs.state === 'new' ? true : dueTodayIds.has(card.id)
                   const masteryPct = fs && fs.state !== 'new'
                     ? Math.round(fsrsRetrievability(fs) * 100)
                     : null

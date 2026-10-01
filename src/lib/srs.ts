@@ -29,9 +29,7 @@
 
 import {
   createEmptyCard,
-  default_learning_steps,
   default_maximum_interval,
-  default_relearning_steps,
   default_request_retention,
   default_w,
   forgetting_curve,
@@ -118,13 +116,24 @@ export const FSRS6_DEFAULT_WEIGHTS: readonly number[] = default_w
 export const FSRS_WEIGHT_COUNT = default_w.length
 
 /**
- * Learning/relearning steps. These are the library's own defaults; FSRS-6 (with
- * `enable_short_term`) runs the short-term step machine itself, which is what
- * gives Nemos its intended "a new card you just answered is still reachable
- * today" behaviour without any Nemos-side graduation override.
+ * Learning/relearning steps — intentionally EMPTY. A new card graduates
+ * straight to `State.Review` on its first answer (any grade), and a lapse on a
+ * review card stays in `State.Review` with a day-level interval. There is no
+ * sub-day 1m/10m step machine.
+ *
+ * Same-day visibility in Reviews (the hard same-day-graduation rule, see
+ * CLAUDE.md) is NOT provided by a step any more: the just-graduated card's
+ * dueDate is already tomorrow+, and `graduatedTodayIds()` in useLibraryStore
+ * keeps it in today's Reviews regardless of dueDate until it is answered there.
+ * That same-day Reviews answer then goes through FSRS-6's short-term stability
+ * path (`enable_short_term`), which is what earns the longer first gap.
+ *
+ * Legacy rows persisted in 'learning'/'relearning' with `learningSteps > 0`
+ * self-heal: with empty steps the step strategy returns no step, so their next
+ * answer lands in `State.Review` with a real FSRS interval.
  */
-export const LEARNING_STEPS: readonly StepUnit[] = default_learning_steps
-export const RELEARNING_STEPS: readonly StepUnit[] = default_relearning_steps
+export const LEARNING_STEPS: readonly StepUnit[] = []
+export const RELEARNING_STEPS: readonly StepUnit[] = []
 
 /**
  * The three FSRS knobs Nemos persists in `useSettingsStore` / syncs via
@@ -174,10 +183,14 @@ export function fsrsParameters(settings: NemosFsrsSettings = {}): FSRSParameters
     // Official FSRS fuzz — spreads same-interval cards across nearby days so
     // review load doesn't clump. Nemos adds no fuzz of its own on top.
     enable_fuzz: true,
-    // Short-term (learning/relearning step) scheduling, FSRS-6's own.
+    // FSRS-6 short-term stability for same-day reviews. MUST stay true: it is
+    // what makes the same-day Reviews answer of a just-graduated card count.
     enable_short_term: true,
-    learning_steps: default_learning_steps,
-    relearning_steps: default_relearning_steps,
+    // Steps are intentionally empty — a new card graduates on its first
+    // answer; same-day visibility in Reviews is provided by graduatedTodayIds()
+    // in useLibraryStore, NOT by a sub-day step.
+    learning_steps: [...LEARNING_STEPS],
+    relearning_steps: [...RELEARNING_STEPS],
   })
 }
 

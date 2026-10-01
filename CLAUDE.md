@@ -32,6 +32,19 @@ down. If it fails, the bug is in your change. The mechanism lives in
 `graduatedTodayIds()` in `src/store/useLibraryStore.ts`, which every
 `answeredToday()` gate must be paired with.
 
+**Mechanism (since Oct 2026):** FSRS learning/relearning steps are **empty**
+(`LEARNING_STEPS`/`RELEARNING_STEPS` in `src/lib/srs.ts`), so a new card's
+first answer graduates it straight to `review` with a real dueDate of
+tomorrow+. Same-day graduation is therefore a *queue* rule, not a schedule
+rule: `graduatedTodayIds()` (a `wasNew` log today with no ordinary log since,
+OR the review_logs-lag fallback: row past `new`, `repetitions === 1`, reviewed
+today, no log today on this device) keeps the card in today's Reviews
+**regardless of dueDate**, via the shared `isReviewDueToday()` predicate used
+by `getReviewsDue`, `getDeckDueCount` and `getDueTodayIds` (DeckView badge).
+The same-day Reviews answer then goes through FSRS-6's short-term stability
+path (`enable_short_term` MUST stay true). `src/store/learningLifecycle.test.ts`
+locks the resulting intervals against a bare ts-fsrs replay.
+
 # Sync architecture (`src/hooks/useSync.ts`)
 
 `useSync` is a single React hook mounted once at the app layout level. It owns all Supabase communication.
@@ -171,7 +184,7 @@ Two bugs reported still-present with screenshots. **Bug 1 root cause:** `CreateD
 Prompt (verbatim, condensed): 5 cards in `learning`/`relearning` state with today's-date `due_date` weren't appearing in the Reviews list; asked to check state filtering, a separate learning-steps queue, `toLocalDateStr` date-boundary bugs, and orphaned rows before fixing. **Root cause: none of the 4 — `getReviewsDue` (`useLibraryStore.ts:666`) used an exact-timestamp compare (`new Date(fs.dueDate) <= now`)**, so cards due later the same local calendar day (confirmed via live server `now()` vs. `due_date`, ~15–25h out) correctly didn't show yet — timezone-agnostic and consistent with the raw instant, just inconsistent with the day-granularity `getDeckDueCount` badges elsewhere. No orphans, no archived decks/folders, no separate queue. **User asked to switch to calendar-day granularity.** Fix: `getReviewsDue` now uses `toLocalDateStr(dueDate) <= toLocalDateStr(now)`, matching `getDeckDueCount`'s convention — a card due later today now shows immediately rather than at its exact minute. Kept consistent in two related call sites: `examScheduler.ts`'s `getPulledForwardCardIds` "already due — regular queue handles it" exclusion (was exact-timestamp, would've double-counted pull-forward load for same-day cards), and `DeckView.tsx`'s per-card Due badge (the literal "folder view" from the bug report, previously exact-timestamp same as the old Reviews check). `tsc --noEmit` + `next build` both clean.
 
 ### Scheduler migration: custom "FSRS-5" replaced by official ts-fsrs 5.4.1 (FSRS-6)
-Prompt (verbatim, condensed): replace the hand-written `src/lib/srs.ts` mathematics with the official Open Spaced Repetition `ts-fsrs` library as the single source of truth (FSRS-6, 21 params, official defaults/fuzz/learning-steps, no home-grown optimizer); keep the two-button UX; preserve review history; audit first, then verify with tsc/lint/build/tests. **`srs.ts` is now a thin adapter** (`FSRSState` ⇄ ts-fsrs `Card`, `fsrsReview`/`fsrsRetrievability`/`fsrsParameters`); `fsrsSchedule`, `withFuzz`, `optimizeFsrsWeights` and the duplicated forgetting curves in `examScheduler.ts`/`StatsPage.tsx` are gone, and the Nemos same-day-graduation override was **deleted** because FSRS-6's own learning steps (`1m,10m`) already keep a just-answered new card due today. **Two-button mapping: Forgot → `Rating.Again` (1), Remembered → `Rating.Good` (3)** — never Easy. **Migration** (`src/lib/fsrsMigration.ts`, one-time, per-row `schedulerVersion` stamp): old S/D are not FSRS-6 values, so reviewed cards are *reconstructed by replaying their real `review_logs` through the official scheduler* — live data split 110 replayed / 288 re-created as new / **0 unrecoverable**; ratings replay verbatim (no rewriting), so 42/110 cards carry the old Remembered→Easy grade-4 distortion and normalise as new grade-3 reviews land. New DB columns `learning_steps`/`scheduler_version` (+ `scheduled_days` now genuinely used) — `migration-fsrs6.sql`, **already applied**. Also fixed a **pre-existing latent race**: `await persist.rehydrate()` resolves while `hasHydrated()` is still false, so the migration (and `migrateLegacyIds`/`migrateHistoryToOwnStore`) could read an empty `reviewLogs` — new `ensureHydrated()` plus a `FsrsMigrationUnsafeError` bail-out prevent a mass reset. 52 unit tests (differential vs. a bare `fsrs()` instance) + 30 live browser assertions all pass; tsc/build clean, lint at baseline.
+Prompt (verbatim, condensed): replace the hand-written `src/lib/srs.ts` mathematics with the official Open Spaced Repetition `ts-fsrs` library as the single source of truth (FSRS-6, 21 params, official defaults/fuzz/learning-steps, no home-grown optimizer); keep the two-button UX; preserve review history; audit first, then verify with tsc/lint/build/tests. **`srs.ts` is now a thin adapter** (`FSRSState` ⇄ ts-fsrs `Card`, `fsrsReview`/`fsrsRetrievability`/`fsrsParameters`); `fsrsSchedule`, `withFuzz`, `optimizeFsrsWeights` and the duplicated forgetting curves in `examScheduler.ts`/`StatsPage.tsx` are gone, and the Nemos same-day-graduation override was **deleted** because FSRS-6's own learning steps (`1m,10m`) already keep a just-answered new card due today (*⚠️ superseded Oct 2026: steps are now empty — see Rules › Same-day graduation*). **Two-button mapping: Forgot → `Rating.Again` (1), Remembered → `Rating.Good` (3)** — never Easy. **Migration** (`src/lib/fsrsMigration.ts`, one-time, per-row `schedulerVersion` stamp): old S/D are not FSRS-6 values, so reviewed cards are *reconstructed by replaying their real `review_logs` through the official scheduler* — live data split 110 replayed / 288 re-created as new / **0 unrecoverable**; ratings replay verbatim (no rewriting), so 42/110 cards carry the old Remembered→Easy grade-4 distortion and normalise as new grade-3 reviews land. New DB columns `learning_steps`/`scheduler_version` (+ `scheduled_days` now genuinely used) — `migration-fsrs6.sql`, **already applied**. Also fixed a **pre-existing latent race**: `await persist.rehydrate()` resolves while `hasHydrated()` is still false, so the migration (and `migrateLegacyIds`/`migrateHistoryToOwnStore`) could read an empty `reviewLogs` — new `ensureHydrated()` plus a `FsrsMigrationUnsafeError` bail-out prevent a mass reset. 52 unit tests (differential vs. a bare `fsrs()` instance) + 30 live browser assertions all pass; tsc/build clean, lint at baseline.
 
 ### Fix: `createBrowserClient` "project's URL and API key are required" on login/signup — stale Turbopack dev cache
 Prompt (verbatim, condensed): runtime `@supabase/ssr` error from a login/signup submit (`src_03-bs0k._.js`) despite a structurally-correct `.env.local`; asked to check hidden characters/encoding as raw bytes, conflicting `.env*` files and Next precedence, key truncation, the var names used in `client.ts` vs the file, dev-server restart, and whether it's a Turbopack/Next 16.2.6 env-loading quirk — report root cause before fixing, verify with tsc/build, leave unstaged.
@@ -187,9 +200,9 @@ Prompt (verbatim, condensed): (7, first) search the whole codebase for a hardcod
 
 **3 — already implemented exactly as specified; nothing was missing.** All three retention computations (`StatsPage.tsx:199`, `PeriodStats.tsx:37`, `StatsOverview.tsx:41`) are already derived live from synced `review_logs`, already exclude `wasNew`, already use the `rating >= 2` threshold, and already bucket by local day via `toLocalDateStr`. No persisted state, no new fields. It "didn't persist" because the review_logs themselves were being deleted locally by the truncated pull (server kept all 2545 — `mergeKeepLocal` drops rows without queuing a delete). Fixed by item 7; **no code change**.
 
-**5 — not a scheduler bug; same root cause.** Traced standalone `ts-fsrs` (steps `1m,10m`, fuzz off): Good→Good→Good→Good yields 0.007d → 2d → 7d → 23d, and across a day boundary 0.007d → 7d → 23d — compounding correctly. Live data agrees: review-state cards average `scheduled_days` 25.9, with exactly one card at 1 day. So no reset happens *between* reviews; the card returning is a card whose fsrs row was destroyed by the truncated pull and re-created as new. Note the intended progression is FSRS-6's 2d→7d→23d, not "1 day → 3 days". Hardened as defence-in-depth: `runPull`'s backfill now **reconstructs from real `review_logs` via `replayCardHistory`** instead of stamping `state:'new'` on a card that has history (result left unstamped so any real row still wins).
+**5 — not a scheduler bug; same root cause.** Traced standalone `ts-fsrs` (steps `1m,10m` — *⚠️ superseded Oct 2026: steps now empty*, fuzz off): Good→Good→Good→Good yields 0.007d → 2d → 7d → 23d, and across a day boundary 0.007d → 7d → 23d — compounding correctly. Live data agrees: review-state cards average `scheduled_days` 25.9, with exactly one card at 1 day. So no reset happens *between* reviews; the card returning is a card whose fsrs row was destroyed by the truncated pull and re-created as new. Note the intended progression is FSRS-6's 2d→7d→23d, not "1 day → 3 days". Hardened as defence-in-depth: `runPull`'s backfill now **reconstructs from real `review_logs` via `replayCardHistory`** instead of stamping `state:'new'` on a card that has history (result left unstamped so any real row still wins).
 
-**1 — every path audited; guarded the silent ones.** `reviewCard` has exactly **one** call site (`session/page.tsx:635`). Other writers: `setFSRSData` (undo only, already recency-checked against `postReviewUpdatedAt`), `resetCardSRS` (explicit user action), trash/undo restore, the one-time `migrateFsrsToV6`, `pickFresherFsrs` (legitimate cross-device sync), and `runPull`'s backfill. The one genuinely *silent* rescheduler was the backfill — it now refuses any card with a review logged today, and reconstructs rather than resets otherwise. **Deliberately not implemented: a literal "no schedule write at all today" lock.** FSRS-6's learning steps are sub-day by design (rate at 1m, rate again at 10m → graduate), so a strict same-day lock would break new-card graduation — and item 5's own premise ("graduates into Reviews same-day … rate it correctly in Reviews") depends on the second same-day rating landing. The lock is therefore scoped to background/automatic mechanisms, which is what was actually leaking.
+**1 — every path audited; guarded the silent ones.** `reviewCard` has exactly **one** call site (`session/page.tsx:635`). Other writers: `setFSRSData` (undo only, already recency-checked against `postReviewUpdatedAt`), `resetCardSRS` (explicit user action), trash/undo restore, the one-time `migrateFsrsToV6`, `pickFresherFsrs` (legitimate cross-device sync), and `runPull`'s backfill. The one genuinely *silent* rescheduler was the backfill — it now refuses any card with a review logged today, and reconstructs rather than resets otherwise. **Deliberately not implemented: a literal "no schedule write at all today" lock.** FSRS-6's learning steps are sub-day by design (rate at 1m, rate again at 10m → graduate — *⚠️ superseded Oct 2026: steps now empty*), so a strict same-day lock would break new-card graduation — and item 5's own premise ("graduates into Reviews same-day … rate it correctly in Reviews") depends on the second same-day rating landing. The lock is therefore scoped to background/automatic mechanisms, which is what was actually leaking.
 
 **4 — two violations found, both fixed.** Both ran through the same ungated `handleRate`. (a) The session-end **missed-cards pass** (`sessionPhase === 'retry'`) called `reviewCard()` and logged — re-grading cards answered minutes earlier and overwriting the first pass's real schedule. (b) **Planner "Study Weakest"** (`?mode=weakest`) did the same for cards already in review/relearning. `handleRate` now computes `drillOnly` and, when set, advances the queue and updates in-session counters only — no `reviewCard()`, no `addLog`, no undo entry. Weakest still permits a **new** card's first exposure, per the rule. Plain `?mode=cram` is deliberately untouched: it is reached from StudyHub/inbox/reviews, i.e. inside the Reviews area, not from the Planner.
 
@@ -202,7 +215,7 @@ Files touched: `src/hooks/useSync.ts` (paginated every pull read; replay-based, 
 ### Nine-item pass: active-time study tracking, answered-today due rule, folder move-to-root, sidebar/library/chart tweaks, full FSRS write-site audit
 Prompt (verbatim, condensed): (1) Remove the standalone "DECKS" section (deck list + "+ New Deck") from the persistent sidebar entirely; confirm nothing depends on it and flag rather than silently break. (2) Stats retention graph draws a gap/false zero on missed days — make it draw straight through to the next real point using the charting library's own connect-nulls option, not fabricated data points. (3) Default Library deck sort → date created, newest first, without overriding a user's explicitly chosen sort if one is saved. (4) Folders lack the move-to-root mechanism decks have — investigate how decks do it and apply the same UI pattern to folders. (5) Full refix of study time: cap a single card's contribution at 60s; count only while the tab is visible and the window focused (Page Visibility API + focus/blur), stopping immediately on background/minimise/blur; apply to per-card responseMs and to total session/study-time aggregation; cap the existing responseMs consumers (avg response time, burnout pace) too. (6) Re-investigate "same card two days in a row" — do NOT reuse the prior truncated-pull conclusion; pick a live card, pull its full fsrs_data + review_logs via MCP, run the identical inputs through ts-fsrs standalone and compare against what was actually written; also check whether it is really item 7 (correct due_date, miscounted/redisplayed) and report which is happening. (7) Reviews counter only decrements on correct answers — a wrong answer should still decrement it (the card was reviewed; it just returns sooner). (8) Re-verify the missed-cards retry gating end to end: zero writes to fsrs_data, review_logs, or any store field feeding scheduling — including local UI state that later syncs; report the full trace. (9) Exhaustive sweep of every FSRS write site — all reviewCard() call sites, direct fsrsData/fsrs_data writes, all Planner/exam study features, quick-study/cram/practice/preview, card editor side effects, import/restore overwrite paths, keyboard/quick actions, bulk operations, undo/redo; report the complete list before gating, then fix every violation. Report root cause with file/line evidence per item, verify with `tsc --noEmit` + `next build`, leave unstaged.
 
-**6 — NOT the prior conclusion, and not a scheduler bug: the written due_dates are exactly right.** Replayed two live cards' complete `review_logs` through a bare `ts-fsrs` instance and compared field-by-field against `fsrs_data`. Card `8e942232` (2 logs): replay gives S=7.3153 D=2.1112 state=review reps=2 — stored row is **identical**, `scheduled_days` differing only by official fuzz (3 vs 2). Card `552a6b12` (4 logs, last=Again): replay gives S=1.4294 D=7.3900 state=relearning due=+10m — stored row matches **exactly, including due_date**. Two real causes, neither a defect: (a) `user_settings.target_retention` is **0.95**, not the 0.9 default — at R=0.95 a card with S=7.32 earns ~3 days where R=0.90 would give 7, so short intervals are the requested retention working as configured (`fsrs_weights` checked too: byte-identical to ts-fsrs 5.4.1 `default_w`). (b) A card rated Missed enters relearning on FSRS-6's `10m` step, i.e. due the same calendar day — and stays due every day after until answered correctly. **So the answer to the "or is it item 7?" question is: it is item 7.** The schedule is correct; the queue was redisplaying it.
+**6 — NOT the prior conclusion, and not a scheduler bug: the written due_dates are exactly right.** Replayed two live cards' complete `review_logs` through a bare `ts-fsrs` instance and compared field-by-field against `fsrs_data`. Card `8e942232` (2 logs): replay gives S=7.3153 D=2.1112 state=review reps=2 — stored row is **identical**, `scheduled_days` differing only by official fuzz (3 vs 2). Card `552a6b12` (4 logs, last=Again): replay gives S=1.4294 D=7.3900 state=relearning due=+10m — stored row matches **exactly, including due_date**. Two real causes, neither a defect: (a) `user_settings.target_retention` is **0.95**, not the 0.9 default — at R=0.95 a card with S=7.32 earns ~3 days where R=0.90 would give 7, so short intervals are the requested retention working as configured (`fsrs_weights` checked too: byte-identical to ts-fsrs 5.4.1 `default_w`). (b) A card rated Missed enters relearning on FSRS-6's `10m` step (*⚠️ superseded Oct 2026: steps now empty, a lapse stays in review*), i.e. due the same calendar day — and stays due every day after until answered correctly. **So the answer to the "or is it item 7?" question is: it is item 7.** The schedule is correct; the queue was redisplaying it.
 
 **7 — confirmed, root cause found, fixed.** `getReviewsDue` (`useLibraryStore.ts:666`) and `getDeckDueCount` both asked only `toLocalDateStr(dueDate) <= today`, with no "already answered today" test. Answer correctly → due moves out days → counter drops. Answer wrong → relearning re-dues the card ~10 minutes later, **the same local day** → it is instantly counted as due again and the counter never moves. Fix: new shared `answeredToday(fs, todayStr)` helper (checks `fsrsData.lastReviewedAt`), applied in both — and in `getReviewsDue` *before* the exam pull-forward branch, so a pull-forward can't resurrect an answered card either. `getDueCards` composes `getReviewsDue`, so every badge (StudyHub, DailyQueue, Sidebar, inbox/reviews pages, Library) is fixed by the same two edits. **⚠️ Intended behaviour change worth knowing:** answering now clears a card from *today's* queue whatever the grade, so a missed card no longer reappears within the same day (it is still genuinely due tomorrow, which is correct SRS). This also means a card learned today no longer re-enters Reviews the same day — say if you want new cards exempted.
 
@@ -442,7 +455,7 @@ it before appending — don't paste the full chat response in.
 
 ### Investigation: newly learned cards getting short intervals (1–3 days) — BUG or FSRS feature?
 
-**Verdict: FEATURE, not a bug.** Replayed 40+ cards' review histories through official ts-fsrs with user settings (target_retention=0.99, custom weights, enable_short_term). All outputs matched stored fsrs_data exactly. Same-day graduation confirmed working (learning → 10min step → review state). The 1-2 day intervals are mathematically correct: target_retention=0.99 produces 80–85% shorter intervals than the 0.90 default because it requires more frequent reviews to maintain 99% recall. Full analysis: R=0.99 → 2nd review due 1d later vs R=0.90 → 5d later. **Not a code fix; a settings question:** user can lower target_retention (0.90–0.95) to extend intervals, or keep 0.99 for aggressive review schedule. No changes made; awaiting direction.
+**Verdict: FEATURE, not a bug.** Replayed 40+ cards' review histories through official ts-fsrs with user settings (target_retention=0.99, custom weights, enable_short_term). All outputs matched stored fsrs_data exactly. Same-day graduation confirmed working (learning → 10min step → review state — *⚠️ superseded Oct 2026: steps now empty*). The 1-2 day intervals are mathematically correct: target_retention=0.99 produces 80–85% shorter intervals than the 0.90 default because it requires more frequent reviews to maintain 99% recall. Full analysis: R=0.99 → 2nd review due 1d later vs R=0.90 → 5d later. **Not a code fix; a settings question:** user can lower target_retention (0.90–0.95) to extend intervals, or keep 0.99 for aggressive review schedule. No changes made; awaiting direction.
 
 ### Fix: Settings button no longer opens panel (event propagation bug)
 
@@ -459,3 +472,206 @@ Prompt: refix redo-missed screen; audit all card interfaces. **Found:** redo pas
 ### Session summary: always shown, dashboard exit, New Cards tiles
 
 Prompt: summary always at session end; Back→Dashboard; New Cards metrics. **Fix:** queue emptied by deletes now reaches summary; button routes `/`; New Cards sessions show Time Elapsed/Cards Learned/Repetitions from per-rating capped times.
+
+### FSRS learning steps removed — first answer graduates
+
+Prompt (verbatim):
+
+```
+FSRS learning steps — remove the 1m/10m phase so the FIRST correct Reviews answer earns a real 
+multi-day interval. Read this whole prompt before touching code.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+THE ONLY BEHAVIOUR WANTED (this is the spec — every change below serves it)
+════════════════════════════════════════════════════════════════════════════════════════════
+Day 0, New Cards: card shown → "Remembered" (Rating.Good) → the card GRADUATES immediately 
+       (FSRS State.Review, persisted state 'review') and leaves New Cards.
+Day 0, Reviews:   the same card appears in Reviews THE SAME DAY (queue + every due badge), 
+       is answerable, and once answered drops out for the rest of the day.
+       "Remembered" there → next dueDate is a real multi-day interval set purely by the user's 
+       target_retention. NEVER a day-1 repeat caused by a learning/relearning step.
+Then:  each correct answer on its due date compounds per FSRS.
+
+Pre-verified against THIS repo (ts-fsrs 5.4.1, the app's own reviewCard + getReviewsDue via a 
+throwaway vitest with fake timers, fuzz ON, all edits in sections 1–2 applied). Gap in days 
+after the same-day Reviews answer, then each later "Remembered" on its due date:
+  target_retention 0.95:  R/R → 2 → 4 → 12 → 25   | F/R → 2 → 2 → 3 → 5 | R/F → 1 → 2 → 3 → 5
+  target_retention 0.90:  R/R → 3 → 13 → 50 → 181 | F/R → 2 → 3 → 9 → 21 | R/F → 1 → 3 → 5 → 13
+  (R/R = Remembered in New then Remembered in Reviews; F/R = Forgot then Remembered; 
+   R/F = Remembered then Forgot. Exact values can shift ±1 with fuzz/date — the shape must match.)
+Your implementation must reproduce these. If it doesn't, stop and report why before going on.
+
+Background — why this is needed (do not re-investigate, it's settled): today the config uses 
+ts-fsrs default steps ['1m','10m'] / ['10m']. "Remembered" in New puts the card in Learning 
+step 1 (due +10m); "Remembered" in Reviews is the real FSRS graduation and at retention 0.95 it 
+yields a 1-day first interval → the "same card two days in a row" complaint. Removing the 
+steps makes the New-Cards answer the graduation, so the Reviews answer becomes a second 
+same-day review (FSRS-6 short-term stability path) and earns the longer gap above.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+DO NOT CHANGE (hard constraints)
+════════════════════════════════════════════════════════════════════════════════════════════
+- target_retention, weights (w), maximum_interval, enable_fuzz (true), enable_short_term 
+  (MUST stay true — it's what makes the same-day Reviews answer count; false changes the 
+  numbers above).
+- The two-button mapping: Forgot → Rating.Again, Remembered → Rating.Good. Never Easy.
+- The answeredToday() once-per-day rule and its semantics.
+- src/store/sameDayGraduation.test.ts — must pass UNCHANGED. If it fails, your change is wrong.
+- src/store/archivedDeck.test.ts — must pass unchanged.
+- No changes to sync architecture, no new DB columns, no data migration.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+1. SCHEDULER CONFIG — src/lib/srs.ts
+════════════════════════════════════════════════════════════════════════════════════════════
+a) In fsrsParameters(), replace
+     learning_steps: default_learning_steps,
+     relearning_steps: default_relearning_steps,
+   with
+     learning_steps: [],
+     relearning_steps: [],
+   and add a comment: steps are intentionally empty — a new card graduates on its first 
+   answer; same-day visibility in Reviews is provided by graduatedTodayIds() in 
+   useLibraryStore, NOT by a sub-day step.
+b) Change the exported constants to
+     export const LEARNING_STEPS: readonly StepUnit[] = []
+     export const RELEARNING_STEPS: readonly StepUnit[] = []
+   Remove default_learning_steps / default_relearning_steps from the import if now unused.
+c) Rewrite every doc comment in srs.ts that says the 1m/10m step is what keeps a new card 
+   "reachable today" (the LEARNING_STEPS block comment, the fsrsParameters comment) to 
+   describe the new mechanism. Leave the NemosCardState type and the State mapping tables 
+   ('learning'/'relearning') in place — legacy rows still carry those states.
+d) Verify with a bare ts-fsrs instance (same params): New + Good → State.Review, 
+   learning_steps 0, due ≥ +1 day; New + Again → State.Review, due +1 day; Review + Again → 
+   State.Review (NOT Relearning), day-level due, lapses+1.
+e) Legacy rows: a persisted card in 'learning'/'relearning' with learningSteps > 0 must 
+   self-heal to 'review' on its next answer (with empty steps, BasicLearningStepsStrategy 
+   returns {} → scheduled_minutes 0 → State.Review + FSRS interval). Prove it with a unit test 
+   (build such a row by hand, call fsrsReview, assert state 'review'). If you have Supabase 
+   MCP access, report how many live fsrs_data rows are currently in 'learning'/'relearning' 
+   — read-only, do not modify them.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+2. KEEP SAME-DAY GRADUATION — src/store/useLibraryStore.ts
+════════════════════════════════════════════════════════════════════════════════════════════
+Problem: with no steps, a just-learned card's dueDate is tomorrow+ (0.95: +1d, 0.90: +2d), so 
+the `toLocalDateStr(fs.dueDate) <= todayStr` check hides it from today's Reviews → breaks the 
+HARD same-day graduation rule.
+
+a) getReviewsDue (~line 725) and getDeckDueCount (~line 844): directly AFTER the existing line
+     if (answeredToday(fs, todayStr) && !graduatedToday.has(c.id)) return false
+   add
+     if (graduatedToday.has(c.id)) return true
+   It MUST come after the answeredToday line and BEFORE the `!fs || fs.state === 'new'` and 
+   dueDate checks. Comment it: "graduated today → in today's Reviews regardless of dueDate 
+   (same-day graduation; steps are empty so dueDate is already tomorrow+)."
+b) Harden graduatedTodayIds() against review_logs lag (e.g. logs not yet pulled on a second 
+   device — fsrs_data and review_logs sync separately). Add a fallback so a card ALSO counts 
+   as graduated today when: fsrsData row exists, state !== 'new', repetitions === 1, 
+   lastReviewedAt is today (local), AND there is no review log for that card today on this 
+   device. (repetitions === 1 ⇒ its only answer ever was the first exposure.) This needs 
+   fsrsData passed in or read via get() — keep the function's existing log-based rule 
+   exactly as-is and OR the fallback in. The existing test "an ordinary review card answered 
+   today stays suppressed even with no logs" uses repetitions: 3 and must still pass.
+c) getDueCards composes getReviewsDue — confirm no extra change needed. 
+   getDeckReviewsAll / getDeckBoth ignore due dates — confirm unaffected.
+d) Exam pull-forward (src/lib/examScheduler.ts getPulledForwardCardIds ~line 159): a 
+   just-graduated card is now due tomorrow+, so it may be evaluated for pull-forward. Confirm 
+   this can't double-surface or resurrect a card already answered today (getReviewsDue checks 
+   answeredToday before pulledForwardIds — verify that ordering still holds after your edit).
+
+════════════════════════════════════════════════════════════════════════════════════════════
+3. EVERY OTHER "DUE TODAY" DISPLAY MUST AGREE WITH THE QUEUE
+════════════════════════════════════════════════════════════════════════════════════════════
+a) src/components/library/DeckView.tsx ~line 534 computes the per-card "Due" badge on its own:
+     const due = fs ? toLocalDateStr(new Date(fs.dueDate)) <= toLocalDateStr(new Date()) : true
+   A card graduated today would be in Reviews but show no Due badge. Fix so the badge uses 
+   the same rule as the queue (export a shared predicate from useLibraryStore, e.g. 
+   isCardDueToday(cardId), built on the same answeredToday + graduatedTodayIds logic — do NOT 
+   duplicate the logic in the component).
+b) grep the whole of src for any other dueDate-vs-today comparison or 'learning'/'relearning' 
+   state check (known: StatsPage.tsx ~221 forecast, HardestTopics.tsx ~34, 
+   useLibraryStore getDeckMastery ~865, import.ts ~338, FSRSSimulator.tsx). For each, report 
+   file:line and whether the behaviour changes. Expected and acceptable: getDeckMastery and 
+   HardestTopics count 'review'/'relearning' as learned, so a card now counts as learned 
+   immediately after its first answer instead of after the Reviews answer — REPORT this, do 
+   not change it. StatsPage forecast is a future-date view — leave it.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+4. INTERVAL PREVIEW LABELS — src/components/study/ConfidenceRating.tsx
+════════════════════════════════════════════════════════════════════════════════════════════
+The "More ratings" 4-button panel previews each rating via fsrsReview → formatIntervalDays. 
+Today a new card shows "10 min" etc.; after this change it would show "1 d"/"2 d", which is 
+wrong for the user because ANY first answer on a new card (any grade — graduatedTodayIds keys 
+on the wasNew log, not the rating) puts it in today's Reviews. Fix: when fsrs.state === 'new', 
+every rating's label is "Today". All other cards keep the real FSRS preview. Also confirm the 
+primary Forgot/Remembered pill buttons in src/app/(app)/study/session/page.tsx show no 
+interval (or apply the same rule if they do). Check FSRSSimulator.tsx still renders sanely 
+with empty steps (it calls fsrsReview) and report anything that assumed minute-level steps.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+5. SESSION FLOW CHECKS (read + confirm, change only if broken)
+════════════════════════════════════════════════════════════════════════════════════════════
+- New Cards session "redo missed cards" retry pass is drillOnly (no reviewCard/addLog) — 
+  confirm still true, so a Forgot-then-redo in New Cards writes exactly ONE fsrs review.
+- Undo of a first exposure (setFSRSData snapshot restore) must put the card back to 'new', 
+  back in New Cards, and out of Reviews. Undo of the Reviews answer must put it back in 
+  today's Reviews. Verify both in a test.
+- getNewCards daily cap counts wasNew logs — unaffected; confirm.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+6. TESTS
+════════════════════════════════════════════════════════════════════════════════════════════
+Expected fallout (pre-verified): after sections 1–2, exactly these fail —
+  srs.test.ts: "feeds the official defaults…" (asserts ['1m','10m']/['10m']), "Remembered on 
+  a new card enters learning via the official step machine", "Forgot on a new card enters 
+  learning at the first step (Again)", "Forgot on a graduated review card lapses into 
+  relearning", "does not lose the learning-step position across a reload".
+  …PLUS ~9 differential tests in srs.test.ts / fsrsMigration.test.ts that fail only because 
+  their bare `reference` scheduler still uses ['1m','10m']/['10m'].
+Fix:
+a) Every generatorParameters({...}) reference in srs.test.ts (~lines 53–60, 311–318) and 
+   fsrsMigration.test.ts (~25–32): learning_steps: [], relearning_steps: []. That alone fixes 
+   the differential tests — they compare app vs library with identical params.
+b) srs.test.ts ~86–87: expect [] for both.
+c) Rewrite (don't delete) the 3 "enters learning/relearning" tests to assert the NEW intent: 
+   Remembered on new → 'review', due ≥ +1d; Forgot on new → 'review', due +1d; Forgot on a 
+   review card → 'review' (not relearning), lapses+1, day-level due. Each still compared 
+   field-by-field against the bare library.
+d) "does not lose the learning-step position across a reload": learningSteps is now always 0 
+   for new data. Rewrite it to prove a LEGACY row with learningSteps > 0 round-trips through 
+   toFsrsCard/fromFsrsCard intact AND self-heals to 'review' on its next answer.
+e) NEW test file src/store/learningLifecycle.test.ts (pattern: sameDayGraduation.test.ts — 
+   indexedDB shim, real store, vi.useFakeTimers, setSystemTime local Sydney times, 
+   useSettingsStore.setState({ fsrsTargetRetention })). For retention 0.95 AND 0.90, for R/R, 
+   F/R, R/F:
+     09:00 first answer in New → state 'review'; in getReviewsDue + getDueCards; 
+           getDeckDueCount === 1; gone from getNewCards
+     09:15 second answer → gone from getReviewsDue and getDeckDueCount === 0
+     22:00 same day → still gone
+     then setSystemTime(dueDate) → card IS in getReviewsDue → Remembered; repeat 3×
+   Assert R/R first gap ≥ 2 days at 0.95 and ≥ 3 days at 0.90, and that every gap equals a 
+   bare ts-fsrs replay of the same ratings/timestamps (fuzz on, same params). Print the gap 
+   sequences in the report and compare to the table at the top.
+f) Add a test for the 2b fallback: card with repetitions 1, lastReviewedAt today, NO logs → 
+   in getReviewsDue today.
+
+════════════════════════════════════════════════════════════════════════════════════════════
+7. VERIFY + REPORT
+════════════════════════════════════════════════════════════════════════════════════════════
+- npx vitest run (ALL suites green), npx tsc --noEmit (clean), npx next build. Note: in a 
+  sandbox without internet, next build can fail fetching Google Fonts (next/font/google in 
+  src/app/layout.tsx) — if so, say so explicitly and show it's that error, not a code error.
+- Report the user's current target_retention from user_settings (read-only via Supabase MCP 
+  if available) and the R/R gap sequence it produces. Tell me: 0.95 → first gap 2d, 0.90 → 3d.
+- Report every finding from 2d, 3b, 4 and 5 with file:line.
+- Do not commit or push — leave changes unstaged for me to review and push myself. List every 
+  file touched with a one-line summary.
+
+Update CLAUDE.md: (1) in "## Same-day graduation" describe the new mechanism — steps empty, 
+first answer graduates, graduatedTodayIds (+ repetitions===1 fallback) keeps the card in 
+today's Reviews regardless of dueDate; (2) anywhere it says FSRS-6 steps are 1m/10m, mark 
+that superseded. Then append to CLAUDE.md under ## Session Log: this prompt verbatim, fix 
+summary. 40 words MAX.
+```
+
+**Fix:** steps emptied; first answer graduates to review; `isReviewDueToday` keeps graduated-today (+`repetitions===1` lag fallback) in today's Reviews regardless of dueDate; DeckView badge shares it; new-card previews read "Today". R/R gaps: 0.95→2d, 0.90→3d.

@@ -33,6 +33,7 @@ import {
   isValidFsrsWeights,
   NEMOS_FORGOT_GRADE,
   NEMOS_REMEMBERED_GRADE,
+  fromFsrsCard,
   toFsrsCard,
   toFsrsGrade,
   type FSRSState,
@@ -56,8 +57,8 @@ const reference = fsrs(
     maximum_interval: 36500,
     enable_fuzz: true,
     enable_short_term: true,
-    learning_steps: ['1m', '10m'],
-    relearning_steps: ['10m'],
+    learning_steps: [],
+    relearning_steps: [],
   }),
 )
 
@@ -83,8 +84,9 @@ describe('library identity', () => {
     expect(params.enable_fuzz).toBe(true)
     expect(params.enable_short_term).toBe(true)
     expect(params.request_retention).toBe(0.9)
-    expect([...params.learning_steps]).toEqual(['1m', '10m'])
-    expect([...params.relearning_steps]).toEqual(['10m'])
+    // Steps are intentionally empty: a new card graduates on its first answer.
+    expect([...params.learning_steps]).toEqual([])
+    expect([...params.relearning_steps]).toEqual([])
   })
 
   it('rejects a legacy 17-value FSRS-5 vector instead of padding it to 21', () => {
@@ -146,44 +148,54 @@ describe('Tests 2 & 3: two-button UX maps onto FSRS grades', () => {
     expect(toFsrsGrade(4)).toBe(Rating.Easy)
   })
 
-  it('Remembered on a new card enters learning via the official step machine', () => {
+  it('Remembered on a new card graduates straight to review (no learning steps)', () => {
     const { state } = fsrsReview(newState(), 3, params, T0)
     const expected = reference.next(createEmptyCard(T0), T0, Rating.Good).card
 
-    expect(state.state).toBe('learning')
-    // First learning step, not an immediate graduation to review.
-    expect(state.learningSteps).toBe(expected.learning_steps)
-    expect(state.learningSteps).toBeGreaterThan(0)
-    expect(new Date(state.dueDate).getTime()).toBe(expected.due.getTime())
-    // Same-day reachability: the 10m step keeps the card due today, which is
-    // what Nemos' local-calendar-day due list needs — no Nemos-side override.
-    const minutesOut = (new Date(state.dueDate).getTime() - T0.getTime()) / 60000
-    expect(minutesOut).toBeGreaterThan(0)
-    expect(minutesOut).toBeLessThan(60)
-  })
-
-  it('Forgot on a new card enters learning at the first step (Again)', () => {
-    const { state } = fsrsReview(newState(), 1, params, T0)
-    const expected = reference.next(createEmptyCard(T0), T0, Rating.Again).card
-
-    expect(state.state).toBe(expected.state === State.Learning ? 'learning' : 'relearning')
+    expect(expected.state).toBe(State.Review)
+    expect(state.state).toBe('review')
+    expect(state.learningSteps).toBe(0)
     expect(state.stability).toBe(expected.stability)
     expect(state.difficulty).toBe(expected.difficulty)
     expect(new Date(state.dueDate).getTime()).toBe(expected.due.getTime())
+    // A real day-level interval. Same-day visibility in Reviews comes from
+    // graduatedTodayIds() in useLibraryStore, not from a sub-day step.
+    const daysOut = (new Date(state.dueDate).getTime() - T0.getTime()) / 86400000
+    expect(daysOut).toBeGreaterThanOrEqual(1)
   })
 
-  it('Forgot on a graduated review card lapses into relearning', () => {
-    // Drive a card to Review first: Good (→ learning) then Good (→ review).
+  it('Forgot on a new card also graduates to review, due in one day (Again)', () => {
+    const { state } = fsrsReview(newState(), 1, params, T0)
+    const expected = reference.next(createEmptyCard(T0), T0, Rating.Again).card
+
+    expect(expected.state).toBe(State.Review)
+    expect(state.state).toBe('review')
+    expect(state.stability).toBe(expected.stability)
+    expect(state.difficulty).toBe(expected.difficulty)
+    expect(new Date(state.dueDate).getTime()).toBe(expected.due.getTime())
+    expect((new Date(state.dueDate).getTime() - T0.getTime()) / 86400000).toBe(1)
+  })
+
+  it('Forgot on a review card lapses but stays in review with a day-level due', () => {
     let state = fsrsReview(newState(), 3, params, T0).state
-    state = fsrsReview(state, 3, params, new Date('2026-07-01T09:11:00.000Z')).state
+    let ref = reference.next(createEmptyCard(T0), T0, Rating.Good).card
     expect(state.state).toBe('review')
 
     const lapseAt = new Date('2026-07-06T09:00:00.000Z')
     const before = state.lapses
-    const lapsed = fsrsReview(state, 1, params, lapseAt).state
+    state = fsrsReview(state, 1, params, lapseAt).state
+    ref = reference.next(ref, lapseAt, Rating.Again).card
 
-    expect(lapsed.state).toBe('relearning')
-    expect(lapsed.lapses).toBe(before + 1)
+    expect(ref.state).toBe(State.Review)
+    expect(state.state).toBe('review') // NOT relearning
+    expect(state.lapses).toBe(before + 1)
+    expect(state.lapses).toBe(ref.lapses)
+    expect(state.stability).toBe(ref.stability)
+    expect(state.difficulty).toBe(ref.difficulty)
+    expect(new Date(state.dueDate).getTime()).toBe(ref.due.getTime())
+    const daysOut = (new Date(state.dueDate).getTime() - lapseAt.getTime()) / 86400000
+    expect(Number.isInteger(daysOut)).toBe(true)
+    expect(daysOut).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -314,8 +326,8 @@ describe('Tests 5, 6 & 8: stability, difficulty and due date come from ts-fsrs',
         maximum_interval: 7,
         enable_fuzz: true,
         enable_short_term: true,
-        learning_steps: ['1m', '10m'],
-        relearning_steps: ['10m'],
+        learning_steps: [],
+        relearning_steps: [],
       }),
     )
 
@@ -404,19 +416,40 @@ describe('Test 9: reloading does not reset FSRS state', () => {
     )
   })
 
-  it('does not lose the learning-step position across a reload', () => {
-    const state = fsrsReview(newState(), 3, params, T0).state
-    expect(state.learningSteps).toBeGreaterThan(0)
+  it('round-trips a legacy learning-step row intact, and it self-heals to review', () => {
+    // New data never carries learningSteps > 0 any more (steps are empty), but
+    // rows persisted under the old 1m/10m config still do.
+    const legacy: FSRSState = {
+      ...fsrsReview(newState(), 3, params, T0).state,
+      state: 'learning',
+      learningSteps: 1,
+      scheduledDays: 0,
+      dueDate: '2026-07-01T09:10:00.000Z',
+    }
 
-    const reloaded = JSON.parse(JSON.stringify(state)) as FSRSState
-    // Continuing from the reloaded row graduates, exactly as continuing from
-    // the in-memory row does. If learning_steps were dropped, the card would
-    // restart its steps here instead.
+    const reloaded = JSON.parse(JSON.stringify(legacy)) as FSRSState
+    expect(reloaded).toEqual(legacy)
+    const card = toFsrsCard(reloaded)
+    expect(card.state).toBe(State.Learning)
+    expect(card.learning_steps).toBe(1)
+    expect(fromFsrsCard(card, ID, legacy.retrievability)).toEqual({
+      ...legacy,
+      schedulerVersion: FSRS6_SCHEDULER_VERSION,
+    })
+
+    // With empty steps the step strategy yields no step, so the next answer
+    // lands in review with a real FSRS interval — matching the bare library.
     const at = new Date('2026-07-01T09:11:00.000Z')
-    expect(fsrsReview(reloaded, 3, params, at).state.state).toBe('review')
-    expect(fsrsReview(reloaded, 3, params, at).state).toEqual(
-      fsrsReview(state, 3, params, at).state,
-    )
+    const healed = fsrsReview(reloaded, 3, params, at).state
+    const ref = reference.next(toFsrsCard(legacy), at, Rating.Good).card
+    expect(healed.state).toBe('review')
+    expect(healed.learningSteps).toBe(0)
+    expect(new Date(healed.dueDate).getTime()).toBe(ref.due.getTime())
+    expect(healed.scheduledDays).toBeGreaterThanOrEqual(1)
+
+    // A legacy relearning row heals the same way, on a lapse too.
+    const relearning: FSRSState = { ...legacy, state: 'relearning', learningSteps: 1 }
+    expect(fsrsReview(relearning, 1, params, at).state.state).toBe('review')
   })
 
   it('tolerates a legacy row missing the FSRS-6-only fields', () => {

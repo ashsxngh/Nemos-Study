@@ -94,6 +94,11 @@ export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingPr
 
   const intervals = useMemo<Record<Difficulty, string> | null>(() => {
     if (!fsrs) return null
+    // A new card's first answer — any grade — puts it in today's Reviews
+    // (same-day graduation via graduatedTodayIds, keyed on the wasNew log, not
+    // the rating). FSRS' own dueDate would read "1 d"+ since learning steps are
+    // empty, which is not when the learner next sees it.
+    if (fsrs.state === 'new') return { 1: 'Today', 2: 'Today', 3: 'Today', 4: 'Today' }
     const params = fsrsParameters({
       weights: fsrsWeights,
       targetRetention: fsrsTargetRetention,
@@ -108,7 +113,7 @@ export function ConfidenceRating({ onRate, className, fsrs }: ConfidenceRatingPr
     for (const grade of [1, 2, 3, 4] as const) {
       // Real preview, straight from the official scheduler — the same call
       // reviewCard makes when the rating is committed, so what's shown is what
-      // happens (including FSRS' short learning-step intervals for a new card).
+      // happens.
       const next = fsrsReview(fsrs, grade, params, now).state
       const days = (new Date(next.dueDate).getTime() - now.getTime()) / 86400000
       out[grade] = formatIntervalDays(days)

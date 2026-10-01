@@ -82,6 +82,9 @@ interface LibraryState {
   getArchivedDeckIds: () => Set<string>
   getDeckNewCount: (deckId: string) => number
   getDeckDueCount: (deckId: string) => number
+  // Per-card form of getDeckDueCount (same rule as the Reviews queue), for
+  // per-card "Due" badges. Reads reviewLogs — memo deps must include them.
+  getDueTodayIds: (deckId: string) => Set<string>
   getDeckCards: (deckId: string) => Card[]
   getFolderChildren: (folderId: string | null) => Folder[]
   getDeckMastery: (deckId: string) => number
@@ -104,17 +107,16 @@ function getAllDescendantFolderIds(folders: Folder[], rootId: string): string[] 
 
 // A card already answered today is done for today, whatever the grade.
 //
-// FSRS's learning and relearning steps are deliberately sub-day (1m / 10m), so
-// a card rated "Missed" comes back due ~10 minutes later — inside the same
-// local calendar day Nemos buckets its queues by. Without this check the card
-// stayed in the due set the instant it was answered, which is why the Reviews
-// counter only ever decremented on a correct answer: a wrong answer rescheduled
-// the card to later today and it was immediately counted as due again.
+// (Historical: introduced when FSRS ran sub-day 1m/10m learning/relearning
+// steps, so a card rated "Missed" came back due ~10 minutes later inside the
+// same local day and the Reviews counter never decremented. Steps are now
+// empty — see `LEARNING_STEPS` in `@/lib/srs` — so a lapse is already due
+// tomorrow+, but the rule stays: legacy 'learning'/'relearning' rows can still
+// carry a same-day due, and "answered today ⇒ done today" is the established
+// once-per-day semantics.)
 //
 // Answering is what clears a card from today's queue; the grade only decides
-// how soon it returns afterwards. A missed card is genuinely due again
-// tomorrow (it is overdue from its 10-minute step), which is correct SRS
-// behaviour — this only stops it reappearing within the same day.
+// how soon it returns afterwards.
 //
 // ⚠️ This is a LOW-LEVEL predicate. Never use it on its own to gate the due
 // queue: a brand-new card's FIRST exposure also stamps `lastReviewedAt`, and
@@ -137,7 +139,18 @@ function answeredToday(fs: FSRSState | undefined, todayStr: string): boolean {
 // A log with no `wasNew` key at all (pre-`wasNew`-era rows) is deliberately
 // treated as an ordinary review, so a missing flag can never resurrect a card
 // that was genuinely reviewed today.
-function graduatedTodayIds(todayStr: string): Set<string> {
+//
+// Learning steps are empty, so a just-graduated card's dueDate is already
+// tomorrow+; membership in this set is what puts it in TODAY's Reviews
+// regardless of dueDate (see `isReviewDueToday`).
+//
+// Fallback for review_logs lag: fsrs_data and review_logs sync separately, so a
+// second device can hold the graduated fsrs row before the first-exposure log
+// arrives. A card ALSO counts as graduated today when its row is past 'new',
+// has `repetitions === 1` (its only answer ever was the first exposure), was
+// last reviewed today, and this device has no log for it today at all. Any
+// log today defers to the log-based rule above.
+function graduatedTodayIds(todayStr: string, fsrsData: Record<string, FSRSState>): Set<string> {
   const { reviewLogs } = useHistoryStore.getState()
   const firstExposure = new Set<string>()
   const realReview = new Set<string>()
@@ -146,8 +159,50 @@ function graduatedTodayIds(todayStr: string): Set<string> {
     if (l.wasNew === true) firstExposure.add(l.cardId)
     else realReview.add(l.cardId)
   }
-  for (const id of realReview) firstExposure.delete(id)
-  return firstExposure
+  const graduated = new Set<string>()
+  for (const id of firstExposure) {
+    if (realReview.has(id)) continue
+    // Defensive: an undone first exposure restores the card to 'new'; a
+    // leftover log must never push a 'new' card into Reviews.
+    const fs = fsrsData[id]
+    if (fs && fs.state !== 'new') graduated.add(id)
+  }
+  for (const id in fsrsData) {
+    const fs = fsrsData[id]
+    if (
+      fs.state !== 'new' &&
+      fs.repetitions === 1 &&
+      answeredToday(fs, todayStr) &&
+      !firstExposure.has(id) &&
+      !realReview.has(id)
+    ) {
+      graduated.add(id)
+    }
+  }
+  return graduated
+}
+
+// The single "is this card in today's Reviews?" rule, shared by the queue and
+// every due badge. Order matters:
+//   1. answered today (and not merely graduated today) → done for today
+//   2. graduated today → in today's Reviews regardless of dueDate
+//   3. exam pull-forward (queue only) — after (1), so a pull-forward can never
+//      resurrect a card already answered today
+//   4. otherwise: a non-new card whose dueDate is today or earlier
+function isReviewDueToday(
+  cardId: string,
+  fs: FSRSState | undefined,
+  todayStr: string,
+  graduatedToday: Set<string>,
+  pulledForwardIds?: Set<string>,
+): boolean {
+  if (answeredToday(fs, todayStr) && !graduatedToday.has(cardId)) return false
+  // graduated today → in today's Reviews regardless of dueDate (same-day
+  // graduation; steps are empty so dueDate is already tomorrow+).
+  if (graduatedToday.has(cardId)) return true
+  if (pulledForwardIds?.has(cardId)) return true
+  if (!fs || fs.state === 'new') return false
+  return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
 }
 
 function daysOverdue(dueDateIso: string): number {
@@ -580,12 +635,12 @@ export const useLibraryStore = create<LibraryState>()(
         const wasNew = existing.state === 'new'
 
         // All scheduling is delegated to the official FSRS-6 scheduler. Nemos
-        // applies no interval override of its own — in particular there is no
-        // longer a same-day graduation hack: FSRS-6's own learning steps put a
-        // just-answered new card a few minutes out, so it stays reachable today
-        // (Nemos' due-list buckets by local calendar day) and only earns a real
-        // multi-day interval once it graduates. That is the behaviour the old
-        // override was approximating by hand.
+        // applies no interval override of its own. Learning steps are empty,
+        // so a new card's first answer graduates it to review with a real FSRS
+        // dueDate (tomorrow+). Same-day graduation is a QUEUE rule, not a
+        // schedule rule: graduatedTodayIds() keeps the card in today's Reviews
+        // regardless of that dueDate, and its same-day Reviews answer goes
+        // through FSRS-6's short-term stability path.
         const params = fsrsParameters({
           weights: fsrsWeights,
           targetRetention: fsrsTargetRetention,
@@ -717,16 +772,13 @@ export const useLibraryStore = create<LibraryState>()(
         // Cards that graduated today are exempt from the once-per-day rule —
         // they must appear in Reviews on their graduation day. See
         // `graduatedTodayIds`.
-        const graduatedToday = graduatedTodayIds(todayStr)
-        const due = pool.filter((c) => {
-          const fs = fsrsData[c.id]
-          // Checked before the exam pull-forward branch: a card answered today
-          // is done for today even if an exam would otherwise pull it forward.
-          if (answeredToday(fs, todayStr) && !graduatedToday.has(c.id)) return false
-          if (pulledForwardIds.has(c.id)) return true
-          if (!fs || fs.state === 'new') return false
-          return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
-        })
+        const graduatedToday = graduatedTodayIds(todayStr, fsrsData)
+        // isReviewDueToday checks answeredToday before the exam pull-forward
+        // branch: a card answered today is done for today even if an exam
+        // would otherwise pull it forward.
+        const due = pool.filter((c) =>
+          isReviewDueToday(c.id, fsrsData[c.id], todayStr, graduatedToday, pulledForwardIds)
+        )
 
         // Primary sort: relative overdueness (days_late / scheduled_interval) descending.
         // A card 3d late on a 4d interval (0.75) outranks a card 5d late on a 200d interval
@@ -832,19 +884,21 @@ export const useLibraryStore = create<LibraryState>()(
         ).length
       },
 
-      getDeckDueCount: (deckId) => {
+      getDeckDueCount: (deckId) => get().getDueTodayIds(deckId).size,
+
+      // Same rule as getReviewsDue (isReviewDueToday) — badges must track the
+      // queue, same-day graduation included. No exam pull-forward: that stays
+      // a queue-building concern, as it always was for the badges.
+      getDueTodayIds: (deckId) => {
         const { cards, fsrsData } = get()
         const todayStr = toLocalDateStr(new Date())
-        const graduatedToday = graduatedTodayIds(todayStr)
-        return cards.filter((c) => {
-          if (c.deckId !== deckId || c.isArchived) return false
-          const fs = fsrsData[c.id]
-          // Same rule as getReviewsDue — the badge must track the queue,
-          // same-day graduation exemption included.
-          if (answeredToday(fs, todayStr) && !graduatedToday.has(c.id)) return false
-          if (!fs || fs.state === 'new') return false
-          return toLocalDateStr(new Date(fs.dueDate)) <= todayStr
-        }).length
+        const graduatedToday = graduatedTodayIds(todayStr, fsrsData)
+        const ids = new Set<string>()
+        for (const c of cards) {
+          if (c.deckId !== deckId || c.isArchived) continue
+          if (isReviewDueToday(c.id, fsrsData[c.id], todayStr, graduatedToday)) ids.add(c.id)
+        }
+        return ids
       },
 
       getDeckCards: (deckId) => {
