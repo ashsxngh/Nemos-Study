@@ -3,6 +3,7 @@
 import { cn, formatDate } from '@/lib/utils'
 import { useHistoryStore } from '@/store/useHistoryStore'
 import { toLocalDateStr } from '@/lib/formatDate'
+import { PRACTICE_SESSION_MODE, type ReviewSession } from '@/lib/types'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '']
@@ -20,12 +21,26 @@ interface DayCell {
   count: number
 }
 
-function buildYearData(reviewLogs: { reviewedAt: string }[], year: number): DayCell[][] {
+// Days with a deck Reviews practice session. Practice writes no review_logs,
+// so its only trace is its review_sessions row — enough to mark the day as
+// active here. This is the heatmap's sole use of it: streak, retention and
+// every stats figure stay review_logs-only.
+function practiceDays(sessions: ReviewSession[]): Set<string> {
+  return new Set(
+    sessions
+      .filter((s) => s.mode === PRACTICE_SESSION_MODE)
+      .map((s) => toLocalDateStr(new Date(s.startedAt)))
+  )
+}
+
+function buildYearData(reviewLogs: { reviewedAt: string }[], practice: Set<string>, year: number): DayCell[][] {
   const countMap: Record<string, number> = {}
   for (const log of reviewLogs) {
     const day = toLocalDateStr(new Date(log.reviewedAt))
     countMap[day] = (countMap[day] ?? 0) + 1
   }
+  // A practice-only day shows as the lowest intensity — active, nothing more.
+  for (const day of practice) countMap[day] = Math.max(countMap[day] ?? 0, 1)
 
   // Build array of all days in the year, grouped by week (columns)
   // Week starts on Sunday to match calendar convention
@@ -78,16 +93,19 @@ function getMonthPositions(weeks: DayCell[][]): { label: string; col: number }[]
 
 export function StreakHeatmap() {
   const reviewLogs = useHistoryStore((s) => s.reviewLogs)
+  const sessions = useHistoryStore((s) => s.sessions)
   const year = new Date().getFullYear()
-  const weeks = buildYearData(reviewLogs, year)
+  const practice = practiceDays(sessions)
+  const weeks = buildYearData(reviewLogs, practice, year)
   const monthPositions = getMonthPositions(weeks)
 
   // Summary stats
-  const activeDays = new Set(
-    reviewLogs
+  const activeDays = new Set([
+    ...reviewLogs
       .filter((l) => new Date(l.reviewedAt).getFullYear() === year)
-      .map((l) => toLocalDateStr(new Date(l.reviewedAt)))
-  ).size
+      .map((l) => toLocalDateStr(new Date(l.reviewedAt))),
+    ...[...practice].filter((d) => d.startsWith(`${year}-`)),
+  ]).size
   // Repeat reviews only — new-card graduations aren't reviews. The day cells
   // above deliberately still count all activity (learning new cards keeps a
   // streak day alive), so they're labeled "cards", not "reviews".

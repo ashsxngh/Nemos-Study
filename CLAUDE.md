@@ -89,12 +89,12 @@ When the user selects **New Cards** or **Both** and the deck has at least one ne
 1. Mode button click → selects/highlights the mode and reveals a number input defaulting to `getDeckNewAll(deckId).length`.
 2. **Start** button → navigates to `/study/session?deck=…&mode=…&newCount=N`.
 
-Reviews mode still navigates immediately (no input). Both mode with zero new cards also navigates immediately.
+**Reviews = practice (since Nov 2026):** selecting it reveals a "Reviews this session" input (default + max = learned cards in the deck, 0/empty disables Start) → `?reviewCount=N`, a random sample. Practice is drill-only (`isPractice` in `handleRate`): no fsrs_data/review_logs writes; its only trace is a lazily-created `deck-practice` review_sessions row the heatmap reads. Both mode with zero new cards still navigates immediately.
 
 The `?newCount=N` param is read in `session/page.tsx` as `deckNewCount`. In `buildQueue`:
 - `deck-new`: slices `getDeckNewAll` to `deckNewCount`.
 - `deck-both`: replicates the interleave logic inline (reviews unlimited, new cards capped at `deckNewCount`).
-- `deck-reviews`: unaffected — no new-card count applies.
+- `deck-reviews`: shuffles `getDeckReviewsAll`, applies `?order=` (`random` | `hardest` = lowest retrievability | `last-seen` = oldest `lastReviewedAt`) to the whole pool, then slices to `deckReviewCount`.
 
 `deckNewCount` is in `buildQueue`'s `useCallback` dep array. Do **not** touch `newCardsPerDay`, `useSettingsStore`, or the daily new-card tracking — this feature is entirely separate from the automatic inbox limit.
 
@@ -675,3 +675,11 @@ summary. 40 words MAX.
 ```
 
 **Fix:** steps emptied; first answer graduates to review; `isReviewDueToday` keeps graduated-today (+`repetitions===1` lag fallback) in today's Reviews regardless of dueDate; DeckView badge shares it; new-card previews read "Today". R/R gaps: 0.95→2d, 0.90→3d.
+
+### Deck "Reviews" practice mode
+
+Prompt: add Reviews count picker; isolate mode from FSRS/stats (heatmap excepted); X-badge missed-cards drill. **Fix:** random `reviewCount` sample; drill-only gating; `deck-practice` session row lights heatmap; shared `startMissedDrill` loop (X badge resumes queue, summary redo).
+
+### Practice Reviews card order
+
+Prompt: add Random / Hardest First / Last Seen order picker to deck Reviews. **Fix:** `?order=` sorts the full learned pool (lowest live retrievability, or oldest `lastReviewedAt`) before the count cap; shuffle-first breaks ties randomly.

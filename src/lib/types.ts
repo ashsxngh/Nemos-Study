@@ -81,8 +81,18 @@ export interface ReviewSession {
   cardsCorrect: number
   cardsIncorrect: number
   averageResponseMs: number
-  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only' | 'deck-all' | 'deck-reviews' | 'deck-new' | 'deck-both'
+  // 'deck-practice' = a Reviews practice session from the deck Study popup.
+  // Its row exists only so the heatmap can mark the day active: cardsReviewed/
+  // cardsCorrect stay 0 by design (practice writes no fsrs_data/review_logs).
+  // Do not prune these as zero-review noise.
+  mode: 'standard' | 'cram' | 'random' | 'failed-only' | 'new-only' | 'reviews-only' | 'deck-all' | 'deck-reviews' | 'deck-new' | 'deck-both' | 'deck-practice'
 }
+
+export const PRACTICE_SESSION_MODE = 'deck-practice' satisfies ReviewSession['mode']
+
+// Card order for deck "Reviews" practice (`?order=` on the session URL).
+// Applied to the full eligible pool before the count cap.
+export type PracticeOrder = 'random' | 'hardest' | 'last-seen'
 
 export interface ReviewLog {
   id: string

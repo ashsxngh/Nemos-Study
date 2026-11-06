@@ -36,7 +36,7 @@ import { restoreCardsFromTrash, createUndoTracker } from '@/lib/deleteUndo'
 import { cn, formatDuration, formatDate, generateId } from '@/lib/utils'
 import { toLocalDateStr } from '@/lib/formatDate'
 import { ActiveTimer, subscribeToActivity, activeStudyMs } from '@/lib/activeTime'
-import type { Card, Difficulty } from '@/lib/types'
+import { PRACTICE_SESSION_MODE, type Card, type Difficulty, type PracticeOrder } from '@/lib/types'
 
 // ── Session abandonment recovery ──────────────────────────────────────────────
 // Snapshotted to sessionStorage on every queue/log change so a closed tab or
@@ -99,6 +99,11 @@ function SessionContent() {
   const examId = searchParams.get('examId') ?? undefined
   const modeParam = searchParams.get('mode')
   const deckNewCount = (() => { const v = parseInt(searchParams.get('newCount') ?? ''); return isNaN(v) ? null : v })()
+  const deckReviewCount = (() => { const v = parseInt(searchParams.get('reviewCount') ?? ''); return isNaN(v) ? null : v })()
+  const practiceOrder: PracticeOrder = (() => {
+    const o = searchParams.get('order')
+    return o === 'hardest' || o === 'last-seen' ? o : 'random'
+  })()
 
   const {
     sessionId,
@@ -196,10 +201,25 @@ function SessionContent() {
     return 'standard' as const
   })()
 
+  // Deck popup "Reviews" = practice. Every rating in it is a drill: no
+  // fsrs_data, no review_logs, nothing the stats/retention/answeredToday
+  // machinery can see. Its one trace is a 'deck-practice' review_sessions row
+  // (markPracticeActivity) that lights today on the heatmap.
+  const isPractice = resolvedMode === 'deck-reviews'
+
   const startLibrarySession = useCallback(() => {
+    // Practice opens its row lazily on the first rating, so a practice session
+    // opened and abandoned without answering leaves no heatmap activity.
+    if (isPractice) return
     const session = useHistoryStore.getState().startSession(deckId, resolvedMode)
     librarySessionIdRef.current = session.id
-  }, [deckId, resolvedMode])
+  }, [deckId, resolvedMode, isPractice])
+
+  const markPracticeActivity = useCallback(() => {
+    if (librarySessionIdRef.current) return
+    const session = useHistoryStore.getState().startSession(deckId, PRACTICE_SESSION_MODE)
+    librarySessionIdRef.current = session.id
+  }, [deckId])
 
   const endLibrarySession = useCallback(() => {
     const sessionId = librarySessionIdRef.current
@@ -273,6 +293,14 @@ function SessionContent() {
   // New Cards summary's Time Elapsed. Missed new cards leave no review log, so
   // `logs` alone can't count reshows.
   const [ratingTimes, setRatingTimes] = useState<number[]>([])
+  // Practice only. Latest first-pass rating per card (summary tiles + the
+  // summary's redo option), and the missed cards not yet cleared by a drill
+  // (the X badge and its instant jump).
+  const [practiceRatings, setPracticeRatings] = useState<Map<string, number>>(new Map())
+  const [missedPile, setMissedPile] = useState<string[]>([])
+  // Where a mid-session missed-cards drill returns to once every card in it
+  // is answered correctly. null = the drill ends the session instead.
+  const resumeAfterDrillRef = useRef<{ queue: Card[]; index: number } | null>(null)
 
   // Card swipe animation
   const [animatingOut, setAnimatingOut] = useState<'left' | 'right' | 'delete' | null>(null)
@@ -335,7 +363,31 @@ function SessionContent() {
     if (resolvedMode === 'new-only') return getNewCards(deckId)
     if (resolvedMode === 'reviews-only') return getReviewsDue(deckId)
     // Deck Study popup modes — deck-scoped, ignore the inbox entirely.
-    if (resolvedMode === 'deck-reviews') return deckId ? getDeckReviewsAll(deckId) : []
+    if (resolvedMode === 'deck-reviews') {
+      if (!deckId) return []
+      // Order the WHOLE learned pool, then cap — "Hardest, 20" is the 20
+      // lowest-retrievability cards, not a random 20 sorted afterwards. The
+      // shuffle runs first for every order so ties (equal R, never-stamped
+      // lastReviewedAt) break randomly; Array.sort is stable.
+      const all = [...getDeckReviewsAll(deckId)]
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[all[i], all[j]] = [all[j], all[i]]
+      }
+      if (practiceOrder === 'hardest') {
+        // Live recall probability (stability + time elapsed), lowest first.
+        const r = new Map(all.map((c) => [c.id, rawFsrs[c.id] ? fsrsRetrievability(rawFsrs[c.id]) : 0]))
+        all.sort((a, b) => r.get(a.id)! - r.get(b.id)!)
+      } else if (practiceOrder === 'last-seen') {
+        // Oldest lastReviewedAt first; a row with none counts as oldest.
+        const seen = (c: Card) => {
+          const t = rawFsrs[c.id]?.lastReviewedAt
+          return t ? new Date(t).getTime() : 0
+        }
+        all.sort((a, b) => seen(a) - seen(b))
+      }
+      return deckReviewCount != null ? all.slice(0, Math.max(1, deckReviewCount)) : all
+    }
     if (resolvedMode === 'deck-new') {
       if (!deckId) return []
       const all = getDeckNewAll(deckId)
@@ -359,7 +411,7 @@ function SessionContent() {
     // here just drops the lowest-priority tail.
     return getDueCards(deckId).slice(0, sessionLength)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, examId, resolvedMode, sessionLength, deckNewCount])
+  }, [deckId, examId, resolvedMode, sessionLength, deckNewCount, deckReviewCount, practiceOrder])
 
   const checkBurnoutAndMaybeNudge = useCallback((): void => {
     const { lastBurnoutNudgeAt, setLastBurnoutNudgeAt } = useAppStore.getState()
@@ -404,6 +456,9 @@ function SessionContent() {
     setRetryRatings(new Map())
     setRateKinds([])
     setRatingTimes([])
+    setPracticeRatings(new Map())
+    setMissedPile([])
+    resumeAfterDrillRef.current = null
     if (!burnoutCheckedRef.current && sessionCards.length > 0) {
       burnoutCheckedRef.current = true
       checkBurnoutAndMaybeNudge()
@@ -448,6 +503,9 @@ function SessionContent() {
     setRetryRatings(new Map())
     setRateKinds([])
     setRatingTimes(pendingRecovery.logs.map((l) => l.responseMs ?? 0))
+    setPracticeRatings(new Map())
+    setMissedPile([])
+    resumeAfterDrillRef.current = null
     setPendingRecovery(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRecovery])
@@ -689,10 +747,24 @@ function SessionContent() {
       // retry pass may not write anything at all.
       const inReviewsToday =
         isNew || useLibraryStore.getState().getReviewsDue().some((c) => c.id === card.id)
-      const drillOnly = isRetryPass || (isExamWeakest && !isNew) || !inReviewsToday
+      //  - Deck popup "Reviews" practice (isPractice): never writes, even for a
+      //    card that is genuinely due today — it stays due in the real queue.
+      const drillOnly = isRetryPass || isPractice || (isExamWeakest && !isNew) || !inReviewsToday
 
       if (drillOnly) {
         if (isRetryPass) setRetryRatings((m) => new Map(m).set(card.id, rating))
+        if (isPractice) {
+          markPracticeActivity()
+          if (!isRetryPass) {
+            setPracticeRatings((m) => new Map(m).set(card.id, rating))
+            setMissedPile((p) => {
+              const rest = p.filter((id) => id !== card.id)
+              return rating === 1 ? [...rest, card.id] : rest
+            })
+            if (rating >= 3) setRememberedCount((c) => c + 1)
+            else setForgottenReviewCount((c) => c + 1)
+          }
+        }
         setRateKinds((k) => [...k, { kind: 'drill', cardId: card.id, rating }])
         if (rating === 1) setMissedReviewCount((c) => c + 1)
         setHistory((h) => [...h, currentIndex])
@@ -769,6 +841,16 @@ function SessionContent() {
         return next
       })
       if (last.rating === 1) setMissedReviewCount((c) => Math.max(0, c - 1))
+      if (isPractice && sessionPhase === 'first') {
+        setPracticeRatings((m) => {
+          const next = new Map(m)
+          next.delete(last.cardId)
+          return next
+        })
+        setMissedPile((p) => p.filter((id) => id !== last.cardId))
+        if (last.rating >= 3) setRememberedCount((c) => Math.max(0, c - 1))
+        else setForgottenReviewCount((c) => Math.max(0, c - 1))
+      }
       decrementIndex()
       useAppStore.getState().addToast({ type: 'info', message: 'Undid last rating', duration: 2000 })
       return
@@ -814,7 +896,7 @@ function SessionContent() {
       if (entry.rating === 1) setMissedReviewCount((c) => Math.max(0, c - 1))
     }
     useAppStore.getState().addToast({ type: 'info', message: 'Undid last review', duration: 2000 })
-  }, [popUndo, decrementIndex, rateKinds, sessionPhase])
+  }, [popUndo, decrementIndex, rateKinds, sessionPhase, isPractice])
 
   /* ── Go back one card in history ── */
   function handleBack() {
@@ -905,7 +987,7 @@ function SessionContent() {
     // flow action only. In a drill (missed-cards retry, Study Weakest) the
     // button is hidden; this guard keeps the handler honest if it is reached
     // another way (stale menu, keyboard path added later).
-    if (sessionPhase === 'retry' || modeParam === 'weakest') {
+    if (sessionPhase === 'retry' || modeParam === 'weakest' || isPractice) {
       useAppStore.getState().addToast({
         type: 'info',
         message: "Review history can only be reset from a Reviews session",
@@ -1003,7 +1085,7 @@ function SessionContent() {
   // True whenever this session is a drill rather than a real review pass: the
   // session-end missed-cards retry, or Planner "Study Weakest". Nothing in a
   // drill may modify an already-scheduled card's review status.
-  const isDrillContext = sessionPhase === 'retry' || modeParam === 'weakest'
+  const isDrillContext = sessionPhase === 'retry' || modeParam === 'weakest' || isPractice
   // Undo is offered for a drill rating (step back) or a real write — but in the
   // redo pass never for first-pass reviews (see handleUndo).
   const canUndo = rateKinds.length > 0 || (sessionPhase !== 'retry' && undoStack.length > 0)
@@ -1017,6 +1099,20 @@ function SessionContent() {
   const isSessionDone = sessionPhase === 'done'
   const isComplete = isFirstPassDone || isSessionDone
 
+  // Enters the missed-cards drill (the 'retry' phase below). The one entry
+  // point for every caller: the end-of-pass checkpoint, the practice X badge
+  // mid-session (with `resume` = where to pick the full queue back up), and
+  // the practice summary's redo button.
+  const startMissedDrill = useCallback((cards: Card[], resume: { queue: Card[]; index: number } | null) => {
+    resumeAfterDrillRef.current = resume
+    reorderQueue(cards, 0)
+    setSessionPhase('retry')
+    setMissedReviewCount(0)
+    setRetryRatings(new Map())
+    setRateKinds([])
+    setHistory([])
+  }, [reorderQueue])
+
   // Redo-missed loop: at the end of each pass, re-run only the cards still
   // missed (rated Missed, or skipped). The drill ends only after a full pass
   // with zero misses. Drill ratings never write, so looping is side-effect free.
@@ -1024,9 +1120,24 @@ function SessionContent() {
     if (!isRetryPassDone) return
     const stillMissed = queue.filter((c) => (retryRatings.get(c.id) ?? 1) === 1)
     if (stillMissed.length === 0) {
+      // Every drilled card is now correct — nothing left in the missed pile.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMissedPile([])
+      const resume = resumeAfterDrillRef.current
+      resumeAfterDrillRef.current = null
+      if (resume) {
+        // Mid-session jump: back to the full queue exactly where it was left.
+        reorderQueue(resume.queue, resume.index)
+        setSessionPhase('first')
+        setRetryRatings(new Map())
+        setRateKinds([])
+        setHistory([])
+        setMissedReviewCount(0)
+        useAppStore.getState().addToast({ type: 'info', message: 'Missed cards cleared — back to your session', duration: 2500 })
+        return
+      }
       // A pass can end by rating, skip or delete — reacting here, once, beats
       // duplicating the transition into each of those handlers.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSessionPhase('done')
       return
     }
@@ -1047,6 +1158,8 @@ function SessionContent() {
 
   // Missed cards from first pass (for intermediate screen and retry queue)
   const firstPassMissedCards: Card[] = isFirstPassDone ? (() => {
+    // Practice writes no logs; its misses live in the pile instead.
+    if (isPractice) return queue.filter((c) => missedPile.includes(c.id))
     const lastRatings = new Map<string, number>()
     for (const log of logs) lastRatings.set(log.cardId, log.rating)
     const missedIds = new Set([...lastRatings.entries()].filter(([, r]) => r === 1).map(([id]) => id))
@@ -1135,14 +1248,7 @@ function SessionContent() {
             </p>
           </div>
           <button
-            onClick={() => {
-              reorderQueue(firstPassMissedCards, 0)
-              setSessionPhase('retry')
-              setMissedReviewCount(0)
-              setRetryRatings(new Map())
-              setRateKinds([])
-              setHistory([])
-            }}
+            onClick={() => startMissedDrill(firstPassMissedCards, null)}
             className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
             style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
           >
@@ -1172,6 +1278,14 @@ function SessionContent() {
     // card's capped foreground time. Sitting on this screen adds nothing.
     const elapsed = Math.round(activeStudyMs(logs) / 1000)
 
+    // Practice has no logs: tally its own first-pass ratings instead. Every
+    // card missed this session (cleared by a drill or not) can be redone.
+    const practiceTotal = practiceRatings.size
+    const practiceCorrect = [...practiceRatings.values()].filter((r) => r >= 3).length
+    const practiceAccuracy = practiceTotal > 0 ? Math.round((practiceCorrect / practiceTotal) * 100) : 0
+    const practiceElapsed = Math.round(ratingTimes.reduce((a, b) => a + b, 0) / 1000)
+    const practiceMissedCards = isPractice ? allCards.filter((c) => practiceRatings.get(c.id) === 1) : []
+
     // New Cards sessions get their own tiles: every rating in them is a first
     // exposure, so the review-only Accuracy/Cards/Correct above are all 0.
     const isNewSession = resolvedMode === 'new-only' || resolvedMode === 'deck-new'
@@ -1183,7 +1297,13 @@ function SessionContent() {
     const reshows = Math.max(0, repetitions - learned)
     const learnPct = repetitions > 0 ? Math.round((learned / repetitions) * 100) : 0
 
-    const tiles: { label: string; value: string; sub?: string; accent?: boolean }[] = isNewSession
+    const tiles: { label: string; value: string; sub?: string; accent?: boolean }[] = isPractice
+      ? [
+          { label: 'Accuracy', value: `${practiceAccuracy}%`, accent: true },
+          { label: 'Cards', value: String(practiceTotal), sub: `${formatDuration(practiceElapsed)} elapsed` },
+          { label: 'Correct', value: String(practiceCorrect) },
+        ]
+      : isNewSession
       ? [
           { label: 'Time Elapsed', value: formatDuration(newElapsed), accent: true },
           { label: 'Cards Learned', value: String(learned) },
@@ -1202,9 +1322,14 @@ function SessionContent() {
           <div className="text-center space-y-2">
             <p className="meta-label text-[var(--text-muted)]">Session Summary</p>
             <h1 className="text-[28px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              {isNewSession ? 'You’ve finished learning' : 'You’ve completed your review'}{deckName && deckName !== 'All cards' ? (isNewSession ? ' ' : ' of ') : '.'}
+              {isNewSession ? 'You’ve finished learning' : isPractice ? 'You’ve completed your practice' : 'You’ve completed your review'}{deckName && deckName !== 'All cards' ? (isNewSession ? ' ' : ' of ') : '.'}
               {deckName && deckName !== 'All cards' && <span style={{ color: 'var(--accent)' }}>{deckName}</span>}
             </h1>
+            {isPractice && (
+              <p className="text-[13px]" style={{ color: 'var(--text-muted)' }}>
+                Practice session — your review schedule and stats are unchanged.
+              </p>
+            )}
           </div>
 
           {/* Stat tiles — mono labels, display numbers */}
@@ -1228,13 +1353,19 @@ function SessionContent() {
                 <span className="font-mono text-[13px]" style={{ color: reshows > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
                   {reshows} {reshows === 1 ? 'reshow' : 'reshows'}
                 </span>
+              ) : isPractice ? (
+                <span className="font-mono text-[13px]" style={{ color: practiceMissedCards.length > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                  {practiceMissedCards.length} {practiceMissedCards.length === 1 ? 'card' : 'cards'} missed
+                </span>
               ) : (
                 <span className="font-mono text-[13px]" style={{ color: totalLogged - correct > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
                   {totalLogged - correct} {totalLogged - correct === 1 ? 'card' : 'cards'} missed
                 </span>
               )}
             </div>
-            {isNewSession ? (
+            {isPractice ? (
+              <Progress value={practiceAccuracy} max={100} size="lg" color={practiceAccuracy >= 80 ? 'success' : practiceAccuracy >= 60 ? 'accent' : 'danger'} />
+            ) : isNewSession ? (
               <Progress value={learnPct} max={100} size="lg" color={learnPct >= 80 ? 'success' : learnPct >= 60 ? 'accent' : 'danger'} />
             ) : (
               <Progress value={accuracy} max={100} size="lg" color={accuracy >= 80 ? 'success' : accuracy >= 60 ? 'accent' : 'danger'} />
@@ -1242,6 +1373,16 @@ function SessionContent() {
           </div>
 
           <div className="flex flex-col gap-3">
+            {practiceMissedCards.length > 0 && (
+              <button
+                onClick={() => startMissedDrill(practiceMissedCards, null)}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
+                style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
+              >
+                <X size={16} />
+                Redo missed cards ({practiceMissedCards.length})
+              </button>
+            )}
             <button
               onClick={() => {
                 const cards = buildQueue()
@@ -1263,6 +1404,9 @@ function SessionContent() {
                 setRetryRatings(new Map())
                 setRateKinds([])
                 setRatingTimes([])
+                setPracticeRatings(new Map())
+                setMissedPile([])
+                resumeAfterDrillRef.current = null
               }}
               className="w-full flex items-center justify-center gap-2 py-4 rounded-[var(--radius-lg)] text-[15px] font-bold active:scale-[0.98] transition-transform"
               style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
@@ -1322,6 +1466,18 @@ function SessionContent() {
   const canGoBack = history.length > 0
   const answerReady = showAnswer
   const isAnimating = animatingOut !== null
+
+  const missedBadgeCount = isPractice && sessionPhase === 'first' ? missedPile.length : missedReviewCount
+  const canJumpToMissed = isPractice && sessionPhase === 'first' && missedPile.length > 0 && !isAnimating
+
+  function handleJumpToMissed() {
+    if (!canJumpToMissed) return
+    const cards = missedPile
+      .map((id) => queue.find((c) => c.id === id))
+      .filter((c): c is Card => !!c)
+    if (cards.length === 0) return
+    startMissedDrill(cards, { queue, index: currentIndex })
+  }
 
   // Review logs for this card (shown in history dialog)
   const cardLogs = reviewLogs
@@ -1408,14 +1564,27 @@ function SessionContent() {
         </div>
 
         <div className="flex items-center gap-4 flex-1 justify-end min-w-0">
-          {/* Mistake counter badge — hidden until first miss */}
-          {missedReviewCount > 0 && (
-            <span
-              className="font-mono text-[11px] font-semibold tabular-nums px-2 py-1 rounded-[var(--radius-sm)]"
-              style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
-            >
-              ✕ {missedReviewCount}
-            </span>
+          {/* Mistake counter badge — hidden until first miss. In practice it
+              counts the not-yet-cleared missed cards, and tapping it drills
+              them right now, then returns to this point in the queue. */}
+          {missedBadgeCount > 0 && (
+            canJumpToMissed ? (
+              <button
+                onClick={handleJumpToMissed}
+                className="font-mono text-[11px] font-semibold tabular-nums px-2 py-1 rounded-[var(--radius-sm)] transition-[filter] hover:brightness-125"
+                style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
+                title="Drill your missed cards now"
+              >
+                ✕ {missedBadgeCount}
+              </button>
+            ) : (
+              <span
+                className="font-mono text-[11px] font-semibold tabular-nums px-2 py-1 rounded-[var(--radius-sm)]"
+                style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)' }}
+              >
+                ✕ {missedBadgeCount}
+              </span>
+            )
           )}
 
           {/* Daily progress */}
